@@ -8,6 +8,8 @@ RUN npm install
 COPY app ./app
 COPY lib ./lib
 COPY components ./components
+COPY hooks ./hooks
+COPY types ./types
 
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build

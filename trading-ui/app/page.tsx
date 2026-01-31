@@ -13,6 +13,7 @@ export default function Page() {
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
           <Link href="/forex">Forex Analytics</Link>
+          <Link href="/settings">Settings</Link>
         </div>
       </div>
 
@@ -69,6 +70,13 @@ export default function Page() {
             <div>
               <h3>Unified Analytics</h3>
               <p>Overview and analysis dashboards for the live trading book.</p>
+            </div>
+          </Link>
+          <Link href="/settings" className="landing-card">
+            <div className="landing-icon">🛠️</div>
+            <div>
+              <h3>Settings Center</h3>
+              <p>Scanner + SMC configuration, overrides, and audit trail.</p>
             </div>
           </Link>
         </div>

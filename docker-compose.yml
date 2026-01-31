@@ -162,9 +162,11 @@ services:
     environment:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
       - FASTAPI_GENERAL_URL=http://fastapi-general:8008
       - FASTAPI_DEV_URL=http://fastapi-dev:8000
       - FASTAPI_API_KEY=${FASTAPI_API_KEY}
+      - NEXT_PUBLIC_BASE_PATH=/trading
     networks:
       - lab-net
     depends_on:
