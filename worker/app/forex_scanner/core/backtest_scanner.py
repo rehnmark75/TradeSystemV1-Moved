@@ -20,6 +20,7 @@ try:
     from core.backtest_candles_manager import BacktestCandlesManager
     from configdata.strategies import config_momentum_strategy
     from services.smc_simple_config_service import get_smc_simple_config
+    from services.strategy_router_service import get_strategy_router, StrategyRouterService
 except ImportError:
     from forex_scanner import config
     from forex_scanner.core.scanner import IntelligentForexScanner
@@ -32,6 +33,11 @@ except ImportError:
     except ImportError:
         config_momentum_strategy = None
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    try:
+        from forex_scanner.services.strategy_router_service import get_strategy_router, StrategyRouterService
+    except ImportError:
+        get_strategy_router = None
+        StrategyRouterService = None
 
 
 class BacktestScanner(IntelligentForexScanner):
@@ -68,6 +74,10 @@ class BacktestScanner(IntelligentForexScanner):
         self.timeframe = backtest_config.get('timeframe', '15m')
         self.pipeline_mode = backtest_config.get('pipeline_mode', False)
 
+        # Multi-strategy configuration (v3.0.0) - initialized after parent __init__ for logger access
+        self._multi_strategy_config = backtest_config.get('multi_strategy_config', None)
+        self._strategy_router = None
+
         # CRITICAL FIX: Skip signal logging when orchestrator handles logging
         # When True, scanner returns signals but doesn't log to DB (orchestrator does it)
         self.skip_signal_logging = backtest_config.get('skip_signal_logging', False)
@@ -96,6 +106,22 @@ class BacktestScanner(IntelligentForexScanner):
 
         self.logger.info("🧠 Market Intelligence CAPTURE: DISABLED (backtest mode)")
         self.logger.info("📊 Scan Performance CAPTURE: DISABLED (backtest mode)")
+
+        # Initialize multi-strategy router (v3.0.0) - now that logger is available
+        if self._multi_strategy_config and self._multi_strategy_config.get('enabled'):
+            try:
+                self._strategy_router = get_strategy_router(is_backtest=True) if get_strategy_router else None
+                if self._strategy_router:
+                    self.logger.info("🎯 Multi-Strategy Mode: ENABLED")
+                    enabled_strategies = self._multi_strategy_config.get('enable_strategies')
+                    if enabled_strategies:
+                        self.logger.info(f"   Strategies: {enabled_strategies}")
+                    regime_filter = self._multi_strategy_config.get('regime_filter')
+                    if regime_filter:
+                        self.logger.info(f"   Regime filter: {regime_filter}")
+            except Exception as e:
+                self.logger.warning(f"Failed to initialize strategy router: {e}")
+                self._strategy_router = None
 
         # Override scanner metadata
         self.scanner_version = 'backtest_v1.0_integrated_pipeline'
@@ -772,6 +798,45 @@ class BacktestScanner(IntelligentForexScanner):
             strategy_name = self.strategy_name.upper()
             self.logger.debug(f"🎯 Backtest strategy filter: '{strategy_name}' for {epic}")
 
+            # Multi-strategy routing mode (v3.0.0)
+            routed_strategy = None
+            confidence_modifier = 1.0
+            routing_context = None
+            if self._strategy_router and self._multi_strategy_config:
+                routed_result = self._get_routed_strategy(epic, timestamp)
+                if routed_result:
+                    routed_strategy, confidence_modifier, routing_context = routed_result
+
+                    # Apply regime filter if specified
+                    regime_filter = self._multi_strategy_config.get('regime_filter')
+                    if regime_filter and routing_context.get('regime') != regime_filter:
+                        self.logger.debug(
+                            f"⏭️ Skipping {epic} at {timestamp}: regime '{routing_context.get('regime')}' "
+                            f"doesn't match filter '{regime_filter}'"
+                        )
+                        return None
+
+                    # Apply session filter if specified
+                    session_filter = self._multi_strategy_config.get('session_filter')
+                    if session_filter and routing_context.get('session') != session_filter:
+                        self.logger.debug(
+                            f"⏭️ Skipping {epic} at {timestamp}: session '{routing_context.get('session')}' "
+                            f"doesn't match filter '{session_filter}'"
+                        )
+                        return None
+
+                    # Override strategy_name with routed strategy
+                    if routed_strategy:
+                        self.logger.debug(
+                            f"🔀 Multi-Strategy Routing: {epic} at {timestamp} → {routed_strategy} "
+                            f"(regime: {routing_context.get('regime')}, conf_mod: {confidence_modifier:.2f})"
+                        )
+                        strategy_name = routed_strategy
+                elif self._multi_strategy_config.get('enabled'):
+                    # Router returned None, skip this signal in multi-strategy mode
+                    self.logger.debug(f"⏭️ No suitable strategy found for {epic} at {timestamp}")
+                    return None
+
             # Strategy method mapping
             strategy_methods = {
                 'EMA_CROSSOVER': 'detect_signals_mid_prices',
@@ -845,6 +910,14 @@ class BacktestScanner(IntelligentForexScanner):
                         signal['validation_passed'] = True
                         signal['validation_message'] = 'Basic mode - no validation applied'
                         self.logger.debug(f"🚀 BASIC MODE: Skipping trade validator for {strategy_name} signal on {epic}")
+
+                    # Add multi-strategy routing metadata if applicable
+                    if signal and routed_strategy:
+                        signal['routed_strategy'] = routed_strategy
+                        signal['routing_confidence_modifier'] = confidence_modifier
+                        if routing_context:
+                            signal['routing_regime'] = routing_context.get('regime')
+                            signal['routing_session'] = routing_context.get('session')
 
                     # FIXED: Return result even if None - don't fallback to all strategies
                     return signal
@@ -1043,6 +1116,139 @@ class BacktestScanner(IntelligentForexScanner):
         except Exception as e:
             self.logger.warning(f"⚠️ Error preloading historical intelligence: {e}")
             return 0
+
+    def _get_routed_strategy(
+        self,
+        epic: str,
+        timestamp: datetime
+    ) -> Optional[Tuple[str, float, Dict]]:
+        """
+        Get the routed strategy for a given epic and timestamp using multi-strategy routing.
+
+        Uses historical intelligence to determine market regime, then routes to
+        the most appropriate strategy based on regime-strategy mapping rules.
+
+        Args:
+            epic: The trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+            timestamp: The backtest timestamp
+
+        Returns:
+            Tuple of (strategy_name, confidence_modifier, routing_context) or None
+            routing_context contains: regime, session, volatility_state, adx_value
+        """
+        if not self._strategy_router:
+            return None
+
+        try:
+            # Get historical intelligence for this timestamp
+            intelligence = self._get_historical_intelligence(timestamp)
+
+            # Extract regime information
+            regime = 'trending'  # Default regime
+            volatility_state = 'normal'
+            adx_value = None
+            session = None
+
+            if intelligence:
+                regime = intelligence.get('dominant_regime', 'trending')
+                volatility_state = intelligence.get('volatility_level', 'normal')
+
+                # Try to get ADX from per-epic data if available
+                per_epic = intelligence.get('per_epic_intelligence', {})
+                if isinstance(per_epic, dict):
+                    epic_intel = per_epic.get(epic, {})
+                    if isinstance(epic_intel, dict):
+                        adx_value = epic_intel.get('adx')
+                        # Per-epic regime overrides global if available
+                        epic_regime = epic_intel.get('structure_regime')
+                        if epic_regime:
+                            regime = epic_regime
+
+            # Determine session from timestamp
+            session = self._get_session_from_timestamp(timestamp)
+
+            # Check enabled strategies filter
+            enabled_strategies = self._multi_strategy_config.get('enable_strategies')
+
+            # Get routed strategy from router
+            routed_strategy, confidence_modifier = self._strategy_router.get_strategy_for_regime(
+                regime=regime,
+                epic=epic,
+                session=session,
+                volatility_state=volatility_state,
+                adx_value=adx_value
+            )
+
+            # Filter by enabled strategies if specified
+            if routed_strategy and enabled_strategies:
+                if routed_strategy not in enabled_strategies:
+                    self.logger.debug(
+                        f"⏭️ Routed strategy {routed_strategy} not in enabled list {enabled_strategies}"
+                    )
+                    # Try to find a fallback from enabled strategies
+                    for fallback in enabled_strategies:
+                        alt_strategy, alt_conf = self._strategy_router.get_strategy_for_regime(
+                            regime=regime,
+                            epic=epic,
+                            session=session,
+                            volatility_state=volatility_state,
+                            adx_value=adx_value
+                        )
+                        if alt_strategy == fallback:
+                            routed_strategy = alt_strategy
+                            confidence_modifier = alt_conf
+                            break
+                    else:
+                        # No enabled strategy matches this regime - use first enabled as fallback
+                        routed_strategy = enabled_strategies[0]
+                        confidence_modifier = 0.8  # Reduced confidence for fallback
+
+            routing_context = {
+                'regime': regime,
+                'session': session,
+                'volatility_state': volatility_state,
+                'adx_value': adx_value,
+                'routed_from_intelligence': intelligence is not None
+            }
+
+            return (routed_strategy, confidence_modifier, routing_context)
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Error in strategy routing: {e}")
+            return None
+
+    def _get_session_from_timestamp(self, timestamp: datetime) -> str:
+        """
+        Determine trading session from timestamp.
+
+        Args:
+            timestamp: The timestamp to evaluate
+
+        Returns:
+            Session name: 'asian', 'london', 'new_york', or 'overlap'
+        """
+        # Ensure timezone-aware
+        if timestamp.tzinfo is None:
+            timestamp = timestamp.replace(tzinfo=timezone.utc)
+
+        hour = timestamp.hour
+
+        # Session definitions (UTC)
+        # Asian: 00:00 - 08:00 UTC
+        # London: 08:00 - 16:00 UTC
+        # New York: 13:00 - 21:00 UTC
+        # Overlap (London/NY): 13:00 - 16:00 UTC
+
+        if 13 <= hour < 16:
+            return 'overlap'
+        elif 0 <= hour < 8:
+            return 'asian'
+        elif 8 <= hour < 16:
+            return 'london'
+        elif 13 <= hour < 21:
+            return 'new_york'
+        else:
+            return 'asian'  # Late night defaults to Asian
 
     def _format_historical_intelligence_for_signal(self, intelligence: Dict) -> Dict:
         """

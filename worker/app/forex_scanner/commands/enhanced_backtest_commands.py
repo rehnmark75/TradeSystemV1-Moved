@@ -51,7 +51,8 @@ class EnhancedBacktestCommands:
         csv_export: str = None,
         config_override: dict = None,
         use_historical_intelligence: bool = True,
-        return_results: bool = False
+        return_results: bool = False,
+        multi_strategy_config: dict = None
     ):
         """
         Run enhanced backtest using the new integrated pipeline
@@ -69,6 +70,11 @@ class EnhancedBacktestCommands:
             csv_export: Path to CSV file for exporting all signals
             config_override: Dict of parameter overrides for this backtest only (backtest isolation)
             use_historical_intelligence: Use stored market intelligence instead of recalculating (Phase 3)
+            multi_strategy_config: Multi-strategy routing configuration (v3.0.0)
+                - enabled: bool - Enable multi-strategy routing
+                - enable_strategies: str - Comma-separated list of strategies to enable
+                - regime_filter: str - Filter signals by market regime
+                - session_filter: str - Filter signals by trading session
         """
 
         self.logger.info("🚀 Starting Enhanced Backtest Pipeline")
@@ -167,7 +173,8 @@ class EnhancedBacktestCommands:
                 'epics': epic_list,
                 'timeframe': timeframe,
                 'pipeline_mode': pipeline,
-                'signal_start_filter': target_start_date  # Only count signals from target period, not warmup
+                'signal_start_filter': target_start_date,  # Only count signals from target period, not warmup
+                'multi_strategy_config': multi_strategy_config  # Multi-strategy routing (v3.0.0)
             }
 
             # Run backtest orchestration

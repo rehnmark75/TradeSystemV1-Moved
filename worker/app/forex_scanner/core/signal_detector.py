@@ -83,6 +83,11 @@ class SignalDetector:
         self.performance_analyzer = PerformanceAnalyzer()
         self.signal_analyzer = SignalAnalyzer()
 
+        # Multi-strategy support (v3.0.0)
+        # These strategies are lazy-loaded on first use
+        self.ranging_market_strategy = None
+        self.volume_profile_strategy = None
+
         self.logger.info("📊 SignalDetector initialized (SMC Simple only - legacy strategies archived)")
 
     # =========================================================================
@@ -771,3 +776,171 @@ class SignalDetector:
         except Exception as e:
             self.logger.error(f"❌ Error adding complete technical indicators: {e}")
             return signal
+
+    # =========================================================================
+    # MULTI-STRATEGY DETECTION METHODS (v3.0.0)
+    # =========================================================================
+
+    def detect_ranging_market_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m'
+    ) -> Optional[Dict]:
+        """
+        Detect signals using the Ranging Market strategy
+
+        Uses multi-oscillator approach (Squeeze Momentum, RSI, Stochastic)
+        for mean reversion signals in ranging conditions (ADX < 20)
+
+        Args:
+            epic: The trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+            pair: The pair name (e.g., 'EURUSD')
+            spread_pips: Current spread in pips
+            timeframe: Signal timeframe
+
+        Returns:
+            Signal dict if conditions met, None otherwise
+        """
+        try:
+            # Lazy-load the ranging market strategy
+            if self.ranging_market_strategy is None:
+                try:
+                    from .strategies.ranging_market_strategy import RangingMarketStrategy, RangingMarketConfig
+                    # Load config from database
+                    config = RangingMarketConfig.from_database()
+                    self.ranging_market_strategy = RangingMarketStrategy(
+                        config=config,
+                        data_fetcher=self.data_fetcher,
+                        logger=self.logger,
+                        db_manager=self.db_manager
+                    )
+                    self.logger.info("✅ Ranging Market strategy lazy-loaded")
+                except ImportError as e:
+                    self.logger.warning(f"⚠️ Could not import Ranging Market strategy: {e}")
+                    return None
+                except Exception as e:
+                    self.logger.error(f"❌ Error initializing Ranging Market strategy: {e}")
+                    return None
+
+            # Fetch required data
+            # Primary timeframe (15m)
+            df_trigger = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=timeframe,
+                lookback_hours=48
+            )
+            if df_trigger is None or df_trigger.empty:
+                self.logger.debug(f"[RANGING_MARKET] No {timeframe} data for {epic}")
+                return None
+
+            # Higher timeframe (1H) for bias
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=72
+            )
+
+            # Generate signal using the strategy
+            signal = self.ranging_market_strategy.detect_signal(
+                df_trigger=df_trigger,
+                df_4h=df_4h,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips
+            )
+
+            # Enhance signal with technical indicators if found
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, epic, timeframe)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting ranging market signals for {epic}: {e}")
+            return None
+
+    def detect_volume_profile_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m'
+    ) -> Optional[Dict]:
+        """
+        Detect signals using the Volume Profile strategy
+
+        Uses HVN bounce, POC reversion, and Value Area breakout patterns
+        with session-based confidence boosting (Asian session edge)
+
+        Args:
+            epic: The trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+            pair: The pair name (e.g., 'EURUSD')
+            spread_pips: Current spread in pips
+            timeframe: Signal timeframe
+
+        Returns:
+            Signal dict if conditions met, None otherwise
+        """
+        try:
+            # Lazy-load the volume profile strategy
+            if self.volume_profile_strategy is None:
+                try:
+                    from .strategies.volume_profile_strategy import VolumeProfileStrategy, VolumeProfileConfig
+                    # Load config from database
+                    config = VolumeProfileConfig.from_database()
+                    self.volume_profile_strategy = VolumeProfileStrategy(
+                        config=config,
+                        data_fetcher=self.data_fetcher,
+                        logger=self.logger,
+                        db_manager=self.db_manager
+                    )
+                    self.logger.info("✅ Volume Profile strategy lazy-loaded")
+                except ImportError as e:
+                    self.logger.warning(f"⚠️ Could not import Volume Profile strategy: {e}")
+                    return None
+                except Exception as e:
+                    self.logger.error(f"❌ Error initializing Volume Profile strategy: {e}")
+                    return None
+
+            # Fetch required data
+            # Primary timeframe (15m) for Volume Profile analysis
+            df_trigger = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=timeframe,
+                lookback_hours=48
+            )
+            if df_trigger is None or df_trigger.empty:
+                self.logger.debug(f"[VOLUME_PROFILE] No {timeframe} data for {epic}")
+                return None
+
+            # Higher timeframe (1H) for profile context
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=72
+            )
+
+            # Generate signal using the strategy
+            signal = self.volume_profile_strategy.detect_signal(
+                df_trigger=df_trigger,
+                df_4h=df_4h,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips
+            )
+
+            # Enhance signal with technical indicators if found
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, epic, timeframe)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting volume profile signals for {epic}: {e}")
+            return None
