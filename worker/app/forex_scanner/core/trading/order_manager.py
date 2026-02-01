@@ -31,6 +31,13 @@ try:
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
 
+# SMC config for per-pair settings (monitor_only flag)
+try:
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    SMC_CONFIG_AVAILABLE = True
+except ImportError:
+    SMC_CONFIG_AVAILABLE = False
+
 # Import config for infrastructure settings (not behavioral)
 try:
     from forex_scanner import config as forex_config
@@ -94,6 +101,9 @@ class OrderManager:
         self.last_execution_time = None
         self.execution_history = []
 
+        # v2.39.0: Log monitor-only pairs at startup
+        self._log_monitor_only_pairs()
+
         # Error tracking
         self.error_counts = {}
         self.retry_counts = {}
@@ -132,7 +142,41 @@ class OrderManager:
         except Exception as e:
             self.logger.error(f"Error initializing order executor: {e}")
             self.logger.info("Continuing without live order execution")
-    
+
+    def _log_monitor_only_pairs(self):
+        """v2.39.0: Log which pairs are in monitor-only mode at startup"""
+        if not SMC_CONFIG_AVAILABLE:
+            self.logger.debug("SMC config not available - skipping monitor-only check")
+            return
+
+        try:
+            smc_config = get_smc_simple_config()
+            monitor_only_pairs = []
+            active_pairs = []
+
+            for epic, overrides in smc_config._pair_overrides.items():
+                param_overrides = overrides.get('parameter_overrides', {})
+                is_monitor_only = param_overrides.get('monitor_only', False)
+                pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+
+                if is_monitor_only:
+                    monitor_only_pairs.append(pair_name)
+                elif overrides.get('is_enabled', False):
+                    active_pairs.append(pair_name)
+
+            if monitor_only_pairs:
+                self.logger.info("=" * 60)
+                self.logger.info("👁️ MONITOR-ONLY PAIRS (signals logged, orders BLOCKED):")
+                for pair in monitor_only_pairs:
+                    self.logger.info(f"   - {pair}")
+                self.logger.info("=" * 60)
+
+            if active_pairs:
+                self.logger.info(f"✅ ACTIVE TRADING PAIRS: {', '.join(active_pairs)}")
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Could not check monitor-only pairs: {e}")
+
     def validate_configuration(self) -> Dict:
         """
         Comprehensive configuration validation using database config.
@@ -354,11 +398,41 @@ class OrderManager:
             entry_price = signal.get('entry_price', signal.get('price', 0))
             confidence = signal.get('confidence_score', 0)
             alert_id = signal.get('alert_id')  # Extract alert_id from signal
-            
+
             self.logger.info(f"🚀 Executing signal: {epic} {signal_type} ({confidence:.1%})")
             if alert_id:
                 self.logger.info(f"   Alert ID: {alert_id}")
-            
+
+            # v2.39.0: Check if pair is in monitor_only mode (signals logged but not executed)
+            # This check is fail-safe: if config unavailable or error, execution proceeds normally
+            is_monitor_only = False
+            if SMC_CONFIG_AVAILABLE:
+                try:
+                    smc_config = get_smc_simple_config()
+                    pair_overrides = smc_config._pair_overrides.get(epic, {})
+                    param_overrides = pair_overrides.get('parameter_overrides', {})
+                    is_monitor_only = param_overrides.get('monitor_only', False)
+
+                    if is_monitor_only:
+                        self.logger.info(f"👁️ MONITOR MODE: {epic} - Signal logged but NOT executed")
+                        self.logger.info(f"   ℹ️ Reason: monitor_only=true in parameter_overrides")
+                        self.logger.info(f"   ℹ️ To enable trading: UPDATE smc_simple_pair_overrides SET parameter_overrides = parameter_overrides - 'monitor_only' WHERE epic = '{epic}';")
+                        return {
+                            'status': 'monitor_only',
+                            'executed': False,
+                            'reason': f'{epic} is in monitor-only mode - signal tracked but not traded',
+                            'alert_id': alert_id,
+                            'signal': signal
+                        }
+                    else:
+                        self.logger.info(f"✅ {epic}: monitor_only=false, proceeding with order execution")
+                except Exception as e:
+                    # Fail-safe: if we can't check, allow execution to proceed
+                    self.logger.warning(f"⚠️ Could not check monitor_only status for {epic}: {e}")
+                    self.logger.warning(f"   ℹ️ Proceeding with execution (fail-safe behavior)")
+            else:
+                self.logger.debug(f"ℹ️ SMC config not available, skipping monitor_only check for {epic}")
+
             # Validate signal for execution
             is_valid, reason = self._validate_signal_for_execution(signal)
             if not is_valid:

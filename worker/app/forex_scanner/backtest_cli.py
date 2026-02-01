@@ -750,9 +750,9 @@ Signal Display Format:
                 overrides['scalp_momentum_candle_enabled'] = True
             # Default: use default enabled filters (consec, antichop, body, range = True, momentum = False)
 
-        # Display VSL configuration
-        print(f"\n🎯 Scalp Mode Configuration (Virtual Stop Loss Emulation):")
-        print(f"   Take Profit: {scalp_tp} pips")
+        # Display Scalp Mode configuration (ATR-adaptive trailing since Jan 2026)
+        print(f"\n🎯 Scalp Mode Configuration (ATR-Adaptive Trailing):")
+        print(f"   Trailing: ATR-adaptive (scales with market volatility)")
         print(f"   Order Offset: {offset} pips (momentum confirmation)")
         print(f"   Order Expiry: {expiry} minutes")
 
@@ -808,24 +808,24 @@ Signal Display Format:
             else:
                 print(f"   Filters: Default (consec + antichop + body + range)")
 
-        if epic:
-            # Single epic - show its VSL
-            vsl_pips = get_vsl_pips(epic)
-            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
-            print(f"   {pair}: VSL = {vsl_pips} pips")
-        else:
-            # Multiple epics - show summary
-            print(f"   Per-pair Virtual Stop Loss:")
-            # Group by VSL value
-            majors = [e for e, c in PAIR_VSL_CONFIGS.items() if c['vsl_pips'] == 3.0]
-            jpy_pairs = [e for e, c in PAIR_VSL_CONFIGS.items() if c['vsl_pips'] == 4.0]
+        # Show ATR trailing config info
+        try:
+            from forex_scanner.config_trailing_stops import SCALP_TRAILING_CONFIGS, DEFAULT_SCALP_CONFIG
+        except ImportError:
+            from config_trailing_stops import SCALP_TRAILING_CONFIGS, DEFAULT_SCALP_CONFIG
 
-            if majors:
-                major_names = [e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in majors[:4]]
-                print(f"   - Majors (3 pips): {', '.join(major_names)}...")
-            if jpy_pairs:
-                jpy_names = [e.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '') for e in jpy_pairs[:4]]
-                print(f"   - JPY pairs (4 pips): {', '.join(jpy_names)}")
+        if epic:
+            # Single epic - show its ATR trailing config
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            cfg = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_CONFIG)
+            be_trigger = cfg.get('early_breakeven_trigger_points', 8)
+            stage1 = cfg.get('stage1_trigger_points', 12)
+            print(f"   {pair}: BE @ +{be_trigger} pips, Stage1 @ +{stage1} pips")
+        else:
+            # Multiple epics - show summary by pair type
+            print(f"   Per-pair ATR Trailing (from config_trailing_stops.py):")
+            print(f"   - Majors: BE @ +8 pips, Stage1 @ +10-12 pips")
+            print(f"   - JPY pairs: BE @ +10 pips, Stage1 @ +15 pips (higher volatility)")
 
         print()
         return overrides

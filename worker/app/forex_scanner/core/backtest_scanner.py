@@ -19,6 +19,7 @@ try:
     from core.trading.trailing_stop_simulator import TrailingStopSimulator
     from core.backtest_candles_manager import BacktestCandlesManager
     from configdata.strategies import config_momentum_strategy
+    from services.smc_simple_config_service import get_smc_simple_config
 except ImportError:
     from forex_scanner import config
     from forex_scanner.core.scanner import IntelligentForexScanner
@@ -30,6 +31,7 @@ except ImportError:
         from forex_scanner.configdata.strategies import config_momentum_strategy
     except ImportError:
         config_momentum_strategy = None
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 
 
 class BacktestScanner(IntelligentForexScanner):
@@ -1095,8 +1097,43 @@ class BacktestScanner(IntelligentForexScanner):
         historical_intelligence = self._get_historical_intelligence(timestamp)
         formatted_intelligence = self._format_historical_intelligence_for_signal(historical_intelligence)
 
+        # Check for high volatility regime (used for per-pair filtering below)
+        # This filter can only run here since intelligence isn't available during strategy filtering
+        is_high_volatility_regime = False
+        if formatted_intelligence:
+            market_regime_data = formatted_intelligence.get('market_regime', {})
+            global_regime = market_regime_data.get('dominant_regime', 'unknown')
+            is_high_volatility_regime = (global_regime == 'high_volatility')
+
+        # Get SMC config for per-pair regime filtering
+        smc_config = None
+        if is_high_volatility_regime:
+            try:
+                smc_config = get_smc_simple_config()
+            except Exception as e:
+                self.logger.warning(f"Could not load SMC config for regime filtering: {e}")
+
         for signal in signals:
             try:
+                epic = signal.get('epic', '')
+
+                # Per-pair high volatility regime filter (v2.38.0)
+                # Some pairs (like EURUSD) perform poorly in high_volatility regime and should be blocked
+                # Other pairs (like USDJPY) perform BETTER in high_volatility and should NOT be blocked
+                if is_high_volatility_regime and smc_config:
+                    # Check if this specific pair should block high_volatility regime
+                    # Also support override from command line for testing
+                    block_this_pair = smc_config.get_pair_scalp_block_global_high_volatility(epic)
+                    if self._config_override:
+                        # Command-line override takes precedence
+                        override_value = self._config_override.get('scalp_block_global_high_volatility')
+                        if override_value is not None:
+                            block_this_pair = override_value
+
+                    if block_this_pair:
+                        self.logger.debug(f"🚫 Blocking {epic} signal due to high_volatility regime at {timestamp}")
+                        continue
+
                 # Add backtest metadata
                 signal['backtest_execution_id'] = self.execution_id
                 signal['backtest_timestamp'] = timestamp

@@ -192,6 +192,14 @@ class BacktestTradingOrchestrator:
             # Run scanner with proper context management to get raw results
             with self.scanner.order_logger:
                 self.scanner._initialize_backtest_execution()
+
+                # Preload historical intelligence for the backtest period (Phase 3)
+                # This was previously only called in run_backtest() but orchestrator bypasses that
+                if self._use_historical_intelligence and hasattr(self.scanner, '_preload_historical_intelligence'):
+                    intel_count = self.scanner._preload_historical_intelligence()
+                    if intel_count == 0:
+                        self.logger.warning("⚠️ No historical intelligence found - regime filters may not work")
+
                 raw_backtest_results = self.scanner._execute_backtest_loop()
 
             # CRITICAL FIX: Process all signals through orchestrator validation pipeline

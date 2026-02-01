@@ -1265,6 +1265,26 @@ class SMCSimpleConfig:
         value = self.get_for_pair(epic, 'scalp_block_low_volatility_trending')
         return bool(value) if value is not None else False
 
+    def get_pair_scalp_block_global_high_volatility(self, epic: str) -> bool:
+        """
+        Get per-pair global high volatility regime block for scalp trades.
+
+        v2.37.0: Based on Jan 2026 regime analysis showing strategy underperforms
+        when market_intelligence dominant_regime == 'high_volatility'.
+
+        Oct-Dec 2025 had 80% high_volatility regime → 32-35% win rate
+        Jan 2026 had 82% trending regime → 59-66% win rate
+
+        This filter uses the GLOBAL market intelligence regime (aggregated across
+        all pairs) rather than the per-signal regime detection, as the global
+        regime better predicts overall market conditions.
+
+        Returns:
+            True if high volatility global regime should be blocked, False otherwise (default)
+        """
+        value = self.get_for_pair(epic, 'scalp_block_global_high_volatility')
+        return bool(value) if value is not None else False
+
     def get_pair_scalp_min_adx(self, epic: str) -> Optional[float]:
         """
         Get per-pair minimum ADX threshold for scalp trades.
@@ -1789,6 +1809,8 @@ class SMCSimpleConfigService:
                 'scalp_block_ranging_market': row.get('scalp_block_ranging_market'),
                 'scalp_block_low_volatility_trending': row.get('scalp_block_low_volatility_trending'),
                 'scalp_min_adx': row.get('scalp_min_adx'),
+                # Global regime filter (v2.37.0) - block high volatility global market conditions
+                'scalp_block_global_high_volatility': row.get('scalp_block_global_high_volatility'),
                 # RSI zone block and hour block filters (v2.36.0)
                 'scalp_rsi_block_buy_min': row.get('scalp_rsi_block_buy_min'),
                 'scalp_rsi_block_buy_max': row.get('scalp_rsi_block_buy_max'),

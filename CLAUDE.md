@@ -507,4 +507,23 @@ This file controls:
 - ✅ Smart Money Concepts (SMC) analysis
 - ~~✅ Virtual Stop Loss for scalping mode~~ **DEPRECATED: Jan 2026** - Replaced with scalp trailing configs
 
+**⚠️ Monitor-Only Pairs (Feb 2026):**
+
+The following pairs are in **monitor-only mode** - signals are logged but NOT traded:
+
+| Pair | Reason | Check Status |
+|------|--------|--------------|
+| **AUDUSD** | Moderate PF (1.80), filters degrade performance | `parameter_overrides->>'monitor_only'` |
+| **USDCHF** | Breakeven (0.99 PF), all filters degrade | `parameter_overrides->>'monitor_only'` |
+
+```sql
+-- Check monitor-only status
+SELECT epic, parameter_overrides->>'monitor_only' FROM smc_simple_pair_overrides
+WHERE parameter_overrides->>'monitor_only' = 'true';
+
+-- Re-enable trading (remove flag)
+UPDATE smc_simple_pair_overrides SET parameter_overrides = parameter_overrides - 'monitor_only'
+WHERE epic = 'CS.D.AUDUSD.MINI.IP';
+```
+
 For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).

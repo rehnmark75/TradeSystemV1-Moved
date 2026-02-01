@@ -9,3 +9,47 @@
 |----|------|---|-------|------|
 | #1375 | 12:18 PM | 🔵 | Trailing Stop Configuration File: 3-Stage System with MFE Protection | ~438 |
 </claude-mem-context>
+
+## Monitor-Only Pairs (Feb 2026)
+
+**IMPORTANT**: The following pairs are configured in **monitor-only mode** based on 30-day backtest optimization:
+
+| Pair | Reason | PF | Setting |
+|------|--------|-----|---------|
+| **AUDUSD** | Filters degrade performance, moderate profitability | 1.80 | `monitor_only: true` |
+| **USDCHF** | Essentially breakeven, all filters degrade | 0.99 | `monitor_only: true` |
+
+### What This Means
+- Signals ARE generated and logged to `alert_history`
+- Orders are NOT executed (blocked in `order_manager.py`)
+- Log shows: `👁️ MONITOR MODE: {epic} - Signal logged but not executed`
+
+### To Re-enable Trading
+```sql
+-- Remove monitor_only flag
+UPDATE smc_simple_pair_overrides
+SET parameter_overrides = parameter_overrides - 'monitor_only'
+WHERE epic = 'CS.D.AUDUSD.MINI.IP';
+```
+
+### To Check Current Status
+```sql
+SELECT epic, parameter_overrides->>'monitor_only' as monitor_only
+FROM smc_simple_pair_overrides
+WHERE parameter_overrides->>'monitor_only' = 'true';
+```
+
+## Optimized Pair Configurations (Feb 2026)
+
+All 8 pairs were optimized via 30-day backtests. See database `smc_simple_pair_overrides` for current settings.
+
+| Pair | Filter | Mode | Performance |
+|------|--------|------|-------------|
+| USDJPY | RSI | ACTIVE | 52.4% WR, 2.42 PF |
+| EURJPY | Two-Pole | ACTIVE | 53.6% WR, 2.31 PF |
+| AUDJPY | Two-Pole | ACTIVE | 52.3% WR, 2.24 PF |
+| USDCAD | RSI | ACTIVE | 54.5% WR, 2.90 PF |
+| GBPUSD | Two-Pole | ACTIVE | 50.0% WR, 2.31 PF |
+| NZDUSD | RSI | ACTIVE | 57.1% WR, 2.72 PF |
+| AUDUSD | None | MONITORING | 43.4% WR, 1.80 PF |
+| USDCHF | None | MONITORING | 34.2% WR, 0.99 PF |

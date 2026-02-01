@@ -1590,6 +1590,39 @@ class SMCSimpleStrategy:
                 return False, f"ADX {current_adx:.1f} < {min_adx:.1f}"
 
         # =========================================================================
+        # v2.37.0: Global Market Intelligence Regime Filter
+        # Based on Jan 2026 regime analysis:
+        #   - Oct-Dec 2025: 80% high_volatility regime → 32-35% win rate
+        #   - Jan 2026: 82% trending regime → 59-66% win rate
+        # This filter uses the GLOBAL market intelligence dominant_regime (aggregated
+        # across all pairs) rather than per-signal detection for better accuracy.
+        # =========================================================================
+
+        # Filter 9: Block Global High Volatility Regime
+        # Check both database config and backtest override
+        block_global_high_vol = (
+            self._db_config.get_pair_scalp_block_global_high_volatility(epic) or
+            override.get('scalp_block_global_high_volatility', False)
+        )
+        if block_global_high_vol:
+            # Get market intelligence from signal (loaded from historical data in backtest)
+            # Format: signal['market_intelligence']['market_regime']['dominant_regime']
+            market_intel = signal.get('market_intelligence', {})
+            market_regime_data = market_intel.get('market_regime', {})
+            global_regime = market_regime_data.get('dominant_regime', 'unknown')
+            regime_confidence = market_regime_data.get('confidence', 0.0)
+
+            if global_regime == 'high_volatility':
+                self._track_filter_rejection('global_high_volatility')
+                return False, f"Global high_volatility regime blocked (confidence={regime_confidence:.1%})"
+            elif global_regime == 'unknown' and market_intel:
+                # Log if we have intelligence but couldn't get regime (debugging)
+                self.logger.warning(f"⚠️ Intelligence present but no dominant_regime: keys={list(market_intel.keys())}")
+            else:
+                # Log for monitoring what regime we're in
+                self.logger.debug(f"📊 Global regime check passed: {global_regime} (confidence={regime_confidence:.1%})")
+
+        # =========================================================================
         # v2.35.5: Entry Quality/Momentum Gates (Codex recommendation)
         # These filters are BACKTEST-ONLY by default via override system
         # Codex analysis: entry_quality < 0.30 = 1 win in 12 trades, avg -$59.06
@@ -3743,16 +3776,32 @@ class SMCSimpleStrategy:
             # Run momentum confirmation filters on scalp signals
             # Mode: MONITORING (logs only) or ACTIVE (blocks signals)
             # v2.24.1: Per-pair qualification mode support
+            # v2.38.0: Per-pair filter selection (RSI vs Two-Pole) from parameter_overrides
             # ================================================================
             if self.scalp_mode_enabled and self._signal_qualifier and self._signal_qualifier.enabled:
                 try:
                     # v2.24.1: Get per-pair qualification mode (JPY pairs use ACTIVE, others use global)
                     effective_mode = self._signal_qualifier.mode  # Default to global mode
+
+                    # v2.38.0: Per-pair filter selection from parameter_overrides
+                    # Store original filter states to restore after this signal
+                    original_rsi_enabled = self._signal_qualifier.rsi_filter_enabled
+                    original_two_pole_enabled = self._signal_qualifier.two_pole_filter_enabled
+
                     if hasattr(self, '_db_config') and self._db_config:
                         pair_mode = self._db_config.get_pair_scalp_qualification_mode(epic)
                         if pair_mode:
                             effective_mode = pair_mode
                             self._signal_qualifier.mode = pair_mode  # Temporarily set for this signal
+
+                        # v2.38.0: Check for per-pair filter overrides in parameter_overrides
+                        pair_overrides = self._db_config._pair_overrides.get(epic, {})
+                        param_overrides = pair_overrides.get('parameter_overrides', {})
+                        if param_overrides:
+                            if 'scalp_rsi_filter_enabled' in param_overrides:
+                                self._signal_qualifier.rsi_filter_enabled = param_overrides['scalp_rsi_filter_enabled']
+                            if 'scalp_two_pole_filter_enabled' in param_overrides:
+                                self._signal_qualifier.two_pole_filter_enabled = param_overrides['scalp_two_pole_filter_enabled']
 
                     qual_passed, qual_score, qual_results = self._signal_qualifier.qualify_signal(
                         signal=signal,
@@ -3788,6 +3837,10 @@ class SMCSimpleStrategy:
                 except Exception as qual_error:
                     # Don't fail the signal if qualification fails
                     self.logger.warning(f"⚠️ Signal qualification failed: {qual_error}")
+                finally:
+                    # v2.38.0: Restore original filter states after processing this signal
+                    self._signal_qualifier.rsi_filter_enabled = original_rsi_enabled
+                    self._signal_qualifier.two_pole_filter_enabled = original_two_pole_enabled
 
             # v2.31.1: Track signal passed all filters for backtest stats
             self._track_signal_passed()
