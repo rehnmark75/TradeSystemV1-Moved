@@ -140,7 +140,16 @@ class VolumeProfileConfig:
 
                 for db_col, attr_name in field_mapping.items():
                     if db_col in row.keys() and row[db_col] is not None:
-                        setattr(config, attr_name, row[db_col])
+                        value = row[db_col]
+                        # Convert Decimal to appropriate Python type
+                        if hasattr(value, '__float__'):
+                            # Check if it should be an int based on the default type
+                            default_val = getattr(cls, attr_name, None)
+                            if isinstance(default_val, int):
+                                value = int(value)
+                            else:
+                                value = float(value)
+                        setattr(config, attr_name, value)
 
             cur.close()
             conn.close()
@@ -251,10 +260,14 @@ class VolumeProfileStrategy(StrategyInterface):
         epic: str = "",
         pair: str = "",
         df_entry: pd.DataFrame = None,
+        current_timestamp: datetime = None,
         **kwargs
     ) -> Optional[Dict]:
         """
         Detect trading signal using Volume Profile analysis.
+
+        Args:
+            current_timestamp: For backtest mode - use this instead of datetime.now()
         """
         df = df_trigger if df_trigger is not None else df_entry
 
@@ -266,12 +279,12 @@ class VolumeProfileStrategy(StrategyInterface):
         if self.config.enabled_pairs and epic not in self.config.enabled_pairs:
             return None
 
-        # Check cooldown
-        if not self._check_cooldown(epic):
+        # Check cooldown (use backtest timestamp if provided)
+        if not self._check_cooldown(epic, current_timestamp):
             return None
 
-        # Get current session for boost
-        session = self._get_current_session()
+        # Get current session for boost (use backtest timestamp if provided)
+        session = self._get_current_session(current_timestamp)
         session_boost = self._get_session_boost(session)
 
         # Calculate Volume Profile
@@ -324,7 +337,7 @@ class VolumeProfileStrategy(StrategyInterface):
             }
         )
 
-        self._set_cooldown(epic)
+        self._set_cooldown(epic, current_timestamp)
 
         self.logger.info(
             f"[VOLUME_PROFILE] ✅ {signal['type']}: {signal['direction']} {epic} "
@@ -539,9 +552,11 @@ class VolumeProfileStrategy(StrategyInterface):
     # SESSION HANDLING
     # =========================================================================
 
-    def _get_current_session(self) -> str:
+    def _get_current_session(self, current_timestamp: datetime = None) -> str:
         """Get current trading session based on UTC time"""
-        now = datetime.now(timezone.utc)
+        now = current_timestamp if current_timestamp else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         hour = now.hour
 
         # Check sessions (can overlap)
@@ -605,17 +620,26 @@ class VolumeProfileStrategy(StrategyInterface):
     # COOLDOWN MANAGEMENT
     # =========================================================================
 
-    def _check_cooldown(self, epic: str) -> bool:
+    def _check_cooldown(self, epic: str, current_timestamp: datetime = None) -> bool:
+        """Check if epic is on cooldown. Uses current_timestamp for backtest mode."""
         if epic not in self._cooldowns:
             return True
-        now = datetime.now(timezone.utc)
+        # Use backtest timestamp if provided, otherwise real time
+        now = current_timestamp if current_timestamp else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         if now >= self._cooldowns[epic]:
             del self._cooldowns[epic]
             return True
         return False
 
-    def _set_cooldown(self, epic: str) -> None:
-        self._cooldowns[epic] = datetime.now(timezone.utc) + timedelta(
+    def _set_cooldown(self, epic: str, current_timestamp: datetime = None) -> None:
+        """Set cooldown for epic. Uses current_timestamp for backtest mode."""
+        # Use backtest timestamp if provided, otherwise real time
+        now = current_timestamp if current_timestamp else datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        self._cooldowns[epic] = now + timedelta(
             minutes=self.config.signal_cooldown_minutes
         )
 

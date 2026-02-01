@@ -109,15 +109,19 @@ class SignalDetector:
         """
         strategy_name = strategy_name.upper()
 
-        # Strategy initialization mapping - only SMC Simple is active
+        # Strategy initialization mapping - SMC Simple + multi-strategy support (v3.0.0)
         init_map = {
             'SMC_SIMPLE': self._force_init_smc_simple,
             'SMC_EMA': self._force_init_smc_simple,
             'SMC': self._force_init_smc_simple,  # Default SMC to SMC_SIMPLE
+            'RANGING_MARKET': self._force_init_ranging_market,
+            'RANGING': self._force_init_ranging_market,
+            'VOLUME_PROFILE': self._force_init_volume_profile,
+            'VP': self._force_init_volume_profile,
         }
 
         if strategy_name not in init_map:
-            return False, f"Unknown or archived strategy: {strategy_name}. Only SMC_SIMPLE is available after cleanup."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, VOLUME_PROFILE."
 
         return init_map[strategy_name]()
 
@@ -131,6 +135,26 @@ class SignalDetector:
             return True, "SMC Simple strategy force-initialized"
         except Exception as e:
             return False, f"Failed to force-init SMC Simple: {e}"
+
+    def _force_init_ranging_market(self) -> Tuple[bool, str]:
+        """Force-initialize Ranging Market strategy for backtest"""
+        try:
+            # Ranging Market uses lazy loading
+            self.ranging_market_strategy = None  # Will be lazy-loaded on first use
+            self.logger.info("🔧 Force-initialized Ranging Market strategy (lazy-load)")
+            return True, "Ranging Market strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Ranging Market: {e}"
+
+    def _force_init_volume_profile(self) -> Tuple[bool, str]:
+        """Force-initialize Volume Profile strategy for backtest"""
+        try:
+            # Volume Profile uses lazy loading
+            self.volume_profile_strategy = None  # Will be lazy-loaded on first use
+            self.logger.info("🔧 Force-initialized Volume Profile strategy (lazy-load)")
+            return True, "Volume Profile strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Volume Profile: {e}"
 
     def _get_default_timeframe(self, timeframe: str = None) -> str:
         """Get default timeframe from database config if not specified"""
@@ -786,7 +810,8 @@ class SignalDetector:
         epic: str,
         pair: str,
         spread_pips: float = 1.5,
-        timeframe: str = '15m'
+        timeframe: str = '15m',
+        current_timestamp: datetime = None
     ) -> Optional[Dict]:
         """
         Detect signals using the Ranging Market strategy
@@ -799,6 +824,7 @@ class SignalDetector:
             pair: The pair name (e.g., 'EURUSD')
             spread_pips: Current spread in pips
             timeframe: Signal timeframe
+            current_timestamp: For backtest mode - uses this for cooldown handling
 
         Returns:
             Signal dict if conditions met, None otherwise
@@ -807,15 +833,15 @@ class SignalDetector:
             # Lazy-load the ranging market strategy
             if self.ranging_market_strategy is None:
                 try:
-                    from .strategies.ranging_market_strategy import RangingMarketStrategy, RangingMarketConfig
-                    # Load config from database
-                    config = RangingMarketConfig.from_database()
+                    from .strategies.ranging_market_strategy import RangingMarketStrategy
+                    # Strategy loads config from database internally
                     self.ranging_market_strategy = RangingMarketStrategy(
-                        config=config,
-                        data_fetcher=self.data_fetcher,
+                        config=None,  # Uses database config
                         logger=self.logger,
                         db_manager=self.db_manager
                     )
+                    # Store data_fetcher reference for signal detection
+                    self.ranging_market_strategy.data_fetcher = self.data_fetcher
                     self.logger.info("✅ Ranging Market strategy lazy-loaded")
                 except ImportError as e:
                     self.logger.warning(f"⚠️ Could not import Ranging Market strategy: {e}")
@@ -850,12 +876,13 @@ class SignalDetector:
                 df_4h=df_4h,
                 epic=epic,
                 pair=pair,
-                spread_pips=spread_pips
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp
             )
 
             # Enhance signal with technical indicators if found
             if signal:
-                signal = self._add_complete_technical_indicators(signal, epic, timeframe)
+                signal = self._add_complete_technical_indicators(signal, df_trigger)
 
             return signal
 
@@ -868,7 +895,8 @@ class SignalDetector:
         epic: str,
         pair: str,
         spread_pips: float = 1.5,
-        timeframe: str = '15m'
+        timeframe: str = '15m',
+        current_timestamp: datetime = None
     ) -> Optional[Dict]:
         """
         Detect signals using the Volume Profile strategy
@@ -881,6 +909,7 @@ class SignalDetector:
             pair: The pair name (e.g., 'EURUSD')
             spread_pips: Current spread in pips
             timeframe: Signal timeframe
+            current_timestamp: For backtest mode - uses this for cooldown/session detection
 
         Returns:
             Signal dict if conditions met, None otherwise
@@ -889,15 +918,15 @@ class SignalDetector:
             # Lazy-load the volume profile strategy
             if self.volume_profile_strategy is None:
                 try:
-                    from .strategies.volume_profile_strategy import VolumeProfileStrategy, VolumeProfileConfig
-                    # Load config from database
-                    config = VolumeProfileConfig.from_database()
+                    from .strategies.volume_profile_strategy import VolumeProfileStrategy
+                    # Strategy loads config from database internally
                     self.volume_profile_strategy = VolumeProfileStrategy(
-                        config=config,
-                        data_fetcher=self.data_fetcher,
+                        config=None,  # Uses database config
                         logger=self.logger,
                         db_manager=self.db_manager
                     )
+                    # Store data_fetcher reference for signal detection
+                    self.volume_profile_strategy.data_fetcher = self.data_fetcher
                     self.logger.info("✅ Volume Profile strategy lazy-loaded")
                 except ImportError as e:
                     self.logger.warning(f"⚠️ Could not import Volume Profile strategy: {e}")
@@ -932,12 +961,13 @@ class SignalDetector:
                 df_4h=df_4h,
                 epic=epic,
                 pair=pair,
-                spread_pips=spread_pips
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp
             )
 
             # Enhance signal with technical indicators if found
             if signal:
-                signal = self._add_complete_technical_indicators(signal, epic, timeframe)
+                signal = self._add_complete_technical_indicators(signal, df_trigger)
 
             return signal
 

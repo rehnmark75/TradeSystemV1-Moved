@@ -160,7 +160,11 @@ class RangingMarketConfig:
 
                 for db_col, attr_name in field_mapping.items():
                     if db_col in row.keys() and row[db_col] is not None:
-                        setattr(config, attr_name, row[db_col])
+                        value = row[db_col]
+                        # Convert Decimal to float for numeric fields
+                        if hasattr(value, '__float__'):
+                            value = float(value)
+                        setattr(config, attr_name, value)
 
             cur.close()
             conn.close()
@@ -280,6 +284,7 @@ class RangingMarketStrategy(StrategyInterface):
         epic: str = "",
         pair: str = "",
         df_entry: pd.DataFrame = None,
+        current_timestamp: datetime = None,
         **kwargs
     ) -> Optional[Dict]:
         """
@@ -291,11 +296,14 @@ class RangingMarketStrategy(StrategyInterface):
             epic: IG epic identifier
             pair: Currency pair name
             df_entry: Entry timeframe data (optional)
+            current_timestamp: For backtest mode - uses this for cooldown handling
             **kwargs: Additional parameters
 
         Returns:
             Signal dict if detected, None otherwise
         """
+        # Store timestamp for cooldown
+        self._current_timestamp = current_timestamp
         # Use df_trigger as primary data
         df = df_trigger if df_trigger is not None else df_entry
 
@@ -676,11 +684,14 @@ class RangingMarketStrategy(StrategyInterface):
     # =========================================================================
 
     def _check_cooldown(self, epic: str) -> bool:
-        """Check if epic is in cooldown period"""
+        """Check if epic is in cooldown period. Uses stored backtest timestamp if available."""
         if epic not in self._cooldowns:
             return True
 
-        now = datetime.now(timezone.utc)
+        # Use backtest timestamp if available, otherwise real time
+        now = getattr(self, '_current_timestamp', None) or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
         cooldown_end = self._cooldowns[epic]
 
         if now >= cooldown_end:
@@ -690,9 +701,13 @@ class RangingMarketStrategy(StrategyInterface):
         return False
 
     def _set_cooldown(self, epic: str) -> None:
-        """Set cooldown for epic after signal"""
+        """Set cooldown for epic after signal. Uses stored backtest timestamp if available."""
         cooldown_minutes = self.config.signal_cooldown_minutes
-        self._cooldowns[epic] = datetime.now(timezone.utc) + timedelta(minutes=cooldown_minutes)
+        # Use backtest timestamp if available, otherwise real time
+        now = getattr(self, '_current_timestamp', None) or datetime.now(timezone.utc)
+        if now.tzinfo is None:
+            now = now.replace(tzinfo=timezone.utc)
+        self._cooldowns[epic] = now + timedelta(minutes=cooldown_minutes)
 
     def reset_cooldowns(self) -> None:
         """Reset all cooldowns (for backtesting)"""

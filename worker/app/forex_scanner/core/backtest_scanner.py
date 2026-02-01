@@ -893,7 +893,12 @@ class BacktestScanner(IntelligentForexScanner):
                             strategy_timeframe = '1h'
                         else:
                             strategy_timeframe = self.timeframe
-                        signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
+
+                        # Strategies that support backtest timestamp for cooldown/session handling
+                        if method_name in ['detect_volume_profile_signals', 'detect_ranging_market_signals']:
+                            signals = method(epic, pair_name, self.spread_pips, strategy_timeframe, current_timestamp=timestamp)
+                        else:
+                            signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
 
                     # Some methods return a single signal dict, others return lists
                     if signals and not isinstance(signals, list):
