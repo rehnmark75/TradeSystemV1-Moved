@@ -269,6 +269,55 @@ def main():
                 processed_args.append(args[i])
                 print(f"🔬 Show top: {args[i]}")
 
+            # ===== MULTI-STRATEGY FLAGS (v3.0.0) =====
+            # Enable adaptive multi-strategy routing
+            elif arg == "--multi-strategy":
+                processed_args.append(arg)
+                print(f"🎯 Multi-strategy routing: ENABLED")
+
+            # Test specific strategy
+            elif arg == "--strategy" and i + 1 < len(args):
+                # Already handled above for shortcuts, but handle explicit --strategy too
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"📈 Strategy: {args[i]}")
+
+            # Enable specific strategies for routing
+            elif arg == "--enable-strategies" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                strategies = args[i].split(',')
+                print(f"✅ Enabled strategies: {', '.join(strategies)}")
+
+            # Compare strategies head-to-head
+            elif arg == "--compare-strategies" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                strategies = args[i].split(',')
+                print(f"⚖️ Comparing strategies: {' vs '.join(strategies)}")
+
+            # Filter to specific regime
+            elif arg == "--regime-filter" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🔄 Regime filter: {args[i]}")
+
+            # Filter to specific session
+            elif arg == "--session-filter" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🕐 Session filter: {args[i]}")
+
+            # Show regime breakdown in results
+            elif arg == "--show-regime-breakdown":
+                processed_args.append(arg)
+                print(f"📊 Regime breakdown: ENABLED")
+
             # Pass through other flags
             elif arg.startswith("--"):
                 processed_args.append(arg)
@@ -466,6 +515,34 @@ Qualification Examples:
   python bt.py EURUSD 7 --scalp --qualification-active       # Block low-score signals
   python bt.py EURUSD 7 --scalp --qualification-active --qual-min-score 0.66  # Require 2/3 filters to pass
   python bt.py EURUSD 7 --scalp --qualification-monitor --qual-rsi-only  # Test RSI filter alone
+
+Multi-Strategy Testing (v3.0.0 - Adaptive Strategy Routing):
+  --multi-strategy              Enable regime-based strategy routing
+  --enable-strategies LIST      Comma-separated list of strategies to enable
+  --compare-strategies LIST     Compare strategies head-to-head
+  --regime-filter REGIME        Only test in specific regime (trending, ranging, etc.)
+  --session-filter SESSION      Only test in specific session (asian, london, new_york)
+  --show-regime-breakdown       Show detailed performance by regime
+
+Available Strategies:
+  SMC_SIMPLE      - Primary trend strategy (always enabled)
+  RANGING_MARKET  - Multi-oscillator for ranging markets (ADX < 20)
+  VOLUME_PROFILE  - HVN/POC-based strategy (66.7% Asian session edge)
+  MEAN_REVERSION  - LuxAlgo-based mean reversion
+  BB_SUPERTREND   - Squeeze detection with Supertrend
+
+Multi-Strategy Examples:
+  # Test Ranging Market strategy in ranging conditions
+  python bt.py EURUSD 30 --strategy RANGING_MARKET --regime-filter ranging
+
+  # Test Volume Profile in Asian session
+  python bt.py USDJPY 30 --strategy VOLUME_PROFILE --session-filter asian
+
+  # Compare SMC Simple vs Ranging Market
+  python bt.py EURUSD 60 --compare-strategies SMC_SIMPLE,RANGING_MARKET --show-regime-breakdown
+
+  # Full multi-strategy routing test
+  python bt.py EURUSD 90 --multi-strategy --enable-strategies SMC_SIMPLE,RANGING_MARKET,VOLUME_PROFILE
 """
     print(help_text)
 

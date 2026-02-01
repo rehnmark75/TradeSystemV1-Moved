@@ -510,6 +510,47 @@ Signal Display Format:
             help='Show top N variation results (default: 10).'
         )
 
+        # ===== MULTI-STRATEGY ARGUMENTS (v3.0.0) =====
+        parser.add_argument(
+            '--multi-strategy',
+            action='store_true',
+            help='Enable adaptive multi-strategy routing based on market regime.'
+        )
+
+        parser.add_argument(
+            '--enable-strategies',
+            type=str,
+            metavar='LIST',
+            help='Comma-separated list of strategies to enable (e.g., SMC_SIMPLE,RANGING_MARKET,VOLUME_PROFILE).'
+        )
+
+        parser.add_argument(
+            '--compare-strategies',
+            type=str,
+            metavar='LIST',
+            help='Compare strategies head-to-head (e.g., SMC_SIMPLE,RANGING_MARKET).'
+        )
+
+        parser.add_argument(
+            '--regime-filter',
+            type=str,
+            choices=['trending', 'ranging', 'breakout', 'high_volatility', 'low_volatility'],
+            help='Only test in specific market regime.'
+        )
+
+        parser.add_argument(
+            '--session-filter',
+            type=str,
+            choices=['asian', 'london', 'new_york', 'overlap'],
+            help='Only test in specific trading session.'
+        )
+
+        parser.add_argument(
+            '--show-regime-breakdown',
+            action='store_true',
+            help='Show detailed performance breakdown by market regime.'
+        )
+
         return parser
 
     def _parse_overrides(self, override_args) -> dict:
@@ -1080,9 +1121,38 @@ Signal Display Format:
                     use_historical_intelligence=use_historical_intelligence
                 )
 
+            # Handle multi-strategy mode (v3.0.0)
+            multi_strategy_config = None
+            if getattr(args, 'multi_strategy', False):
+                multi_strategy_config = {
+                    'enabled': True,
+                    'enable_strategies': getattr(args, 'enable_strategies', None),
+                    'regime_filter': getattr(args, 'regime_filter', None),
+                    'session_filter': getattr(args, 'session_filter', None),
+                    'show_regime_breakdown': getattr(args, 'show_regime_breakdown', False),
+                }
+                print("\n🎯 MULTI-STRATEGY MODE ENABLED")
+                if multi_strategy_config['enable_strategies']:
+                    strategies = multi_strategy_config['enable_strategies'].split(',')
+                    print(f"   Strategies: {', '.join(strategies)}")
+                if multi_strategy_config['regime_filter']:
+                    print(f"   Regime filter: {multi_strategy_config['regime_filter']}")
+                if multi_strategy_config['session_filter']:
+                    print(f"   Session filter: {multi_strategy_config['session_filter']}")
+
+            # Handle strategy comparison mode
+            if getattr(args, 'compare_strategies', None):
+                return self._run_strategy_comparison(
+                    args=args,
+                    start_date=start_date,
+                    end_date=end_date,
+                    config_override=config_override,
+                    use_historical_intelligence=use_historical_intelligence
+                )
+
             # Standard backtest mode
             # If chart is requested, we need the results dict to get execution_id
-            need_results = args.chart
+            need_results = args.chart or getattr(args, 'show_regime_breakdown', False)
             result = self.enhanced_backtest.run_enhanced_backtest(
                 epic=args.epic,
                 days=args.days,
@@ -1096,7 +1166,8 @@ Signal Display Format:
                 csv_export=args.csv_export if hasattr(args, 'csv_export') else None,
                 config_override=config_override,
                 use_historical_intelligence=use_historical_intelligence,
-                return_results=need_results
+                return_results=need_results,
+                multi_strategy_config=multi_strategy_config
             )
 
             # Generate chart if requested (for standard backtest)
@@ -1543,6 +1614,146 @@ Signal Display Format:
             self._generate_backtest_chart(args, result)
 
         return result is not None
+
+    def _run_strategy_comparison(
+        self,
+        args,
+        start_date,
+        end_date,
+        config_override,
+        use_historical_intelligence
+    ) -> bool:
+        """
+        Run head-to-head strategy comparison.
+
+        Backtests multiple strategies on the same data and compares results.
+        Shows per-regime breakdown if --show-regime-breakdown is set.
+
+        Args:
+            args: CLI arguments
+            start_date: Start date for backtest
+            end_date: End date for backtest
+            config_override: Parameter overrides
+            use_historical_intelligence: Whether to use historical intelligence
+        """
+        strategies = args.compare_strategies.split(',')
+        strategies = [s.strip().upper() for s in strategies]
+
+        print("\n" + "=" * 70)
+        print("⚖️ STRATEGY COMPARISON MODE")
+        print("=" * 70)
+        print(f"📊 Comparing: {' vs '.join(strategies)}")
+        print(f"📅 Period: {args.days} days")
+        if args.epic:
+            print(f"🎯 Epic: {args.epic}")
+        print("=" * 70 + "\n")
+
+        # Results storage
+        comparison_results = {}
+
+        for strategy in strategies:
+            print(f"\n📈 Testing {strategy}...")
+            print("-" * 50)
+
+            result = self.enhanced_backtest.run_enhanced_backtest(
+                epic=args.epic,
+                days=args.days,
+                start_date=start_date,
+                end_date=end_date,
+                show_signals=False,  # Suppress individual signals for comparison
+                timeframe=args.timeframe,
+                strategy=strategy,
+                max_signals_display=0,
+                pipeline=args.pipeline,
+                config_override=config_override,
+                use_historical_intelligence=use_historical_intelligence,
+                return_results=True
+            )
+
+            if result and isinstance(result, dict):
+                comparison_results[strategy] = result
+            else:
+                print(f"⚠️ {strategy} returned no results")
+                comparison_results[strategy] = {
+                    'total_signals': 0,
+                    'total_pips': 0,
+                    'winning_trades': 0,
+                    'losing_trades': 0,
+                    'profit_factor': 0
+                }
+
+        # Print comparison summary
+        print("\n" + "=" * 70)
+        print("📊 COMPARISON RESULTS")
+        print("=" * 70)
+
+        # Header
+        print(f"\n{'Strategy':<20} {'Signals':>10} {'Win %':>10} {'Pips':>12} {'PF':>8}")
+        print("-" * 60)
+
+        for strategy, result in comparison_results.items():
+            signals = result.get('total_signals', 0)
+            wins = result.get('winning_trades', 0)
+            losses = result.get('losing_trades', 0)
+            total = wins + losses
+            win_rate = (wins / total * 100) if total > 0 else 0
+            pips = result.get('total_pips', 0)
+            pf = result.get('profit_factor', 0)
+
+            print(f"{strategy:<20} {signals:>10} {win_rate:>9.1f}% {pips:>+11.1f} {pf:>8.2f}")
+
+        print("-" * 60)
+
+        # Determine winner
+        if comparison_results:
+            best_by_pips = max(comparison_results.items(), key=lambda x: x[1].get('total_pips', 0))
+            best_by_wr = max(comparison_results.items(), key=lambda x: (
+                x[1].get('winning_trades', 0) /
+                max(x[1].get('winning_trades', 0) + x[1].get('losing_trades', 0), 1)
+            ))
+
+            print(f"\n🏆 Best by Pips: {best_by_pips[0]} ({best_by_pips[1].get('total_pips', 0):+.1f} pips)")
+            wr = best_by_wr[1].get('winning_trades', 0) / max(
+                best_by_wr[1].get('winning_trades', 0) + best_by_wr[1].get('losing_trades', 0), 1
+            ) * 100
+            print(f"🏆 Best by Win Rate: {best_by_wr[0]} ({wr:.1f}%)")
+
+        # Show regime breakdown if requested
+        if getattr(args, 'show_regime_breakdown', False):
+            self._print_regime_breakdown(comparison_results)
+
+        return True
+
+    def _print_regime_breakdown(self, comparison_results: dict):
+        """Print performance breakdown by market regime"""
+        print("\n" + "=" * 70)
+        print("📊 REGIME BREAKDOWN")
+        print("=" * 70)
+        print("(Note: Regime breakdown requires signals with regime data)")
+
+        # This is a placeholder - full implementation would analyze
+        # each signal's regime and aggregate statistics
+        for strategy, result in comparison_results.items():
+            signals = result.get('signals', [])
+            if not signals:
+                continue
+
+            # Count by regime
+            regime_counts = {}
+            for sig in signals:
+                regime = sig.get('regime', 'unknown')
+                if regime not in regime_counts:
+                    regime_counts[regime] = {'total': 0, 'wins': 0, 'pips': 0}
+                regime_counts[regime]['total'] += 1
+                if sig.get('profit_pips', 0) > 0:
+                    regime_counts[regime]['wins'] += 1
+                regime_counts[regime]['pips'] += sig.get('profit_pips', 0)
+
+            if regime_counts:
+                print(f"\n{strategy}:")
+                for regime, data in regime_counts.items():
+                    wr = (data['wins'] / data['total'] * 100) if data['total'] > 0 else 0
+                    print(f"  {regime:<15}: {data['total']:>3} trades, {wr:>5.1f}% WR, {data['pips']:>+8.1f} pips")
 
     def _generate_parallel_chart(self, args, all_results, start_date, end_date):
         """Generate summary chart for parallel backtest results"""
