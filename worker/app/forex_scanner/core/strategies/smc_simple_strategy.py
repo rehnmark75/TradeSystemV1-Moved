@@ -1645,6 +1645,77 @@ class SMCSimpleStrategy:
                 self._track_filter_rejection('entry_momentum')
                 return False, f"Entry momentum {entry_momentum:.2f} < {min_entry_momentum:.2f}"
 
+        # =========================================================================
+        # v2.38.0: HIGH_VOL_MODE Analysis (INFORMATION ONLY - No Filtering)
+        # Based on Oct-Dec 2025 analysis:
+        #   - Volume ratio > 1.2: 46.3% win rate (best performance)
+        #   - American/new_york session: 50-67% win rate
+        #   - Confidence >= 0.55: 46.4% win rate
+        # This analysis is logged and stored in strategy_metadata for validation
+        # before implementing actual filtering behavior.
+        # =========================================================================
+        market_intel = signal.get('market_intelligence', {})
+        market_regime_data = market_intel.get('market_regime', {})
+        global_regime = market_regime_data.get('dominant_regime', 'unknown')
+
+        if global_regime == 'high_volatility':
+            # Extract key metrics for HIGH_VOL_MODE analysis
+            volume_ratio = signal.get('volume_ratio', 0)
+            market_session = signal.get('market_session', signal.get('signal_conditions', {}).get('session', 'unknown'))
+            confidence = signal.get('confidence', signal.get('confidence_score', 0))
+
+            # Determine if signal would pass HIGH_VOL_MODE filters
+            has_high_volume = volume_ratio >= 1.2
+            has_american_session = market_session.lower() in ('american', 'new_york')
+            has_min_confidence = confidence >= 0.55
+
+            # Signal passes if: (high_volume OR american_session) AND min_confidence
+            would_pass = (has_high_volume or has_american_session) and has_min_confidence
+
+            # Determine primary pass reason
+            if would_pass:
+                if has_high_volume:
+                    pass_reason = 'high_volume'
+                elif has_american_session:
+                    pass_reason = 'american_session'
+                else:
+                    pass_reason = 'none'  # Shouldn't happen if would_pass is True
+            else:
+                if not has_min_confidence:
+                    pass_reason = 'failed_confidence'
+                elif not has_high_volume and not has_american_session:
+                    pass_reason = 'failed_volume_and_session'
+                else:
+                    pass_reason = 'none'
+
+            # Build analysis dict to store in strategy_metadata
+            high_vol_analysis = {
+                'regime': global_regime,
+                'volume_ratio': round(volume_ratio, 2) if volume_ratio else 0,
+                'session': market_session,
+                'confidence': round(confidence, 2) if confidence else 0,
+                'would_pass_filter': would_pass,
+                'pass_reason': pass_reason,
+                'criteria': {
+                    'has_high_volume': has_high_volume,
+                    'has_american_session': has_american_session,
+                    'has_min_confidence': has_min_confidence
+                }
+            }
+
+            # Store in signal's strategy_metadata for persistence to alert_history
+            if 'strategy_metadata' not in signal:
+                signal['strategy_metadata'] = {}
+            signal['strategy_metadata']['high_vol_analysis'] = high_vol_analysis
+
+            # Log for real-time monitoring
+            epic_short = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            self.logger.info(
+                f"📊 HIGH_VOL_ANALYSIS {epic_short}: vol={volume_ratio:.2f}, "
+                f"session={market_session}, conf={confidence:.2f}, "
+                f"would_pass={would_pass} ({pass_reason})"
+            )
+
         return True, ""
 
     def _get_current_spread(self, epic: str, df: pd.DataFrame) -> float:
