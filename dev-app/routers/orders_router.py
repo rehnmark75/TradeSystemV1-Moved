@@ -25,6 +25,7 @@ import httpx
 import time
 from utils import get_point_value, convert_stop_distance_to_price, convert_limit_distance_to_price
 from services.price_utils import ig_points_to_price
+from services.trading_alert_service import get_alert_service
 
 from services.keyvault import get_secret
 from config import EPIC_MAP, API_BASE_URL, TRADE_COOLDOWN_ENABLED, TRADE_COOLDOWN_MINUTES, EPIC_SPECIFIC_COOLDOWNS, TRADING_BLACKLIST
@@ -731,12 +732,30 @@ async def ig_place_order(
 
                     db.add(trade_log)
                     db.commit()
+                    db.refresh(trade_log)  # Get the ID after commit
                     logger.info(f"✅ Limit order logged to database: {symbol} @ {body.entry_level}")
                     if is_scalp:
                         logger.info(f"   ⚡ Scalp trade: is_scalp_trade=True (using scalp trailing configs)")
                     logger.info(f"   Deal Ref: {deal_reference}, Expiry: {expiry_time.strftime('%Y-%m-%d %H:%M:%S')} UTC")
                     if alert_id:
                         logger.info(f"   Linked to alert_id: {alert_id}")
+
+                    # Send Telegram notification (if enabled)
+                    try:
+                        alert_service = get_alert_service()
+                        await alert_service.send_trade_opened_notification(
+                            trade_id=trade_log.id,
+                            deal_id=deal_reference,
+                            epic=symbol,
+                            direction=direction,
+                            entry_price=body.entry_level,
+                            stop_price=actual_stop_price,
+                            limit_price=actual_limit_price,
+                            is_scalp=is_scalp,
+                            order_type="limit"
+                        )
+                    except Exception as notif_error:
+                        logger.warning(f"⚠️ Trade notification failed: {notif_error}")
 
                 except SQLAlchemyError as db_error:
                     db.rollback()
@@ -1023,10 +1042,22 @@ async def ig_place_order(
             if alert_id is not None:
                 logger.info(f"✅ Trade linked to alert_id: {alert_id}")
 
-            # VSL service registration disabled - using regular trailing system instead
-            # if is_scalp:
-            #     # VSL service no longer used - regular trailing handles scalp trades
-            #     pass
+            # Send Telegram notification (if enabled)
+            try:
+                alert_service = get_alert_service()
+                await alert_service.send_trade_opened_notification(
+                    trade_id=trade_log.id,
+                    deal_id=deal_id,
+                    epic=symbol,
+                    direction=direction,
+                    entry_price=entry_price,
+                    stop_price=actual_stop_price,
+                    limit_price=actual_limit_price,
+                    is_scalp=is_scalp,
+                    order_type="market"
+                )
+            except Exception as notif_error:
+                logger.warning(f"⚠️ Trade notification failed: {notif_error}")
                 
         except SQLAlchemyError as e:
             db.rollback()

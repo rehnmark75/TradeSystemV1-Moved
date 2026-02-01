@@ -40,6 +40,7 @@ class AlertType(Enum):
     DB_COMMIT_FAILED = "db_commit_failed"      # Database write failed
     RECOVERY_FAILED = "recovery_failed"        # Could not recover from failure
     POSITION_NOT_FOUND = "position_not_found"  # Position missing on IG
+    TRADE_OPENED = "trade_opened"              # New trade placed
 
 
 @dataclass
@@ -87,6 +88,9 @@ class TradingAlertService:
         self._alert_history: List[TradingAlert] = []
         self._max_history = 100
 
+        # Trade notification toggle (separate from error alerts)
+        self._trade_notification_enabled = os.getenv("TRADE_NOTIFICATION_TELEGRAM_ENABLED", "false").lower() == "true"
+
         # Check if Telegram is properly configured
         if self._telegram_enabled and (not self._telegram_bot_token or not self._telegram_chat_id):
             self.logger.warning(
@@ -94,6 +98,9 @@ class TradingAlertService:
                 "Alerts will be logged only."
             )
             self._telegram_enabled = False
+
+        if self._trade_notification_enabled:
+            self.logger.info("[ALERT SERVICE] Trade notifications enabled via Telegram")
 
     def _can_send_telegram(self) -> bool:
         """Check if Telegram sending is available"""
@@ -464,6 +471,80 @@ class TradingAlertService:
         message += "🚨 *IMMEDIATE ACTION REQUIRED*\n"
 
         await self._send_telegram(message)
+
+        self._add_to_history(alert)
+        return alert
+
+    async def send_trade_opened_notification(
+        self,
+        trade_id: int,
+        deal_id: str,
+        epic: str,
+        direction: str,
+        entry_price: float,
+        stop_price: Optional[float] = None,
+        limit_price: Optional[float] = None,
+        is_scalp: bool = False,
+        order_type: str = "market"
+    ) -> Optional[TradingAlert]:
+        """
+        Send Telegram notification when a new trade is placed.
+
+        Only sends if TRADE_NOTIFICATION_TELEGRAM_ENABLED=true.
+        """
+        if not self._trade_notification_enabled:
+            return None
+
+        if not self._can_send_telegram():
+            self.logger.debug("[TRADE NOTIFICATION] Telegram not configured, skipping notification")
+            return None
+
+        pair_name = self._format_epic(epic)
+
+        # Direction emoji
+        dir_emoji = "🟢" if direction.upper() == "BUY" else "🔴"
+        dir_text = "LONG" if direction.upper() == "BUY" else "SHORT"
+
+        # Order type indicator
+        order_emoji = "⚡" if order_type == "market" else "📋"
+        order_text = "Market" if order_type == "market" else "Limit"
+
+        # Scalp indicator
+        scalp_text = " (Scalp)" if is_scalp else ""
+
+        message = f"{dir_emoji} *NEW TRADE OPENED*{scalp_text}\n"
+        message += "━" * 25 + "\n\n"
+        message += f"💱 *Pair:* `{pair_name}`\n"
+        message += f"📊 *Direction:* `{dir_text}`\n"
+        message += f"{order_emoji} *Type:* `{order_text}`\n"
+        message += f"💰 *Entry:* `{entry_price:.5f}`\n"
+
+        if stop_price:
+            message += f"🛑 *Stop Loss:* `{stop_price:.5f}`\n"
+        if limit_price:
+            message += f"🎯 *Take Profit:* `{limit_price:.5f}`\n"
+
+        message += f"\n🆔 *Trade ID:* `{trade_id}`"
+
+        # Create alert record
+        alert = TradingAlert(
+            alert_type=AlertType.TRADE_OPENED,
+            level=AlertLevel.LOG,  # Not critical, just informational
+            trade_id=trade_id,
+            deal_id=deal_id,
+            epic=epic,
+            message=f"Trade opened: {pair_name} {direction}",
+            details={
+                "entry_price": entry_price,
+                "stop_price": stop_price,
+                "limit_price": limit_price,
+                "is_scalp": is_scalp,
+                "order_type": order_type
+            }
+        )
+
+        await self._send_telegram(message)
+        self.logger.info(f"[TRADE NOTIFICATION] Sent notification for {pair_name} {direction}")
 
         self._add_to_history(alert)
         return alert

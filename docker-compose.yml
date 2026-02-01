@@ -26,6 +26,10 @@ services:
       # Production credentials for VSL streaming (same as stream-app)
       - PROD_IG_API_KEY=${PROD_API_KEY}
       - PROD_IG_PWD=${PROD_PASSWORD}
+      # Telegram notifications
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - TRADE_NOTIFICATION_TELEGRAM_ENABLED=${TRADE_NOTIFICATION_TELEGRAM_ENABLED:-false}
     healthcheck:
       disable: true  # Health endpoint always times out - container is functional, disable healthcheck
     networks:
