@@ -526,6 +526,7 @@ export default function SignalsPage() {
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
           <Link href="/forex">Forex Analytics</Link>
+          <Link href="/settings">Settings</Link>
         </div>
       </div>
 

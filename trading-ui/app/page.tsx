@@ -14,6 +14,7 @@ export default function Page() {
           <Link href="/market">Market</Link>
           <Link href="/forex">Forex Analytics</Link>
           <Link href="/settings">Settings</Link>
+          <Link href="/settings">Settings</Link>
         </div>
       </div>
 
