@@ -63,16 +63,20 @@ export function usePairOverrides() {
     return payload;
   };
 
-  const createOverride = async (epic: string, overridesPayload: Record<string, unknown>, meta: {
-    updatedBy: string;
-    changeReason: string;
-  }) => {
+  const createOverride = async (
+    epic: string,
+    updates: Record<string, unknown>,
+    meta: {
+      updatedBy: string;
+      changeReason: string;
+    }
+  ) => {
     const response = await fetch(apiUrl("/api/settings/strategy/smc/pairs"), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         epic,
-        overrides: overridesPayload,
+        updates,
         updated_by: meta.updatedBy,
         change_reason: meta.changeReason
       })

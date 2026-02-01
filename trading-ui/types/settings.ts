@@ -49,3 +49,22 @@ export interface AuditEntry {
   new_values?: Record<string, SettingsValue> | null;
   category?: string | null;
 }
+
+export interface SmcParameterMetadata {
+  id: number;
+  parameter_name: string;
+  display_name: string;
+  category: string;
+  subcategory?: string | null;
+  data_type: string;
+  min_value?: string | number | null;
+  max_value?: string | number | null;
+  default_value?: string | null;
+  description?: string | null;
+  help_text?: string | null;
+  display_order?: number | null;
+  is_advanced?: boolean | null;
+  requires_restart?: boolean | null;
+  valid_options?: unknown | null;
+  unit?: string | null;
+}

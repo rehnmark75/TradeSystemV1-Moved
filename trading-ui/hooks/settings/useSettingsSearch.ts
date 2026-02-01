@@ -5,7 +5,8 @@ export function useSettingsSearch<T extends { [key: string]: unknown }>(
   data: T | null,
   defaults: Record<string, unknown>,
   query: string,
-  showModifiedOnly: boolean
+  showModifiedOnly: boolean,
+  searchIndex?: Record<string, string>
 ) {
   return useMemo(() => {
     if (!data) return [];
@@ -25,7 +26,9 @@ export function useSettingsSearch<T extends { [key: string]: unknown }>(
         : false;
       if (showModifiedOnly && hasDefaults && !isModified) return false;
       if (!normalizedQuery) return true;
-      return key.toLowerCase().includes(normalizedQuery);
+      if (key.toLowerCase().includes(normalizedQuery)) return true;
+      const indexed = searchIndex?.[key];
+      return indexed ? indexed.includes(normalizedQuery) : false;
     });
-  }, [keys, data, defaults, query, showModifiedOnly]);
+  }, [keys, data, defaults, query, showModifiedOnly, searchIndex]);
 }

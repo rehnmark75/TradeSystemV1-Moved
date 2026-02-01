@@ -29,7 +29,7 @@ export default function PairOverrideModal({
     const overrides = initialOverrides ?? {};
     setJsonText(JSON.stringify(overrides, null, 2));
     const nextRows = Object.entries(overrides).map(([key, value]) => {
-      const valueType =
+      const valueType: "number" | "boolean" | "string" =
         typeof value === "number"
           ? "number"
           : typeof value === "boolean"

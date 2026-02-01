@@ -53,9 +53,10 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { epic, overrides, updated_by, change_reason } = body as {
+  const { epic, overrides, updates, updated_by, change_reason } = body as {
     epic?: string;
     overrides?: Record<string, unknown>;
+    updates?: Record<string, unknown>;
     updated_by?: string;
     change_reason?: string;
   };
@@ -79,19 +80,59 @@ export async function POST(request: Request) {
   }
 
   try {
+    const columnsResult = await strategyConfigPool.query(
+      `
+        SELECT column_name
+        FROM information_schema.columns
+        WHERE table_name = 'smc_simple_pair_overrides'
+      `
+    );
+    const allowed = new Set(
+      columnsResult.rows
+        .map((row: { column_name: string }) => row.column_name)
+        .filter(
+          (column: string) =>
+            ![
+              "id",
+              "config_id",
+              "created_at",
+              "updated_at",
+              "updated_by",
+              "change_reason",
+              "epic"
+            ].includes(column)
+        )
+    );
+
+    const updatePayload: Record<string, unknown> = { ...(updates ?? {}) };
+    if (updatePayload.parameter_overrides === undefined && overrides) {
+      updatePayload.parameter_overrides = overrides;
+    }
+
+    const updateKeys = Object.keys(updatePayload).filter((key) => allowed.has(key));
+    const columns = ["config_id", "epic", ...updateKeys, "updated_by", "change_reason"];
+    const values: unknown[] = [configId, epic];
+    updateKeys.forEach((key) => values.push(updatePayload[key]));
+    values.push(updated_by);
+    values.push(change_reason);
+
+    const placeholders = columns.map((_, index) => `$${index + 1}`);
+    const setClause = updateKeys
+      .map((key) => `${key} = EXCLUDED.${key}`)
+      .concat(["updated_by = EXCLUDED.updated_by", "change_reason = EXCLUDED.change_reason"])
+      .join(", ");
+
     const result = await strategyConfigPool.query(
       `
         INSERT INTO smc_simple_pair_overrides
-          (config_id, epic, parameter_overrides, updated_by, change_reason)
-        VALUES ($1, $2, $3, $4, $5)
+          (${columns.join(", ")})
+        VALUES (${placeholders.join(", ")})
         ON CONFLICT (config_id, epic)
         DO UPDATE SET
-          parameter_overrides = EXCLUDED.parameter_overrides,
-          updated_by = EXCLUDED.updated_by,
-          change_reason = EXCLUDED.change_reason
+          ${setClause}
         RETURNING *
       `,
-      [configId, epic, overrides ?? {}, updated_by, change_reason]
+      values
     );
 
     await strategyConfigPool.query(
@@ -106,7 +147,7 @@ export async function POST(request: Request) {
         updated_by,
         change_reason,
         null,
-        JSON.stringify({ parameter_overrides: overrides ?? {} })
+        JSON.stringify(updatePayload)
       ]
     );
 
