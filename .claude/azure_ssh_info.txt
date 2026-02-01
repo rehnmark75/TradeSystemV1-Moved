@@ -1,0 +1,12 @@
+# Azure Backtest VM SSH Connection
+# Updated: 2026-01-31
+
+Host: 4.210.64.130
+Username: azureuser
+SSH Key: ~/.ssh/azure_backtest_auto
+
+# SCP Example:
+scp -i ~/.ssh/azure_backtest_auto <local_file> azureuser@4.210.64.130:/tmp/
+
+# SSH Example:
+ssh -i ~/.ssh/azure_backtest_auto azureuser@4.210.64.130
