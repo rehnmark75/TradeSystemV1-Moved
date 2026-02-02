@@ -119,15 +119,13 @@ class MarketIntelligenceEngine:
     
     def _determine_dominant_regime(self, regime_scores: Dict, strategy: str = None) -> str:
         """
-        🔥 CRITICAL FIX: Strategy-aware regime selection
+        🔥 CRITICAL FIX: Structure-first regime selection
 
         Volatility is orthogonal to market structure (trending/ranging).
-        For trend-following strategies (EMA, MACD), prioritize trending/ranging classification.
+        Structure regime (trending/ranging/breakout) should be primary classification.
+        Volatility is a separate dimension for position sizing, not regime selection.
 
-        Problem: Alert 5568 had high_volatility:1.0, ranging:0.566, trending:0.434
-                 max() selected high_volatility, gave EMA 1.0 modifier instead of 0.8 (ranging)
-
-        Solution: Separate structure regimes from volatility regimes for trend strategies
+        Change: Always use structure regime as dominant, not volatility.
         """
         try:
             # Separate volatility from structure regimes
@@ -144,38 +142,28 @@ class MarketIntelligenceEngine:
                 'low_volatility': regime_scores.get('low_volatility', 0)
             }
 
-            # For trend-following strategies, use market structure as primary regime
-            trend_strategies = ['ema', 'macd', 'ichimoku', 'kama', 'smart_money_ema', 'smart_money_macd']
+            # ALWAYS use structure regime as primary classification
+            # Volatility is a separate dimension for position sizing
+            dominant_structure = max(structure_regimes, key=structure_regimes.get)
+            dominant_volatility = max(volatility_regimes, key=volatility_regimes.get)
 
-            if strategy and any(ts in strategy.lower() for ts in trend_strategies):
-                # Use trending vs ranging as primary classification
-                dominant_structure = max(structure_regimes, key=structure_regimes.get)
-                dominant_volatility = max(volatility_regimes, key=volatility_regimes.get)
+            # Log the regime determination
+            self.logger.debug(
+                f"🎯 Regime: Structure={dominant_structure} ({structure_regimes[dominant_structure]:.1%}), "
+                f"Volatility={dominant_volatility} ({volatility_regimes[dominant_volatility]:.1%})"
+            )
 
-                self.logger.info(
-                    f"🎯 Strategy-aware regime: Structure={dominant_structure} ({structure_regimes[dominant_structure]:.1%}), "
-                    f"Volatility={dominant_volatility} ({volatility_regimes[dominant_volatility]:.1%}) "
-                    f"[Strategy: {strategy}]"
-                )
-                return dominant_structure
-
-            # For other strategies or no strategy specified, use original logic (highest score)
-            dominant = max(regime_scores, key=regime_scores.get)
-
-            # Log if volatility dominated over structure
-            if dominant in ['high_volatility', 'low_volatility']:
-                dominant_structure = max(structure_regimes, key=structure_regimes.get)
-                self.logger.debug(
-                    f"⚠️ Volatility regime dominant ({dominant}), "
-                    f"market structure is {dominant_structure} ({structure_regimes[dominant_structure]:.1%})"
-                )
-
-            return dominant
+            return dominant_structure
 
         except Exception as e:
             self.logger.error(f"Error in regime determination: {e}")
-            # Fallback to original logic
-            return max(regime_scores, key=regime_scores.get)
+            # Fallback to structure-first logic
+            structure_regimes = {
+                'trending': regime_scores.get('trending', 0),
+                'ranging': regime_scores.get('ranging', 0),
+                'breakout': regime_scores.get('breakout', 0),
+            }
+            return max(structure_regimes, key=structure_regimes.get)
 
     def _get_fallback_analysis(self) -> Dict:
         """Get fallback analysis for failed epic analysis"""
@@ -276,16 +264,18 @@ class MarketIntelligenceEngine:
                     enhanced = self.calculate_enhanced_regime(recent_primary, recent_secondary)
 
                     # Structure scores from enhanced detection
-                    regime_scores['trending'] = enhanced.get('trend_score', 0.5)
-                    regime_scores['ranging'] = max(0, 1.0 - regime_scores['trending'])
+                    # FIX: trend_score is nested in 'scores' dict, not top-level
+                    scores = enhanced.get('scores', {})
+                    regime_scores['trending'] = scores.get('trending', 0.5)
+                    regime_scores['ranging'] = scores.get('ranging', 0.5)
 
                     # Store structure regime separately (not mixed with volatility)
                     structure_regime = enhanced.get('structure_regime', 'ranging')
 
                     # Volatility as separate dimension (not competing with structure)
-                    vol_data = enhanced.get('volatility', {})
-                    volatility_level = vol_data.get('regime', 'medium')
-                    vol_score = vol_data.get('score', 0.5)
+                    vol_details = enhanced.get('volatility_details', {})
+                    volatility_level = enhanced.get('volatility_regime', 'medium')
+                    vol_score = vol_details.get('volatility_score', 0.5)
 
                     # Still populate volatility scores for compatibility, but they won't dominate
                     regime_scores['high_volatility'] = vol_score if vol_score > 0.6 else 0.0
