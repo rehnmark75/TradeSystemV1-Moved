@@ -1,32 +1,35 @@
 #!/usr/bin/env python3
 """
-Volume Profile Strategy - HVN/POC-Based Trading with Session Edge
+Volume Profile Strategy v4.0 - Regime-Aware with Signal Qualification
 
-VERSION: 3.0.0
-DATE: 2026-02-01
+VERSION: 4.0.0
+DATE: 2026-02-02
 STATUS: Active (backtest-only by default)
 
-Strategy Architecture:
-    - High Volume Nodes (HVN): Support/resistance at high volume areas
-    - Point of Control (POC): Mean reversion to highest volume price
-    - Value Area: Trade boundaries at 70% volume coverage
-    - Session Filter: 66.7% Asian session edge discovered
+Architecture:
+    1. DETECTION: Volume profile signals (HVN bounce, POC reversion, VA breakout)
+    2. QUALIFICATION: Score signal quality (0-100) based on multiple factors
+    3. DECISION: Execute only if quality score meets threshold
 
-Target Performance:
-    - Win Rate: 55%+ (66.7% in Asian session)
-    - Profit Factor: 1.8+
-    - Average R:R: 1.5:1
+Key Features:
+    - Regime-Aware: Trusts multi-strategy routing for high_volatility/breakout
+    - Per-Pair Tuning: All parameters configurable per epic
+    - Signal Qualification: Quality scoring system for trade selection
+    - Session Edge: 66.7% Asian session win rate bonus
 
-Market Regime:
-    - Primary: High volatility, breakout conditions
-    - Edge: Asian session (low volatility consolidation)
+Qualification Factors (configurable weights):
+    - Signal Type Strength: HVN bounce vs POC vs VA breakout (0-25 points)
+    - Level Proximity: How close to key level (0-25 points)
+    - Volume Confirmation: Node strength (0-20 points)
+    - Session Bonus: Asian session edge (0-20 points)
+    - Trend Alignment: Direction with recent trend (0-10 points)
 """
 
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 import logging
-from datetime import datetime, timedelta, timezone, time
+from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 import os
 
@@ -43,16 +46,26 @@ from .strategy_registry import register_strategy, StrategyInterface
 @dataclass
 class VolumeProfileConfig:
     """
-    Configuration for Volume Profile strategy.
+    Configuration for Volume Profile strategy v4.0.
 
-    Loaded from database (strategy_config.volume_profile_global_config).
+    All parameters support per-pair overrides via database.
     """
 
     # Strategy identification
     strategy_name: str = "VOLUME_PROFILE"
-    version: str = "3.0.0"
+    version: str = "4.0.0"
 
-    # Volume Profile Settings
+    # ==========================================================================
+    # REGIME INTEGRATION (v4.0)
+    # ==========================================================================
+
+    # When True, trusts multi-strategy routing
+    trust_regime_routing: bool = True
+
+    # ==========================================================================
+    # VOLUME PROFILE SETTINGS
+    # ==========================================================================
+
     vp_lookback_bars: int = 100
     vp_value_area_percent: float = 70.0
     hvn_threshold_percentile: int = 80
@@ -71,37 +84,127 @@ class VolumeProfileConfig:
     hvn_bounce_enabled: bool = True
     hvn_bounce_proximity_pips: float = 5.0
 
-    # Session Filters (Asian session edge)
-    asian_session_boost: float = 1.15  # 15% confidence boost
-    london_session_boost: float = 1.0
-    ny_session_boost: float = 1.0
-    asian_session_start: int = 0   # 00:00 UTC
-    asian_session_end: int = 8     # 08:00 UTC
-    london_session_start: int = 7  # 07:00 UTC
-    london_session_end: int = 16   # 16:00 UTC
-    ny_session_start: int = 12     # 12:00 UTC
-    ny_session_end: int = 21       # 21:00 UTC
+    # ==========================================================================
+    # SIGNAL QUALIFICATION WEIGHTS (v4.0)
+    # ==========================================================================
 
-    # Timeframes
-    primary_timeframe: str = "15m"
-    profile_timeframe: str = "1h"
+    # Quality score weights (must sum to 100)
+    weight_signal_type: int = 25        # HVN bounce strongest, then POC, then VA
+    weight_level_proximity: int = 25    # Closer to level = higher score
+    weight_volume_strength: int = 20    # HVN volume strength
+    weight_session_bonus: int = 20      # Asian session edge
+    weight_trend_alignment: int = 10    # Direction with recent trend
 
-    # Risk Management
+    # Minimum quality score to generate signal (0-100)
+    min_quality_score: int = 50
+
+    # High quality threshold for boosted confidence
+    high_quality_threshold: int = 75
+
+    # Signal type base scores (out of weight_signal_type max)
+    hvn_bounce_base_score: int = 25     # Best signal type
+    poc_reversion_base_score: int = 20  # Good signal type
+    va_breakout_base_score: int = 15    # Weaker signal type
+
+    # ==========================================================================
+    # SESSION CONFIGURATION
+    # ==========================================================================
+
+    asian_session_start: int = 0
+    asian_session_end: int = 8
+    london_session_start: int = 7
+    london_session_end: int = 16
+    ny_session_start: int = 12
+    ny_session_end: int = 21
+
+    # Session quality bonuses (0-20 scale)
+    asian_session_bonus: int = 20       # Best for volume profile (66.7% WR)
+    london_session_bonus: int = 10      # Moderate
+    ny_session_bonus: int = 10          # Moderate
+    overlap_session_bonus: int = 5      # Worst for this strategy
+
+    # Legacy boost multiplier (for backwards compatibility)
+    asian_session_boost: float = 1.15
+
+    # ==========================================================================
+    # RISK MANAGEMENT
+    # ==========================================================================
+
     fixed_stop_loss_pips: float = 15.0
     fixed_take_profit_pips: float = 22.0
-    min_confidence: float = 0.50
+    min_confidence: float = 0.40
     max_confidence: float = 0.85
     sl_buffer_pips: float = 2.0
 
-    # Cooldown
-    signal_cooldown_minutes: int = 60
+    # ==========================================================================
+    # TIMEFRAMES & COOLDOWN
+    # ==========================================================================
 
-    # Enabled pairs
+    primary_timeframe: str = "15m"
+    profile_timeframe: str = "1h"
+    signal_cooldown_minutes: int = 45
+
+    # ==========================================================================
+    # PAIR CONFIGURATION
+    # ==========================================================================
+
     enabled_pairs: List[str] = field(default_factory=list)
+    _pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+
+    # ==========================================================================
+    # PER-PAIR GETTER METHODS
+    # ==========================================================================
+
+    def get_for_pair(self, epic: str, param_name: str, default: Any = None) -> Any:
+        """Generic per-pair parameter getter with JSONB fallback."""
+        if epic in self._pair_overrides:
+            override_data = self._pair_overrides[epic]
+            if param_name in override_data and override_data[param_name] is not None:
+                return override_data[param_name]
+            param_overrides = override_data.get('parameter_overrides', {})
+            if param_overrides and param_name in param_overrides:
+                return param_overrides[param_name]
+        if hasattr(self, param_name):
+            return getattr(self, param_name)
+        return default
+
+    def get_pair_fixed_stop_loss(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'fixed_stop_loss_pips', self.fixed_stop_loss_pips))
+
+    def get_pair_fixed_take_profit(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'fixed_take_profit_pips', self.fixed_take_profit_pips))
+
+    def get_pair_min_confidence(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'min_confidence', self.min_confidence))
+
+    def get_pair_max_confidence(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'max_confidence', self.max_confidence))
+
+    def get_pair_min_quality_score(self, epic: str) -> int:
+        return int(self.get_for_pair(epic, 'min_quality_score', self.min_quality_score))
+
+    def get_pair_asian_session_bonus(self, epic: str) -> int:
+        return int(self.get_for_pair(epic, 'asian_session_bonus', self.asian_session_bonus))
+
+    def get_pair_poc_proximity_pips(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'poc_proximity_pips', self.poc_proximity_pips))
+
+    def get_pair_hvn_proximity_pips(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'hvn_bounce_proximity_pips', self.hvn_bounce_proximity_pips))
+
+    def get_pair_va_proximity_pips(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'va_high_proximity_pips', self.va_high_proximity_pips))
+
+    def is_pair_enabled(self, epic: str) -> bool:
+        if epic in self._pair_overrides:
+            return self._pair_overrides[epic].get('is_enabled', True)
+        if self.enabled_pairs:
+            return epic in self.enabled_pairs
+        return True
 
     @classmethod
     def from_database(cls, database_url: str = None) -> 'VolumeProfileConfig':
-        """Load configuration from database"""
+        """Load configuration from database including per-pair overrides."""
         config = cls()
 
         if database_url is None:
@@ -114,6 +217,7 @@ class VolumeProfileConfig:
             conn = psycopg2.connect(database_url)
             cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
 
+            # Load global config
             cur.execute("""
                 SELECT * FROM volume_profile_global_config
                 WHERE is_active = TRUE
@@ -122,42 +226,92 @@ class VolumeProfileConfig:
             row = cur.fetchone()
 
             if row:
-                field_mapping = {
-                    'vp_lookback_bars': 'vp_lookback_bars',
-                    'vp_value_area_percent': 'vp_value_area_percent',
-                    'poc_proximity_pips': 'poc_proximity_pips',
-                    'poc_reversion_enabled': 'poc_reversion_enabled',
-                    'hvn_bounce_enabled': 'hvn_bounce_enabled',
-                    'hvn_bounce_proximity_pips': 'hvn_bounce_proximity_pips',
-                    'asian_session_boost': 'asian_session_boost',
-                    'london_session_boost': 'london_session_boost',
-                    'ny_session_boost': 'ny_session_boost',
-                    'fixed_stop_loss_pips': 'fixed_stop_loss_pips',
-                    'fixed_take_profit_pips': 'fixed_take_profit_pips',
-                    'min_confidence': 'min_confidence',
-                    'max_confidence': 'max_confidence',
-                }
-
-                for db_col, attr_name in field_mapping.items():
-                    if db_col in row.keys() and row[db_col] is not None:
-                        value = row[db_col]
-                        # Convert Decimal to appropriate Python type
+                for key in row.keys():
+                    if hasattr(config, key) and row[key] is not None:
+                        value = row[key]
                         if hasattr(value, '__float__'):
-                            # Check if it should be an int based on the default type
-                            default_val = getattr(cls, attr_name, None)
+                            default_val = getattr(cls, key, None)
                             if isinstance(default_val, int):
                                 value = int(value)
                             else:
                                 value = float(value)
-                        setattr(config, attr_name, value)
+                        elif isinstance(value, bool):
+                            value = bool(value)
+                        setattr(config, key, value)
+
+            # Load per-pair overrides
+            cur.execute("""
+                SELECT * FROM volume_profile_pair_overrides
+                WHERE is_enabled = TRUE
+            """)
+            override_rows = cur.fetchall()
+
+            config._pair_overrides = {}
+            for override_row in override_rows:
+                epic = override_row['epic']
+                config._pair_overrides[epic] = dict(override_row)
+
+            if override_rows:
+                logging.info(f"[VOLUME_PROFILE] Loaded {len(config._pair_overrides)} pair overrides")
 
             cur.close()
             conn.close()
 
         except Exception as e:
-            logging.warning(f"Could not load Volume Profile config from database: {e}")
+            logging.warning(f"[VOLUME_PROFILE] Could not load from database: {e}")
 
         return config
+
+
+# ==============================================================================
+# SIGNAL QUALIFICATION RESULT
+# ==============================================================================
+
+@dataclass
+class SignalQualification:
+    """Result of signal qualification assessment."""
+
+    is_qualified: bool
+    quality_score: int
+    direction: str
+    signal_type: str  # HVN_BOUNCE, POC_REVERSION, VA_BREAKOUT
+
+    # Component scores
+    signal_type_score: int = 0
+    level_proximity_score: int = 0
+    volume_strength_score: int = 0
+    session_bonus_score: int = 0
+    trend_alignment_score: int = 0
+
+    # Details
+    session: str = ""
+    level_distance_pips: Optional[float] = None
+    volume_node_strength: Optional[float] = None
+    key_level: Optional[float] = None
+
+    rejection_reason: Optional[str] = None
+
+    def to_dict(self) -> Dict:
+        return {
+            'is_qualified': self.is_qualified,
+            'quality_score': self.quality_score,
+            'direction': self.direction,
+            'signal_type': self.signal_type,
+            'scores': {
+                'signal_type': self.signal_type_score,
+                'level_proximity': self.level_proximity_score,
+                'volume_strength': self.volume_strength_score,
+                'session_bonus': self.session_bonus_score,
+                'trend_alignment': self.trend_alignment_score
+            },
+            'details': {
+                'session': self.session,
+                'level_distance_pips': self.level_distance_pips,
+                'volume_node_strength': self.volume_node_strength,
+                'key_level': self.key_level
+            },
+            'rejection_reason': self.rejection_reason
+        }
 
 
 # ==============================================================================
@@ -165,7 +319,7 @@ class VolumeProfileConfig:
 # ==============================================================================
 
 class VolumeProfileConfigService:
-    """Singleton service for loading and caching Volume Profile configuration."""
+    """Singleton service for loading and caching configuration."""
 
     _instance: Optional['VolumeProfileConfigService'] = None
     _config: Optional[VolumeProfileConfig] = None
@@ -191,20 +345,20 @@ class VolumeProfileConfigService:
         return cls._instance
 
     def get_config(self) -> VolumeProfileConfig:
-        """Get configuration with caching"""
         now = datetime.now()
-
         if (self._config is None or
             self._last_refresh is None or
             (now - self._last_refresh).seconds > self._cache_ttl_seconds):
             self._config = VolumeProfileConfig.from_database()
             self._last_refresh = now
-
         return self._config
+
+    def refresh(self) -> VolumeProfileConfig:
+        self._config = None
+        return self.get_config()
 
 
 def get_volume_profile_config() -> VolumeProfileConfig:
-    """Convenience function to get Volume Profile configuration"""
     return VolumeProfileConfigService.get_instance().get_config()
 
 
@@ -215,43 +369,36 @@ def get_volume_profile_config() -> VolumeProfileConfig:
 @register_strategy('VOLUME_PROFILE')
 class VolumeProfileStrategy(StrategyInterface):
     """
-    Volume Profile Strategy Implementation
+    Volume Profile Strategy v4.0 with Signal Qualification
 
-    Uses Volume Profile analysis for entry points:
-    - HVN Bounce: Trade bounces from high volume nodes
-    - POC Reversion: Mean reversion to Point of Control
-    - Value Area: Trade at 70% volume boundaries
-
-    Special edge: 66.7% win rate discovered in Asian session.
+    Three-phase approach:
+    1. DETECT: Find volume profile signals (HVN, POC, VA)
+    2. QUALIFY: Score signal quality (0-100)
+    3. DECIDE: Generate signal only if quality meets threshold
     """
 
     def __init__(self, config=None, logger=None, db_manager=None):
-        """Initialize Volume Profile Strategy"""
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
-
-        # Load configuration
         self.config = get_volume_profile_config()
 
-        # Cooldown tracking
         self._cooldowns: Dict[str, datetime] = {}
-        self._pending_rejections: List[Dict] = []
-
-        # Volume profile cache
+        self._rejection_log: List[Dict] = []
         self._profile_cache: Dict[str, Dict] = {}
-        self._cache_expiry: Dict[str, datetime] = {}
 
-        self.logger.info(f"Volume Profile Strategy v{self.config.version} initialized")
+        self.logger.info(f"[VOLUME_PROFILE] Strategy v{self.config.version} initialized")
+        self.logger.info(f"[VOLUME_PROFILE] Min quality score: {self.config.min_quality_score}")
 
     @property
     def strategy_name(self) -> str:
         return "VOLUME_PROFILE"
 
     def get_required_timeframes(self) -> List[str]:
-        return [
-            self.config.profile_timeframe,
-            self.config.primary_timeframe
-        ]
+        return [self.config.profile_timeframe, self.config.primary_timeframe]
+
+    # ==========================================================================
+    # MAIN ENTRY POINT
+    # ==========================================================================
 
     def detect_signal(
         self,
@@ -260,98 +407,91 @@ class VolumeProfileStrategy(StrategyInterface):
         epic: str = "",
         pair: str = "",
         df_entry: pd.DataFrame = None,
-        current_timestamp: datetime = None,
+        current_timestamp: Optional[datetime] = None,
+        routing_context: Optional[Dict] = None,
         **kwargs
     ) -> Optional[Dict]:
         """
-        Detect trading signal using Volume Profile analysis.
-
-        Args:
-            current_timestamp: For backtest mode - use this instead of datetime.now()
+        Detect and qualify trading signal.
         """
+        self._current_timestamp = current_timestamp
         df = df_trigger if df_trigger is not None else df_entry
 
         if df is None or len(df) < self.config.vp_lookback_bars:
-            self.logger.debug(f"[VOLUME_PROFILE] Insufficient data for {epic}")
             return None
 
-        # Check enabled pairs
-        if self.config.enabled_pairs and epic not in self.config.enabled_pairs:
+        if not self.config.is_pair_enabled(epic):
             return None
 
-        # Check cooldown (use backtest timestamp if provided)
-        if not self._check_cooldown(epic, current_timestamp):
+        if not self._check_cooldown(epic):
             return None
 
-        # Get current session for boost (use backtest timestamp if provided)
-        session = self._get_current_session(current_timestamp)
-        session_boost = self._get_session_boost(session)
-
-        # Calculate Volume Profile
-        profile = self._calculate_volume_profile(df)
+        # Phase 1: Calculate volume profile
+        profile = self._calculate_volume_profile(df, epic)
         if profile is None:
             return None
 
-        # Get current price
-        latest = df.iloc[-1]
-        current_price = float(latest['close'])
+        current_price = float(df['close'].iloc[-1])
 
-        # Check for trading signals
-        signal = None
-
-        # 1. Check HVN Bounce
-        if self.config.hvn_bounce_enabled:
-            signal = self._check_hvn_bounce(profile, current_price, epic)
-
-        # 2. Check POC Reversion
-        if signal is None and self.config.poc_reversion_enabled:
-            signal = self._check_poc_reversion(profile, current_price, epic)
-
-        # 3. Check Value Area Breakout
-        if signal is None and self.config.va_breakout_enabled:
-            signal = self._check_va_breakout(profile, current_price, df, epic)
-
-        if signal is None:
+        # Phase 2: Detect potential signals
+        signal_candidates = self._detect_all_signals(profile, current_price, df, epic)
+        if not signal_candidates:
+            self._log_rejection(epic, "NO_VP_SIGNALS")
             return None
 
-        # Apply session boost
-        base_confidence = signal['confidence']
-        boosted_confidence = min(base_confidence * session_boost, self.config.max_confidence)
+        # Phase 3: Qualify each signal and pick best
+        best_qualification = None
+        best_signal_data = None
 
-        # Build final signal
-        result = self._build_signal(
+        for signal_data in signal_candidates:
+            qualification = self._qualify_signal(
+                epic=epic,
+                df=df,
+                signal_data=signal_data,
+                profile=profile,
+                current_timestamp=current_timestamp
+            )
+
+            if qualification.is_qualified:
+                if best_qualification is None or qualification.quality_score > best_qualification.quality_score:
+                    best_qualification = qualification
+                    best_signal_data = signal_data
+
+        if best_qualification is None:
+            self._log_rejection(epic, "ALL_SIGNALS_LOW_QUALITY")
+            return None
+
+        # Phase 4: Build qualified signal
+        confidence = self._quality_to_confidence(best_qualification.quality_score, epic)
+
+        signal = self._build_signal(
             epic=epic,
             pair=pair,
-            direction=signal['direction'],
+            direction=best_qualification.direction,
             entry_price=current_price,
-            sl_pips=self.config.fixed_stop_loss_pips,
-            tp_pips=self.config.fixed_take_profit_pips,
-            confidence=boosted_confidence,
-            indicators={
-                'signal_type': signal['type'],
-                'session': session,
-                'session_boost': session_boost,
-                'poc': profile['poc'],
-                'vah': profile['vah'],
-                'val': profile['val']
-            }
+            sl_pips=self.config.get_pair_fixed_stop_loss(epic),
+            tp_pips=self.config.get_pair_fixed_take_profit(epic),
+            confidence=confidence,
+            qualification=best_qualification,
+            profile=profile
         )
 
-        self._set_cooldown(epic, current_timestamp)
+        self._set_cooldown(epic)
 
         self.logger.info(
-            f"[VOLUME_PROFILE] ✅ {signal['type']}: {signal['direction']} {epic} "
-            f"(session={session}, boost={session_boost:.2f}, conf={boosted_confidence:.2f})"
+            f"[VOLUME_PROFILE] ✅ QUALIFIED SIGNAL: {best_qualification.direction} {epic} "
+            f"(type={best_qualification.signal_type}, quality={best_qualification.quality_score}, "
+            f"session={best_qualification.session})"
         )
 
-        return result
+        return signal
 
-    # =========================================================================
-    # VOLUME PROFILE CALCULATIONS
-    # =========================================================================
+    # ==========================================================================
+    # PHASE 1: VOLUME PROFILE CALCULATION
+    # ==========================================================================
 
-    def _calculate_volume_profile(self, df: pd.DataFrame) -> Optional[Dict]:
-        """Calculate Volume Profile including POC, VAH, VAL, and HVNs"""
+    def _calculate_volume_profile(self, df: pd.DataFrame, epic: str) -> Optional[Dict]:
+        """Calculate Volume Profile including POC, VAH, VAL, and HVNs."""
         try:
             lookback = self.config.vp_lookback_bars
             data = df.tail(lookback).copy()
@@ -359,7 +499,6 @@ class VolumeProfileStrategy(StrategyInterface):
             if len(data) < 20:
                 return None
 
-            # Get price range
             high = float(data['high'].max())
             low = float(data['low'].min())
             price_range = high - low
@@ -367,44 +506,38 @@ class VolumeProfileStrategy(StrategyInterface):
             if price_range <= 0:
                 return None
 
-            # Create price bins (use typical price)
             n_bins = 50
             data['typical_price'] = (data['high'] + data['low'] + data['close']) / 3
 
-            # Use tick volume if available, otherwise simulate
             if 'volume' in data.columns and data['volume'].sum() > 0:
                 volume = data['volume']
             else:
-                # Simulate volume using range as proxy
                 volume = (data['high'] - data['low']).abs()
 
-            # Bin volumes by price level
             price_bins = np.linspace(low, high, n_bins + 1)
             volume_by_price = np.zeros(n_bins)
 
             for i, row in data.iterrows():
                 tp = row['typical_price']
                 vol = volume.loc[i] if hasattr(volume, 'loc') else 1.0
-
                 bin_idx = int((tp - low) / price_range * (n_bins - 1))
                 bin_idx = max(0, min(n_bins - 1, bin_idx))
                 volume_by_price[bin_idx] += vol
 
-            # Find POC (Point of Control) - highest volume price
+            # POC
             poc_idx = np.argmax(volume_by_price)
             poc = (price_bins[poc_idx] + price_bins[poc_idx + 1]) / 2
+            poc_volume = volume_by_price[poc_idx]
 
-            # Calculate Value Area (70% of volume)
+            # Value Area
             total_volume = volume_by_price.sum()
             target_volume = total_volume * (self.config.vp_value_area_percent / 100)
 
-            # Expand from POC to capture 70%
             captured_volume = volume_by_price[poc_idx]
             low_idx = poc_idx
             high_idx = poc_idx
 
             while captured_volume < target_volume:
-                # Check which side to expand
                 low_add = volume_by_price[low_idx - 1] if low_idx > 0 else 0
                 high_add = volume_by_price[high_idx + 1] if high_idx < n_bins - 1 else 0
 
@@ -417,61 +550,100 @@ class VolumeProfileStrategy(StrategyInterface):
                 else:
                     break
 
-            vah = (price_bins[high_idx] + price_bins[high_idx + 1]) / 2  # Value Area High
-            val = (price_bins[low_idx] + price_bins[low_idx + 1]) / 2    # Value Area Low
+            vah = (price_bins[high_idx] + price_bins[high_idx + 1]) / 2
+            val = (price_bins[low_idx] + price_bins[low_idx + 1]) / 2
 
-            # Find High Volume Nodes
+            # HVNs
             hvn_threshold = np.percentile(volume_by_price, self.config.hvn_threshold_percentile)
+            max_volume = volume_by_price.max()
             hvns = []
             for i in range(n_bins):
                 if volume_by_price[i] >= hvn_threshold:
                     price = (price_bins[i] + price_bins[i + 1]) / 2
-                    hvns.append({'price': price, 'volume': volume_by_price[i]})
+                    strength = volume_by_price[i] / max_volume if max_volume > 0 else 0
+                    hvns.append({'price': price, 'volume': volume_by_price[i], 'strength': strength})
 
             return {
                 'poc': poc,
+                'poc_volume': poc_volume,
                 'vah': vah,
                 'val': val,
                 'hvns': hvns,
                 'high': high,
-                'low': low
+                'low': low,
+                'total_volume': total_volume,
+                'max_volume': max_volume
             }
 
         except Exception as e:
-            self.logger.warning(f"Error calculating volume profile: {e}")
+            self.logger.warning(f"[VOLUME_PROFILE] Profile calc error: {e}")
             return None
+
+    # ==========================================================================
+    # PHASE 2: SIGNAL DETECTION
+    # ==========================================================================
+
+    def _detect_all_signals(
+        self,
+        profile: Dict,
+        current_price: float,
+        df: pd.DataFrame,
+        epic: str
+    ) -> List[Dict]:
+        """Detect all potential signals from volume profile."""
+        signals = []
+        pip_value = 0.01 if 'JPY' in epic else 0.0001
+
+        # Check HVN Bounce
+        if self.config.hvn_bounce_enabled:
+            hvn_signal = self._check_hvn_bounce(profile, current_price, epic, pip_value)
+            if hvn_signal:
+                signals.append(hvn_signal)
+
+        # Check POC Reversion
+        if self.config.poc_reversion_enabled:
+            poc_signal = self._check_poc_reversion(profile, current_price, epic, pip_value)
+            if poc_signal:
+                signals.append(poc_signal)
+
+        # Check VA Breakout
+        if self.config.va_breakout_enabled:
+            va_signal = self._check_va_breakout(profile, current_price, df, epic, pip_value)
+            if va_signal:
+                signals.append(va_signal)
+
+        return signals
 
     def _check_hvn_bounce(
         self,
         profile: Dict,
         current_price: float,
-        epic: str
+        epic: str,
+        pip_value: float
     ) -> Optional[Dict]:
-        """Check for HVN bounce signal"""
-        pip_value = 0.01 if 'JPY' in epic else 0.0001
-        proximity_price = self.config.hvn_bounce_proximity_pips * pip_value
+        """Check for HVN bounce signal."""
+        proximity = self.config.get_pair_hvn_proximity_pips(epic) * pip_value
 
         for hvn in profile['hvns']:
             hvn_price = hvn['price']
             distance = abs(current_price - hvn_price)
 
-            if distance <= proximity_price:
-                # Near HVN - check if bounce
+            if distance <= proximity:
                 if current_price > hvn_price:
-                    # Price above HVN, potential support bounce
                     return {
-                        'direction': 'BUY',
                         'type': 'HVN_BOUNCE',
-                        'confidence': 0.60,
-                        'hvn_price': hvn_price
+                        'direction': 'BUY',
+                        'level': hvn_price,
+                        'distance_pips': distance / pip_value,
+                        'volume_strength': hvn['strength']
                     }
                 else:
-                    # Price below HVN, potential resistance bounce
                     return {
-                        'direction': 'SELL',
                         'type': 'HVN_BOUNCE',
-                        'confidence': 0.60,
-                        'hvn_price': hvn_price
+                        'direction': 'SELL',
+                        'level': hvn_price,
+                        'distance_pips': distance / pip_value,
+                        'volume_strength': hvn['strength']
                     }
 
         return None
@@ -480,32 +652,35 @@ class VolumeProfileStrategy(StrategyInterface):
         self,
         profile: Dict,
         current_price: float,
-        epic: str
+        epic: str,
+        pip_value: float
     ) -> Optional[Dict]:
-        """Check for POC mean reversion signal"""
-        pip_value = 0.01 if 'JPY' in epic else 0.0001
+        """Check for POC mean reversion signal."""
         poc = profile['poc']
         vah = profile['vah']
         val = profile['val']
+        proximity = self.config.get_pair_poc_proximity_pips(epic) * pip_value
 
-        # Check if price is outside value area and near boundary
-        proximity = self.config.poc_proximity_pips * pip_value
-
+        # Price at VAH, expect reversion to POC
         if current_price >= vah - proximity and current_price > poc:
-            # Price at VAH, expect reversion to POC
             return {
+                'type': 'POC_REVERSION',
                 'direction': 'SELL',
-                'type': 'POC_REVERSION',
-                'confidence': 0.55,
-                'target': poc
+                'level': vah,
+                'target': poc,
+                'distance_pips': abs(current_price - vah) / pip_value,
+                'volume_strength': profile['poc_volume'] / profile['max_volume'] if profile['max_volume'] > 0 else 0.5
             }
+
+        # Price at VAL, expect reversion to POC
         elif current_price <= val + proximity and current_price < poc:
-            # Price at VAL, expect reversion to POC
             return {
-                'direction': 'BUY',
                 'type': 'POC_REVERSION',
-                'confidence': 0.55,
-                'target': poc
+                'direction': 'BUY',
+                'level': val,
+                'target': poc,
+                'distance_pips': abs(current_price - val) / pip_value,
+                'volume_strength': profile['poc_volume'] / profile['max_volume'] if profile['max_volume'] > 0 else 0.5
             }
 
         return None
@@ -515,75 +690,161 @@ class VolumeProfileStrategy(StrategyInterface):
         profile: Dict,
         current_price: float,
         df: pd.DataFrame,
-        epic: str
+        epic: str,
+        pip_value: float
     ) -> Optional[Dict]:
-        """Check for Value Area breakout signal"""
-        pip_value = 0.01 if 'JPY' in epic else 0.0001
-        proximity = self.config.va_high_proximity_pips * pip_value
-
+        """Check for Value Area breakout signal."""
+        proximity = self.config.get_pair_va_proximity_pips(epic) * pip_value
         vah = profile['vah']
         val = profile['val']
 
-        # Check recent candles for breakout confirmation
         recent_closes = df['close'].tail(3)
         prev_close = float(recent_closes.iloc[-2])
 
         # Breakout above VAH
         if current_price > vah + proximity and prev_close <= vah:
             return {
-                'direction': 'BUY',
                 'type': 'VA_BREAKOUT',
-                'confidence': 0.58,
-                'breakout_level': vah
+                'direction': 'BUY',
+                'level': vah,
+                'distance_pips': (current_price - vah) / pip_value,
+                'volume_strength': 0.5  # Breakouts use fixed strength
             }
 
         # Breakdown below VAL
         if current_price < val - proximity and prev_close >= val:
             return {
-                'direction': 'SELL',
                 'type': 'VA_BREAKOUT',
-                'confidence': 0.58,
-                'breakout_level': val
+                'direction': 'SELL',
+                'level': val,
+                'distance_pips': (val - current_price) / pip_value,
+                'volume_strength': 0.5
             }
 
         return None
 
-    # =========================================================================
-    # SESSION HANDLING
-    # =========================================================================
+    # ==========================================================================
+    # PHASE 3: SIGNAL QUALIFICATION
+    # ==========================================================================
 
-    def _get_current_session(self, current_timestamp: datetime = None) -> str:
-        """Get current trading session based on UTC time"""
-        now = current_timestamp if current_timestamp else datetime.now(timezone.utc)
+    def _qualify_signal(
+        self,
+        epic: str,
+        df: pd.DataFrame,
+        signal_data: Dict,
+        profile: Dict,
+        current_timestamp: Optional[datetime] = None
+    ) -> SignalQualification:
+        """Score signal quality on multiple factors."""
+
+        signal_type = signal_data['type']
+        direction = signal_data['direction']
+
+        # 1. Signal Type Score (0-25)
+        if signal_type == 'HVN_BOUNCE':
+            type_score = self.config.hvn_bounce_base_score
+        elif signal_type == 'POC_REVERSION':
+            type_score = self.config.poc_reversion_base_score
+        else:  # VA_BREAKOUT
+            type_score = self.config.va_breakout_base_score
+
+        # 2. Level Proximity Score (0-25)
+        distance_pips = signal_data.get('distance_pips', 10)
+        max_distance = 15.0  # Max distance for any score
+        if distance_pips <= max_distance:
+            proximity_ratio = 1.0 - (distance_pips / max_distance)
+            proximity_score = int(proximity_ratio * self.config.weight_level_proximity)
+        else:
+            proximity_score = 0
+
+        # 3. Volume Strength Score (0-20)
+        volume_strength = signal_data.get('volume_strength', 0.5)
+        volume_score = int(volume_strength * self.config.weight_volume_strength)
+
+        # 4. Session Bonus Score (0-20)
+        session, session_score = self._calc_session_score(current_timestamp, epic)
+
+        # 5. Trend Alignment Score (0-10)
+        trend_score = self._calc_trend_alignment_score(df, direction)
+
+        # Total quality score
+        quality_score = type_score + proximity_score + volume_score + session_score + trend_score
+
+        # Check against threshold
+        min_quality = self.config.get_pair_min_quality_score(epic)
+        is_qualified = quality_score >= min_quality
+
+        rejection_reason = None
+        if not is_qualified:
+            rejection_reason = f"Quality {quality_score} < min {min_quality}"
+
+        return SignalQualification(
+            is_qualified=is_qualified,
+            quality_score=quality_score,
+            direction=direction,
+            signal_type=signal_type,
+            signal_type_score=type_score,
+            level_proximity_score=proximity_score,
+            volume_strength_score=volume_score,
+            session_bonus_score=session_score,
+            trend_alignment_score=trend_score,
+            session=session,
+            level_distance_pips=distance_pips,
+            volume_node_strength=volume_strength,
+            key_level=signal_data.get('level'),
+            rejection_reason=rejection_reason
+        )
+
+    def _calc_session_score(self, current_timestamp: Optional[datetime], epic: str) -> Tuple[str, int]:
+        """Calculate session bonus score."""
+        now = current_timestamp or datetime.now(timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         hour = now.hour
 
-        # Check sessions (can overlap)
         if self.config.asian_session_start <= hour < self.config.asian_session_end:
-            return 'asian'
-        elif self.config.london_session_start <= hour < self.config.london_session_end:
-            if self.config.ny_session_start <= hour < self.config.london_session_end:
-                return 'overlap'
-            return 'london'
+            return 'asian', self.config.get_pair_asian_session_bonus(epic)
+        elif self.config.london_session_start <= hour < self.config.ny_session_start:
+            return 'london', self.config.london_session_bonus
+        elif self.config.ny_session_start <= hour < self.config.london_session_end:
+            return 'overlap', self.config.overlap_session_bonus
         elif self.config.ny_session_start <= hour < self.config.ny_session_end:
-            return 'new_york'
+            return 'new_york', self.config.ny_session_bonus
+        else:
+            return 'off_hours', 0
 
-        return 'off_hours'
+    def _calc_trend_alignment_score(self, df: pd.DataFrame, direction: str) -> int:
+        """Calculate trend alignment score based on recent price action."""
+        try:
+            # Simple trend: compare last close to 20-bar SMA
+            sma = df['close'].tail(20).mean()
+            current = float(df['close'].iloc[-1])
 
-    def _get_session_boost(self, session: str) -> float:
-        """Get confidence boost for current session"""
-        if session == 'asian':
-            return self.config.asian_session_boost
-        elif session == 'london':
-            return self.config.london_session_boost
-        elif session == 'new_york' or session == 'overlap':
-            return self.config.ny_session_boost
-        return 1.0
+            if direction == 'BUY' and current > sma:
+                return self.config.weight_trend_alignment
+            elif direction == 'SELL' and current < sma:
+                return self.config.weight_trend_alignment
+            else:
+                return self.config.weight_trend_alignment // 2  # Half points for counter-trend
 
-    # =========================================================================
-    # SIGNAL BUILDING
-    # =========================================================================
+        except Exception:
+            return 5  # Neutral
+
+    # ==========================================================================
+    # PHASE 4: SIGNAL BUILDING
+    # ==========================================================================
+
+    def _quality_to_confidence(self, quality_score: int, epic: str) -> float:
+        """Map quality score (0-100) to confidence."""
+        min_conf = self.config.get_pair_min_confidence(epic)
+        max_conf = self.config.get_pair_max_confidence(epic)
+        min_quality = self.config.get_pair_min_quality_score(epic)
+
+        ratio = (quality_score - min_quality) / (100 - min_quality)
+        ratio = max(0, min(1, ratio))
+
+        confidence = min_conf + (ratio * (max_conf - min_conf))
+        return round(confidence, 3)
 
     def _build_signal(
         self,
@@ -594,9 +855,10 @@ class VolumeProfileStrategy(StrategyInterface):
         sl_pips: float,
         tp_pips: float,
         confidence: float,
-        **kwargs
+        qualification: SignalQualification,
+        profile: Dict
     ) -> Dict:
-        """Build standardized signal dictionary"""
+        """Build standardized signal dictionary."""
         now = datetime.now(timezone.utc)
 
         return {
@@ -613,19 +875,28 @@ class VolumeProfileStrategy(StrategyInterface):
             'signal_timestamp': now.isoformat(),
             'timestamp': now,
             'version': self.config.version,
-            'strategy_indicators': kwargs.get('indicators', {})
+
+            'quality_score': qualification.quality_score,
+            'qualification': qualification.to_dict(),
+
+            'strategy_indicators': {
+                'signal_type': qualification.signal_type,
+                'session': qualification.session,
+                'poc': profile['poc'],
+                'vah': profile['vah'],
+                'val': profile['val'],
+                'level_distance_pips': qualification.level_distance_pips
+            }
         }
 
-    # =========================================================================
-    # COOLDOWN MANAGEMENT
-    # =========================================================================
+    # ==========================================================================
+    # UTILITIES
+    # ==========================================================================
 
-    def _check_cooldown(self, epic: str, current_timestamp: datetime = None) -> bool:
-        """Check if epic is on cooldown. Uses current_timestamp for backtest mode."""
+    def _check_cooldown(self, epic: str) -> bool:
         if epic not in self._cooldowns:
             return True
-        # Use backtest timestamp if provided, otherwise real time
-        now = current_timestamp if current_timestamp else datetime.now(timezone.utc)
+        now = getattr(self, '_current_timestamp', None) or datetime.now(timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         if now >= self._cooldowns[epic]:
@@ -633,21 +904,29 @@ class VolumeProfileStrategy(StrategyInterface):
             return True
         return False
 
-    def _set_cooldown(self, epic: str, current_timestamp: datetime = None) -> None:
-        """Set cooldown for epic. Uses current_timestamp for backtest mode."""
-        # Use backtest timestamp if provided, otherwise real time
-        now = current_timestamp if current_timestamp else datetime.now(timezone.utc)
+    def _set_cooldown(self, epic: str) -> None:
+        now = getattr(self, '_current_timestamp', None) or datetime.now(timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
-        self._cooldowns[epic] = now + timedelta(
-            minutes=self.config.signal_cooldown_minutes
-        )
+        self._cooldowns[epic] = now + timedelta(minutes=self.config.signal_cooldown_minutes)
 
     def reset_cooldowns(self) -> None:
         self._cooldowns.clear()
 
-    def flush_rejections(self) -> None:
-        self._pending_rejections.clear()
+    def _log_rejection(self, epic: str, reason: str, details: Any = None) -> None:
+        self._rejection_log.append({
+            'epic': epic,
+            'strategy': self.strategy_name,
+            'reason': reason,
+            'details': details,
+            'timestamp': datetime.now(timezone.utc).isoformat()
+        })
+
+    def get_rejection_log(self) -> List[Dict]:
+        return self._rejection_log.copy()
+
+    def clear_rejection_log(self) -> None:
+        self._rejection_log.clear()
 
 
 # ==============================================================================
@@ -659,7 +938,7 @@ def create_volume_profile_strategy(
     db_manager=None,
     logger=None
 ) -> VolumeProfileStrategy:
-    """Factory function to create Volume Profile strategy instance."""
+    """Factory function to create strategy instance."""
     return VolumeProfileStrategy(
         config=config,
         logger=logger,

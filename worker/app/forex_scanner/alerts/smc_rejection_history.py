@@ -85,6 +85,8 @@ class SMCRejectionHistoryManager:
     STAGE_REVERSAL_FILTER = 'REVERSAL_FILTER'  # Signal continues prior trend in reversal regime
     # v2.35.4: HTF candle alignment filter (prevents counter-momentum trades)
     STAGE_TIER1_HTF_CANDLE = 'TIER1_HTF_CANDLE'  # HTF candle direction conflicts with signal
+    # v2.38.0: Per-pair scalp filters (EMA stack, efficiency ratio checks)
+    STAGE_PAIR_SCALP_FILTER = 'PAIR_SCALP_FILTER'  # Per-pair scalp mode filter rejection
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -103,7 +105,9 @@ class SMCRejectionHistoryManager:
         # v2.26.0: Reversal regime filter
         STAGE_REVERSAL_FILTER,
         # v2.35.4: HTF candle alignment filter
-        STAGE_TIER1_HTF_CANDLE
+        STAGE_TIER1_HTF_CANDLE,
+        # v2.38.0: Per-pair scalp filters
+        STAGE_PAIR_SCALP_FILTER
     ]
 
     def __init__(self, db_manager, config=None):
