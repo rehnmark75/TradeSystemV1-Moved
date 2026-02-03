@@ -29,6 +29,37 @@ from utils import get_point_value, convert_price_to_points, calculate_move_point
 from config import DB_COMMIT_RECOVERY_ENABLED, TRAILING_ALERT_ENABLED
 
 
+def normalize_ig_stop_for_db(stop_level: float, epic: str) -> float:
+    """
+    Normalize IG stop level to price format for database storage.
+
+    CRITICAL FIX (Feb 2026): IG API returns CEEM pair stops in scaled format
+    (e.g., 11783.1 instead of 1.17831). This was causing:
+    - DB storing 11783.1 instead of 1.17831
+    - Mismatch detector seeing 117 million pip "mismatch"
+    - Stage 1/2/3 trailing stops being reverted to Early BE level
+
+    Args:
+        stop_level: Raw stop level from IG API sentPayload
+        epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
+
+    Returns:
+        Normalized price suitable for database storage
+    """
+    if stop_level is None:
+        return None
+
+    # CEEM pairs have scaled prices (11783.1 → 1.17831)
+    if "CEEM" in epic and stop_level > 1000:
+        return stop_level / 10000.0
+
+    # JPY CEEM pairs have different scaling (12345.6 → 123.456)
+    if "JPY" in epic and "CEEM" in epic and stop_level > 10000:
+        return stop_level / 100.0
+
+    return stop_level
+
+
 class TrailingMethod(Enum):
     """Different trailing stop methods available"""
     FIXED_POINTS = "fixed_points"           # Original simple method
@@ -2091,8 +2122,10 @@ class EnhancedTradeProcessor:
 
                                     # Use IG's actual stop level
                                     if ig_actual_stop:
-                                        trade.sl_price = float(ig_actual_stop)
-                                        self.logger.info(f"📍 [IG ACTUAL BE] Trade {trade.id}: IG set break-even to {ig_actual_stop:.5f}")
+                                        # CRITICAL FIX (Feb 2026): Normalize CEEM prices before DB storage
+                                        normalized_stop = normalize_ig_stop_for_db(float(ig_actual_stop), trade.symbol)
+                                        trade.sl_price = normalized_stop
+                                        self.logger.info(f"📍 [IG ACTUAL BE] Trade {trade.id}: IG set break-even to {normalized_stop:.5f} (raw: {ig_actual_stop})")
                                     else:
                                         trade.sl_price = break_even_stop
                                         self.logger.warning(f"⚠️ [FALLBACK BE] Trade {trade.id}: Using calculated BE {break_even_stop:.5f}")
@@ -2130,7 +2163,11 @@ class EnhancedTradeProcessor:
                                                 # Refresh trade from DB
                                                 db.refresh(trade)
                                                 # Re-apply the changes using the IG actual stop or calculated break-even
-                                                recovery_sl = float(ig_actual_stop) if ig_actual_stop else break_even_stop
+                                                # CRITICAL FIX (Feb 2026): Normalize CEEM prices before DB storage
+                                                if ig_actual_stop:
+                                                    recovery_sl = normalize_ig_stop_for_db(float(ig_actual_stop), trade.symbol)
+                                                else:
+                                                    recovery_sl = break_even_stop
                                                 trade.sl_price = recovery_sl
                                                 trade.status = "break_even" if trade.status not in ["profit_protected", "trailing"] else trade.status
                                                 trade.moved_to_breakeven = True
@@ -2497,8 +2534,10 @@ class EnhancedTradeProcessor:
                                 old_status = trade.status
                                 if ig_actual_stop:
                                     # Use IG's actual stop level instead of our calculation
-                                    trade.sl_price = float(ig_actual_stop)
-                                    self.logger.info(f"📍 [IG ACTUAL] Trade {trade.id}: IG set stop to {ig_actual_stop:.5f} (calculated {new_trail_level:.5f})")
+                                    # CRITICAL FIX (Feb 2026): Normalize CEEM prices before DB storage
+                                    normalized_stop = normalize_ig_stop_for_db(float(ig_actual_stop), trade.symbol)
+                                    trade.sl_price = normalized_stop
+                                    self.logger.info(f"📍 [IG ACTUAL] Trade {trade.id}: IG set stop to {normalized_stop:.5f} (raw: {ig_actual_stop}, calculated: {new_trail_level:.5f})")
                                 else:
                                     # Fallback to our calculation if IG's response is missing
                                     trade.sl_price = new_trail_level

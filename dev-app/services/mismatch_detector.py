@@ -230,40 +230,45 @@ class MismatchDetector:
         ig_stop_raw = position_data.get("stopLevel")
         ig_limit_raw = position_data.get("limitLevel")
 
-        # Normalize CEEM prices
+        # Normalize CEEM prices from IG
         ig_stop = self._normalize_ceem_price(float(ig_stop_raw), trade.symbol) if ig_stop_raw else None
         ig_limit = self._normalize_ceem_price(float(ig_limit_raw), trade.symbol) if ig_limit_raw else None
 
-        # Calculate mismatches
-        stop_mismatch = self._calculate_mismatch_pips(trade.sl_price, ig_stop, trade.symbol)
-        limit_mismatch = self._calculate_mismatch_pips(trade.tp_price, ig_limit, trade.symbol)
+        # CRITICAL FIX (Feb 2026): Also normalize DB values in case they were stored in wrong format
+        # This handles existing trades that may have scaled values from a previous bug
+        db_stop = self._normalize_ceem_price(float(trade.sl_price), trade.symbol) if trade.sl_price else None
+        db_limit = self._normalize_ceem_price(float(trade.tp_price), trade.symbol) if trade.tp_price else None
+
+        # Calculate mismatches using normalized values
+        stop_mismatch = self._calculate_mismatch_pips(db_stop, ig_stop, trade.symbol)
+        limit_mismatch = self._calculate_mismatch_pips(db_limit, ig_limit, trade.symbol)
 
         # Use the more severe mismatch
         max_mismatch = max(stop_mismatch, limit_mismatch)
         severity = self._classify_severity(max_mismatch)
 
-        # Log based on severity
+        # Log based on severity (using normalized values for clearer comparison)
         if severity == MismatchSeverity.NONE:
             self.logger.debug(
-                f"[MISMATCH OK] Trade {trade.id}: DB stop={trade.sl_price}, "
+                f"[MISMATCH OK] Trade {trade.id}: DB stop={db_stop}, "
                 f"IG stop={ig_stop} (diff={stop_mismatch}pips)"
             )
         elif severity == MismatchSeverity.MINOR:
             self.logger.info(
-                f"[MISMATCH MINOR] Trade {trade.id}: DB stop={trade.sl_price}, "
+                f"[MISMATCH MINOR] Trade {trade.id}: DB stop={db_stop}, "
                 f"IG stop={ig_stop} (diff={stop_mismatch}pips)"
             )
         elif severity == MismatchSeverity.MAJOR:
             self.logger.warning(
                 f"[MISMATCH MAJOR] Trade {trade.id} {trade.symbol}: "
-                f"DB stop={trade.sl_price}, IG stop={ig_stop} (diff={stop_mismatch}pips) | "
+                f"DB stop={db_stop}, IG stop={ig_stop} (diff={stop_mismatch}pips) | "
                 f"trailing_active={trailing_active}"
             )
         else:  # CRITICAL
             self.logger.error(
                 f"[MISMATCH CRITICAL] Trade {trade.id} {trade.symbol}: "
-                f"DB stop={trade.sl_price}, IG stop={ig_stop} (diff={stop_mismatch}pips) | "
-                f"DB limit={trade.tp_price}, IG limit={ig_limit} (diff={limit_mismatch}pips) | "
+                f"DB stop={db_stop}, IG stop={ig_stop} (diff={stop_mismatch}pips) | "
+                f"DB limit={db_limit}, IG limit={ig_limit} (diff={limit_mismatch}pips) | "
                 f"trailing_active={trailing_active}"
             )
 
@@ -272,9 +277,9 @@ class MismatchDetector:
             deal_id=trade.deal_id,
             epic=trade.symbol,
             direction=trade.direction,
-            db_stop=trade.sl_price,
+            db_stop=db_stop,  # Use normalized value
             ig_stop=ig_stop,
-            db_limit=trade.tp_price,
+            db_limit=db_limit,  # Use normalized value
             ig_limit=ig_limit,
             stop_mismatch_pips=stop_mismatch,
             limit_mismatch_pips=limit_mismatch,
