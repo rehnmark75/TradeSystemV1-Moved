@@ -1328,6 +1328,7 @@ class SMCSimpleStrategy:
         config = {
             'ema_period': self.scalp_ema_period,
             'swing_lookback_bars': self.scalp_swing_lookback_bars,
+            'swing_strength_bars': self.swing_strength,
             'limit_offset_pips': getattr(self, 'scalp_limit_offset_pips', 1.0),
             'htf_timeframe': self.scalp_htf_timeframe,
             'trigger_timeframe': self.scalp_trigger_timeframe,
@@ -1354,6 +1355,12 @@ class SMCSimpleStrategy:
                 pair_swing = self._db_config.get_pair_scalp_swing_lookback(epic)
                 if pair_swing is not None:
                     config['swing_lookback_bars'] = pair_swing
+
+            # Swing strength: CLI override > per-pair DB parameter_overrides > global
+            if 'swing_strength_bars' not in cli_overrides:
+                pair_strength = self._db_config.get_for_pair(epic, 'swing_strength_bars')
+                if pair_strength is not None:
+                    config['swing_strength_bars'] = int(pair_strength)
 
             # Limit offset: CLI --scalp-offset > per-pair DB > global
             if 'scalp_limit_offset_pips' not in cli_overrides:
@@ -1412,6 +1419,7 @@ class SMCSimpleStrategy:
         # Apply settings to instance
         self.ema_period = pair_config['ema_period']
         self.swing_lookback = pair_config['swing_lookback_bars']
+        self.swing_strength = pair_config['swing_strength_bars']
         self.htf_timeframe = pair_config['htf_timeframe']
         self.trigger_tf = pair_config['trigger_timeframe']
         self.entry_tf = pair_config['entry_timeframe']
