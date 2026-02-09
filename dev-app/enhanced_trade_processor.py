@@ -542,16 +542,25 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 return True
             elif final_status == "closed":
                 self.logger.info(f"📊 [TRADE CLOSED] Trade {trade.id}: Detected as closed - {getattr(trade, 'exit_reason', 'unknown reason')}")
-                return False
             elif final_status in ["rejected", "invalid_deal", "expired"]:
                 self.logger.warning(f"⚠️ [TRADE INVALID] Trade {trade.id}: Status {final_status} - {getattr(trade, 'exit_reason', 'unknown reason')}")
-                return False
             elif final_status == "missing_on_ig":
                 self.logger.error(f"❌ [TRADE MISSING] Trade {trade.id}: Genuinely missing from IG - {getattr(trade, 'exit_reason', 'unknown reason')}")
-                return False
             else:
                 self.logger.error(f"❌ [VERIFICATION ERROR] Trade {trade.id}: Unexpected status {final_status}")
-                return False
+
+            # CRITICAL FIX: Commit terminal status changes to DB
+            # _update_trade_status() modifies trade in-memory but delegates commit to caller.
+            # Without this commit, the session closes and changes are lost, causing
+            # closed trades to be re-processed every cycle in an infinite loop.
+            try:
+                db.commit()
+                self.logger.info(f"✅ [DB COMMIT] Trade {trade.id}: Status '{final_status}' persisted to database")
+            except Exception as commit_err:
+                db.rollback()
+                self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {commit_err}")
+
+            return False
             
         except Exception as e:
             self.logger.error(f"❌ [COMPREHENSIVE VERIFICATION ERROR] Trade {trade.id}: {e}")
