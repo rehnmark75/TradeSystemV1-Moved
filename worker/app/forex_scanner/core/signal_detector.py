@@ -185,14 +185,44 @@ class SignalDetector:
         if df is None or len(df) == 0:
             return df
 
-        # Check if we're in backtest mode - if so, all candles should be complete already
+        # Check if we're in backtest mode
         is_backtest = self._is_backtest_mode or (
             hasattr(self.data_fetcher, 'current_backtest_time') and
             self.data_fetcher.current_backtest_time is not None
         )
 
         if is_backtest:
-            # In backtest mode, all candles are historical and complete
+            # BACKTEST FIX: Simulate incomplete candle filtering to match live behavior.
+            # In live mode, the last candle is dropped if it hasn't closed yet.
+            # In backtest, historical data contains completed candles, but a candle
+            # whose period hasn't elapsed at current_backtest_time would still be
+            # "forming" in a real scenario. Drop it to match live behavior.
+            backtest_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+            if backtest_time is not None:
+                try:
+                    tf_minutes = {
+                        '1m': 1, '5m': 5, '15m': 15, '30m': 30,
+                        '1h': 60, '4h': 240, '1d': 1440
+                    }.get(timeframe.lower(), 15)
+
+                    if 'start_time' in df.columns:
+                        last_candle_start = pd.to_datetime(df['start_time'].iloc[-1])
+                        candle_close_time = last_candle_start + pd.Timedelta(minutes=tf_minutes)
+
+                        bt_time = pd.Timestamp(backtest_time)
+                        if last_candle_start.tz is not None and bt_time.tz is None:
+                            bt_time = bt_time.tz_localize(last_candle_start.tz)
+                        elif last_candle_start.tz is None and bt_time.tz is not None:
+                            bt_time = bt_time.tz_localize(None)
+
+                        if bt_time < candle_close_time:
+                            self.logger.debug(
+                                f"🕐 [{timeframe}] Backtest: filtering incomplete candle "
+                                f"(start={last_candle_start}, closes={candle_close_time}, bt_time={bt_time})"
+                            )
+                            return df.iloc[:-1].copy()
+                except Exception as e:
+                    self.logger.debug(f"Backtest incomplete candle check failed: {e}")
             return df
 
         # Check if is_complete column exists
