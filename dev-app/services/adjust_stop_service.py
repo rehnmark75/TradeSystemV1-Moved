@@ -130,7 +130,7 @@ async def adjust_stop_logic(
             payload["stopLevel"] = denormalize_ceem_price(float(new_stop), epic)
         elif position.get("stopLevel"):
             old_stop = normalize_ceem_price(float(position["stopLevel"]), epic)
-            offset = ig_points_to_price(float(stop_offset_points), epic) if stop_offset_points else 0.0002
+            offset = ig_points_to_price(float(stop_offset_points), epic) if stop_offset_points is not None and stop_offset_points != 0 else 0.0002
 
             # Apply direction correctly based on adjustDirectionStop
             if adjust_direction_stop == "increase":
@@ -145,7 +145,7 @@ async def adjust_stop_logic(
 
         elif position.get("stopDistance"):
             old_distance = float(position["stopDistance"])
-            offset_points = float(stop_offset_points) if stop_offset_points else 2
+            offset_points = float(stop_offset_points) if stop_offset_points is not None and stop_offset_points != 0 else 2
 
             # Distance logic - decrease distance = tighter stop, increase distance = looser stop
             if adjust_direction_stop == "increase":
@@ -163,7 +163,9 @@ async def adjust_stop_logic(
             payload["limitLevel"] = denormalize_ceem_price(float(new_limit), epic)
         elif position.get("limitLevel"):
             old_limit = normalize_ceem_price(float(position["limitLevel"]), epic)
-            offset = ig_points_to_price(float(limit_offset_points), epic) if limit_offset_points else 0.0002
+            # FIX: Use 'is not None' to avoid Python falsy trap (0 is falsy)
+            # When no limit adjustment requested (None or 0), preserve current limit unchanged
+            offset = ig_points_to_price(float(limit_offset_points), epic) if limit_offset_points is not None and limit_offset_points != 0 else 0
 
             # Apply direction correctly based on adjustDirectionLimit
             if adjust_direction_limit == "increase":
@@ -178,7 +180,7 @@ async def adjust_stop_logic(
 
         elif position.get("limitDistance"):
             old_distance = float(position["limitDistance"])
-            offset_points = float(limit_offset_points) if limit_offset_points else 2
+            offset_points = float(limit_offset_points) if limit_offset_points is not None and limit_offset_points != 0 else 0
 
             # Distance logic for limits
             if adjust_direction_limit == "increase":

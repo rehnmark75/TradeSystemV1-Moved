@@ -604,19 +604,21 @@ SCALP_TRAILING_CONFIGS = {
     },
 
     'CS.D.AUDUSD.MINI.IP': {
-        'early_breakeven_trigger_points': 6,    # AUDUSD: 14.3% capture rate, needs adjustment
-        'early_breakeven_buffer_points': 1,
-        'stage1_trigger_points': 10,            # Realistic MFE for AUDUSD (3-3.5 pips typical)
-        'stage1_lock_points': 5,
-        'stage2_trigger_points': 15,            # Stage2 at +15 pips - lock solid profit
-        'stage2_lock_points': 10,               # Lock +10 pips
-        'stage3_trigger_points': 17,            # Stage3 dynamic trailing starts at +17
+        # BE-only config: TP=13.5 is too tight for progressive trailing
+        # Let price breathe after BE - either hits TP or returns to BE
+        'early_breakeven_trigger_points': 6,    # Move to BE at +6 pips
+        'early_breakeven_buffer_points': 1,     # Lock +1 pip at BE
+        'stage1_trigger_points': 999,           # Disabled - let price run to TP
+        'stage1_lock_points': 0,
+        'stage2_trigger_points': 999,           # Disabled - let price run to TP
+        'stage2_lock_points': 0,
+        'stage3_trigger_points': 999,           # Disabled - let price run to TP
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 4,
-        'min_trail_distance': 8,                # 15 pip initial stop
+        'min_trail_distance': 8,
         'break_even_trigger_points': 6,
         'enable_partial_close': False,
-        'partial_close_trigger_points': 10,
+        'partial_close_trigger_points': 999,
         'partial_close_size': 0.5,
     },
 
