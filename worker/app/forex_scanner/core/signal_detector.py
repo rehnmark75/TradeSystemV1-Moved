@@ -88,6 +88,30 @@ class SignalDetector:
         self.ranging_market_strategy = None
         self.volume_profile_strategy = None
 
+        # Multi-strategy routing (v3.0.0)
+        # Routes signals to different strategies based on ADX-derived market regime
+        self._strategy_router = None
+        if not self._is_backtest_mode:
+            try:
+                from services.strategy_router_service import get_strategy_router
+                self._strategy_router = get_strategy_router(is_backtest=False)
+                if self._strategy_router and self._strategy_router.is_multi_strategy_enabled():
+                    self.logger.info("🎯 Multi-strategy routing: ENABLED (live mode)")
+                else:
+                    self._strategy_router = None
+            except ImportError:
+                try:
+                    from forex_scanner.services.strategy_router_service import get_strategy_router
+                    self._strategy_router = get_strategy_router(is_backtest=False)
+                    if self._strategy_router and self._strategy_router.is_multi_strategy_enabled():
+                        self.logger.info("🎯 Multi-strategy routing: ENABLED (live mode)")
+                    else:
+                        self._strategy_router = None
+                except ImportError:
+                    pass
+            except Exception as e:
+                self.logger.warning(f"⚠️ Multi-strategy routing init failed: {e}")
+
         self.logger.info("📊 SignalDetector initialized (SMC Simple only - legacy strategies archived)")
 
     # =========================================================================
@@ -474,24 +498,52 @@ class SignalDetector:
 
             individual_results = {}
 
-            # SMC Simple Strategy (the only active strategy after January 2026 cleanup)
-            # SMC Simple is always enabled - no config flag needed
-            if self.smc_simple_enabled:
+            # Determine which strategy to use via regime-based routing
+            routed_strategy = self._get_routed_strategy(epic, pair)
+
+            if routed_strategy == 'RANGING_MARKET' and self._strategy_router:
                 try:
-                    self.logger.debug(f"🔍 [SMC SIMPLE] Starting detection for {epic}")
-                    smc_simple_signal = self.detect_smc_simple_signals(epic, pair, spread_pips, timeframe)
-
-                    individual_results['smc_simple'] = smc_simple_signal
-
-                    if smc_simple_signal:
-                        all_signals.append(smc_simple_signal)
-                        self.logger.info(f"✅ [SMC SIMPLE] Signal detected for {epic}: {smc_simple_signal.get('signal')} @ {smc_simple_signal.get('entry_price', 0):.5f}")
+                    self.logger.debug(f"🔍 [RANGING_MARKET] Starting detection for {epic}")
+                    signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['ranging_market'] = signal
+                    if signal:
+                        all_signals.append(signal)
+                        self.logger.info(f"✅ [RANGING_MARKET] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.5f}")
                     else:
-                        self.logger.debug(f"📊 [SMC SIMPLE] No signal for {epic}")
-
+                        self.logger.debug(f"📊 [RANGING_MARKET] No signal for {epic}")
                 except Exception as e:
-                    self.logger.error(f"❌ [SMC SIMPLE] Error for {epic}: {e}")
-                    individual_results['smc_simple'] = None
+                    self.logger.error(f"❌ [RANGING_MARKET] Error for {epic}: {e}")
+                    individual_results['ranging_market'] = None
+
+            elif routed_strategy == 'VOLUME_PROFILE' and self._strategy_router:
+                try:
+                    self.logger.debug(f"🔍 [VOLUME_PROFILE] Starting detection for {epic}")
+                    signal = self.detect_volume_profile_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['volume_profile'] = signal
+                    if signal:
+                        all_signals.append(signal)
+                        self.logger.info(f"✅ [VOLUME_PROFILE] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [VOLUME_PROFILE] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [VOLUME_PROFILE] Error for {epic}: {e}")
+                    individual_results['volume_profile'] = None
+
+            else:
+                # Default: SMC_SIMPLE (always enabled after January 2026 cleanup)
+                if self.smc_simple_enabled:
+                    try:
+                        self.logger.debug(f"🔍 [SMC SIMPLE] Starting detection for {epic}")
+                        smc_simple_signal = self.detect_smc_simple_signals(epic, pair, spread_pips, timeframe)
+                        individual_results['smc_simple'] = smc_simple_signal
+                        if smc_simple_signal:
+                            all_signals.append(smc_simple_signal)
+                            self.logger.info(f"✅ [SMC SIMPLE] Signal detected for {epic}: {smc_simple_signal.get('signal')} @ {smc_simple_signal.get('entry_price', 0):.5f}")
+                        else:
+                            self.logger.debug(f"📊 [SMC SIMPLE] No signal for {epic}")
+                    except Exception as e:
+                        self.logger.error(f"❌ [SMC SIMPLE] Error for {epic}: {e}")
+                        individual_results['smc_simple'] = None
 
             # Add smart money analysis to all signals (if enabled)
             if all_signals:
@@ -830,6 +882,136 @@ class SignalDetector:
         except Exception as e:
             self.logger.error(f"❌ Error adding complete technical indicators: {e}")
             return signal
+
+    # =========================================================================
+    # MULTI-STRATEGY ROUTING (v3.0.0)
+    # =========================================================================
+
+    def _get_routed_strategy(self, epic: str, pair: str) -> str:
+        """
+        Determine which strategy to use based on ADX-derived market regime.
+
+        Uses the same regime detection logic as backtest_scanner._calculate_regime_from_data():
+        - ADX < 20: ranging → RANGING_MARKET
+        - ADX 20-25: low_volatility → RANGING_MARKET
+        - ADX 25-50: trending → SMC_SIMPLE
+        - ADX > 50: breakout → SMC_SIMPLE
+        - High ATR ratio: high_volatility → VOLUME_PROFILE
+
+        Falls back to SMC_SIMPLE if router is disabled or any error occurs.
+
+        Args:
+            epic: Trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
+            pair: Pair name (e.g., 'EURUSD')
+
+        Returns:
+            Strategy name string (e.g., 'SMC_SIMPLE', 'RANGING_MARKET', 'VOLUME_PROFILE')
+        """
+        if not self._strategy_router:
+            return 'SMC_SIMPLE'
+
+        try:
+            # Fetch 1h data for regime detection (same as backtest)
+            df = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=72
+            )
+
+            if df is None or df.empty or len(df) < 20:
+                return 'SMC_SIMPLE'
+
+            # Get ADX from latest bar
+            adx_value = None
+            if 'adx' in df.columns:
+                raw_adx = df['adx'].iloc[-1]
+                if raw_adx is not None and not pd.isna(raw_adx):
+                    adx_value = float(raw_adx)
+
+            # Get ATR for volatility assessment
+            atr_value = None
+            atr_mean = None
+            for col in ('atr', 'ATR'):
+                if col in df.columns:
+                    atr_value = df[col].iloc[-1]
+                    atr_mean = df[col].rolling(20).mean().iloc[-1]
+                    break
+
+            # Determine regime from ADX (same thresholds as backtest)
+            regime = 'trending'
+            if adx_value is not None and not pd.isna(adx_value):
+                if adx_value < 20:
+                    regime = 'ranging'
+                elif adx_value < 25:
+                    regime = 'low_volatility'
+                elif adx_value > 50:
+                    regime = 'breakout'
+                else:
+                    regime = 'trending'
+
+            # Determine volatility state from ATR
+            volatility_state = 'normal'
+            if atr_value is not None and atr_mean is not None and atr_mean > 0:
+                atr_ratio = atr_value / atr_mean
+                if atr_ratio > 1.5:
+                    volatility_state = 'high'
+                    if regime == 'trending':
+                        regime = 'high_volatility'
+                elif atr_ratio < 0.7:
+                    volatility_state = 'low'
+                    if regime == 'trending' and adx_value and adx_value < 25:
+                        regime = 'low_volatility'
+
+            # Determine session
+            session = self._get_current_session()
+
+            # Route via the strategy router service
+            strategy_name, confidence_modifier = self._strategy_router.get_strategy_for_regime(
+                regime=regime,
+                epic=epic,
+                session=session,
+                volatility_state=volatility_state,
+                adx_value=adx_value
+            )
+
+            if strategy_name and strategy_name != 'SMC_SIMPLE':
+                self.logger.info(
+                    f"🎯 [{epic}] Regime={regime} ADX={f'{adx_value:.1f}' if adx_value else 'N/A'} "
+                    f"→ {strategy_name} (conf={confidence_modifier:.2f})"
+                )
+            else:
+                strategy_name = 'SMC_SIMPLE'
+                self.logger.debug(
+                    f"🎯 [{epic}] Regime={regime} ADX={f'{adx_value:.1f}' if adx_value else 'N/A'} → SMC_SIMPLE"
+                )
+
+            return strategy_name
+
+        except Exception as e:
+            self.logger.warning(f"⚠️ Regime routing error for {epic}, defaulting to SMC_SIMPLE: {e}")
+            return 'SMC_SIMPLE'
+
+    def _get_current_session(self) -> str:
+        """
+        Determine current trading session from UTC time.
+
+        Returns:
+            Session name: 'asian', 'london', 'new_york', or 'overlap'
+        """
+        from datetime import timezone
+        hour = datetime.now(timezone.utc).hour
+
+        if 13 <= hour < 16:
+            return 'overlap'
+        elif 0 <= hour < 8:
+            return 'asian'
+        elif 8 <= hour < 16:
+            return 'london'
+        elif 16 <= hour < 21:
+            return 'new_york'
+        else:
+            return 'asian'
 
     # =========================================================================
     # MULTI-STRATEGY DETECTION METHODS (v3.0.0)
