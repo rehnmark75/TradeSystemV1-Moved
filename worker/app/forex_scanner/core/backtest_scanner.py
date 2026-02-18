@@ -201,7 +201,7 @@ class BacktestScanner(IntelligentForexScanner):
             self.logger.info(f"🎯 VSL Mode: ENABLED (Virtual Stop Loss Emulation)")
             self.logger.info(f"   Take Profit: {scalp_tp} pips")
             for epic, cfg in self._vsl_config.items():
-                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')
                 self.logger.info(f"   {pair}: VSL={cfg['vsl_pips']} pips, TP={cfg['tp_pips']} pips")
 
         elif self._use_scalping_mode:
@@ -792,7 +792,7 @@ class BacktestScanner(IntelligentForexScanner):
         Supports strategy filtering for backtests
         """
         try:
-            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
 
             # Check if specific strategy is requested
             strategy_name = self.strategy_name.upper()
@@ -1542,7 +1542,7 @@ class BacktestScanner(IntelligentForexScanner):
             # This replicates that behavior in backtest to match live trading more accurately
             trade_outcome = enhanced_signal.get('trade_outcome', '')
             if trade_outcome == 'LIMIT_NOT_FILLED':
-                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')
                 # Get strategy from signal_detector to adjust cooldown
                 if hasattr(self.signal_detector, 'smc_simple_strategy') and self.signal_detector.smc_simple_strategy:
                     self.signal_detector.smc_simple_strategy.adjust_cooldown_for_unfilled_order(pair, signal_timestamp)
@@ -1573,7 +1573,7 @@ class BacktestScanner(IntelligentForexScanner):
             data_fetcher = self.signal_detector.data_fetcher
 
             # Extract pair from epic
-            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')
 
             # Use override timeframe if provided (e.g., '1m' for VSL simulation)
             simulation_tf = timeframe_override or self.timeframe

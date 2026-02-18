@@ -32,7 +32,7 @@ def save_signal_to_database_direct(signal: Dict, message: str = "Signal detected
         if not pair or pair is None:
             # Try to derive from epic
             if epic and 'CS.D.' in str(epic):
-                pair = str(epic).replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                pair = str(epic).replace('CS.D.', '').replace('.MINI.IP', '')
             else:
                 pair = 'UNKNOWN'
         pair = str(pair)

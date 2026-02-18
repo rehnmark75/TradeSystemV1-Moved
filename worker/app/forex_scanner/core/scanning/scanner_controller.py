@@ -180,7 +180,7 @@ class ScannerController:
             pair_name = pair_info.get('pair', '')
 
             if not pair_name or pair_name == 'EURUSD':
-                pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+                pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
             
             signal = None
             

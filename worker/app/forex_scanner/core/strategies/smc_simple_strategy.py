@@ -1757,7 +1757,7 @@ class SMCSimpleStrategy:
         except (IndexError, AttributeError):
             hour_utc = 12
 
-        # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
+        # Extract short pair name from epic for spread lookup (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
         pair = ''
         if '.' in epic:
             parts = epic.split('.')
@@ -5577,6 +5577,7 @@ class SMCSimpleStrategy:
         # Map common pair names to epics
         pair_to_epic = {
             'EURUSD': 'CS.D.EURUSD.CEEM.IP',
+            'EURUSD.CEEM.IP': 'CS.D.EURUSD.CEEM.IP',
             'GBPUSD': 'CS.D.GBPUSD.MINI.IP',
             'USDJPY': 'CS.D.USDJPY.MINI.IP',
             'USDCHF': 'CS.D.USDCHF.MINI.IP',

@@ -385,7 +385,7 @@ class IntelligentForexScanner:
         """Scan single epic for signals"""
         try:
             # Get pair info - extract pair name from epic
-            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
 
             # Get default timeframe from database - NO FALLBACK
             default_tf = self._scanner_cfg.default_timeframe
@@ -726,7 +726,7 @@ class IntelligentForexScanner:
             if not data_fetcher:
                 return {}
 
-            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
 
             # Get default timeframe from database
             default_tf = self._scanner_cfg.default_timeframe
@@ -922,7 +922,7 @@ class IntelligentForexScanner:
     def _detect_signals_for_epic(self, epic: str) -> Optional[Dict]:
         """Detect signals using all strategies for an epic"""
         try:
-            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            pair_name = epic.replace('CS.D.', '').replace('.MINI.IP', '')
 
             # Get default timeframe from database - NO FALLBACK
             default_tf = self._scanner_cfg.default_timeframe
