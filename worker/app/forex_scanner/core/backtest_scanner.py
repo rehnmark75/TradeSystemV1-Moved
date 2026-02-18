@@ -573,6 +573,12 @@ class BacktestScanner(IntelligentForexScanner):
                 # Generate final report
                 final_report = self._generate_backtest_report(results)
 
+                # Log regime routing distribution if multi-strategy was active
+                if hasattr(self, '_regime_counts') and self._regime_counts:
+                    self.logger.info("📊 Multi-Strategy Regime Routing Summary:")
+                    for regime_strategy, count in sorted(self._regime_counts.items(), key=lambda x: -x[1]):
+                        self.logger.info(f"   {regime_strategy}: {count} evaluations")
+
                 self.logger.info(f"✅ Backtest completed successfully")
                 return final_report
 
@@ -827,9 +833,16 @@ class BacktestScanner(IntelligentForexScanner):
 
                     # Override strategy_name with routed strategy
                     if routed_strategy:
+                        # Track regime distribution for summary
+                        if not hasattr(self, '_regime_counts'):
+                            self._regime_counts = {}
+                        regime_key = f"{routing_context.get('regime')}→{routed_strategy}"
+                        self._regime_counts[regime_key] = self._regime_counts.get(regime_key, 0) + 1
+
+                        # Log non-default routing at INFO level
                         self.logger.debug(
-                            f"🔀 Multi-Strategy Routing: {epic} at {timestamp} → {routed_strategy} "
-                            f"(regime: {routing_context.get('regime')}, conf_mod: {confidence_modifier:.2f})"
+                            f"🔀 Routing: {epic} at {timestamp} → {routed_strategy} "
+                            f"(regime: {routing_context.get('regime')}, ADX: {routing_context.get('adx_value')})"
                         )
                         strategy_name = routed_strategy
                 elif self._multi_strategy_config.get('enabled'):
@@ -1145,29 +1158,10 @@ class BacktestScanner(IntelligentForexScanner):
             return None
 
         try:
-            # Get historical intelligence for this timestamp
-            intelligence = self._get_historical_intelligence(timestamp)
-
-            # Extract regime information
-            regime = 'trending'  # Default regime
-            volatility_state = 'normal'
-            adx_value = None
+            # Always calculate regime from live price data (ADX/ATR)
+            # Historical intelligence data has known corruption (always 'trending')
+            regime, adx_value, volatility_state = self._calculate_regime_from_data(epic, timestamp)
             session = None
-
-            if intelligence:
-                regime = intelligence.get('dominant_regime', 'trending')
-                volatility_state = intelligence.get('volatility_level', 'normal')
-
-                # Try to get ADX from per-epic data if available
-                per_epic = intelligence.get('per_epic_intelligence', {})
-                if isinstance(per_epic, dict):
-                    epic_intel = per_epic.get(epic, {})
-                    if isinstance(epic_intel, dict):
-                        adx_value = epic_intel.get('adx')
-                        # Per-epic regime overrides global if available
-                        epic_regime = epic_intel.get('structure_regime')
-                        if epic_regime:
-                            regime = epic_regime
 
             # Determine session from timestamp
             session = self._get_session_from_timestamp(timestamp)
@@ -1213,14 +1207,100 @@ class BacktestScanner(IntelligentForexScanner):
                 'session': session,
                 'volatility_state': volatility_state,
                 'adx_value': adx_value,
-                'routed_from_intelligence': intelligence is not None
+                'routed_from_intelligence': False
             }
 
             return (routed_strategy, confidence_modifier, routing_context)
 
         except Exception as e:
-            self.logger.warning(f"⚠️ Error in strategy routing: {e}")
+            self.logger.warning(f"⚠️ Error in strategy routing for {epic}: {e}")
             return None
+
+    def _calculate_regime_from_data(
+        self,
+        epic: str,
+        timestamp: datetime
+    ) -> Tuple[str, Optional[float], str]:
+        """
+        Calculate market regime directly from price data (ADX/ATR).
+
+        Used as fallback when historical intelligence is unavailable.
+        ADX thresholds (standard interpretation):
+            < 20: ranging / low_volatility
+            20-25: low_volatility (trend developing)
+            25-50: trending
+            > 50: breakout / high_volatility
+
+        Returns:
+            Tuple of (regime, adx_value, volatility_state)
+        """
+        try:
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
+            df = self.signal_detector.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=72
+            )
+
+            if df is None or df.empty or len(df) < 20:
+                return ('trending', None, 'normal')
+
+            # Get data up to current backtest time for accurate regime detection
+            # The data_fetcher handles time windowing via current_backtest_time
+            df_ts = df
+
+            if df_ts.empty or len(df_ts) < 14:
+                return ('trending', None, 'normal')
+
+            # Get ADX from the latest available bar
+            adx_value = None
+            if 'adx' in df_ts.columns:
+                raw_adx = df_ts['adx'].iloc[-1]
+                if raw_adx is not None and not pd.isna(raw_adx):
+                    adx_value = float(raw_adx)
+
+            # Get ATR for volatility assessment
+            atr_value = None
+            if 'atr' in df_ts.columns:
+                atr_value = df_ts['atr'].iloc[-1]
+                atr_mean = df_ts['atr'].rolling(20).mean().iloc[-1]
+            elif 'ATR' in df_ts.columns:
+                atr_value = df_ts['ATR'].iloc[-1]
+                atr_mean = df_ts['ATR'].rolling(20).mean().iloc[-1]
+            else:
+                atr_mean = None
+
+            # Determine regime from ADX
+            regime = 'trending'  # Default
+            if adx_value is not None and not pd.isna(adx_value):
+                if adx_value < 20:
+                    regime = 'ranging'
+                elif adx_value < 25:
+                    regime = 'low_volatility'
+                elif adx_value > 50:
+                    regime = 'breakout'
+                else:
+                    regime = 'trending'
+
+            # Determine volatility state from ATR
+            volatility_state = 'normal'
+            if atr_value is not None and atr_mean is not None and atr_mean > 0:
+                atr_ratio = atr_value / atr_mean
+                if atr_ratio > 1.5:
+                    volatility_state = 'high'
+                    if regime == 'trending':
+                        regime = 'high_volatility'
+                elif atr_ratio < 0.7:
+                    volatility_state = 'low'
+                    if regime == 'trending' and adx_value and adx_value < 25:
+                        regime = 'low_volatility'
+
+            return (regime, adx_value, volatility_state)
+
+        except Exception as e:
+            self.logger.debug(f"⚠️ Error calculating regime from data for {epic}: {e}")
+            return ('trending', None, 'normal')
 
     def _get_session_from_timestamp(self, timestamp: datetime) -> str:
         """

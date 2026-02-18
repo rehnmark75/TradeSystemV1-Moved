@@ -661,17 +661,29 @@ class EnhancedTradeStatusManager:
             else:
                 # Only sync SL/TP for trades NOT being managed by trailing system
                 ig_stop_level = position.get("stopLevel")
-                if ig_stop_level and abs(float(ig_stop_level) - (trade.sl_price or 0)) > 0.0001:
-                    old_sl = trade.sl_price
-                    trade.sl_price = float(ig_stop_level)
-                    self.logger.info(f"🔄 [SYNC SL] Trade {trade.id}: SL {old_sl} → {trade.sl_price}")
+                if ig_stop_level:
+                    sl_value = float(ig_stop_level)
+                    # CEEM pairs return scaled prices from IG (11818.4 instead of 1.18184)
+                    if "CEEM" in (trade.symbol or "") and sl_value > 1000:
+                        sl_value = sl_value / 10000.0
+                        self.logger.info(f"📐 [SYNC CEEM] Normalized SL: {ig_stop_level} → {sl_value}")
+                    if abs(sl_value - (trade.sl_price or 0)) > 0.0001:
+                        old_sl = trade.sl_price
+                        trade.sl_price = sl_value
+                        self.logger.info(f"🔄 [SYNC SL] Trade {trade.id}: SL {old_sl} → {trade.sl_price}")
 
                 # Update take profit if different
                 ig_limit_level = position.get("limitLevel")
-                if ig_limit_level and abs(float(ig_limit_level) - (trade.tp_price or 0)) > 0.0001:
-                    old_tp = trade.tp_price
-                    trade.tp_price = float(ig_limit_level)
-                    self.logger.info(f"🔄 [SYNC TP] Trade {trade.id}: TP {old_tp} → {trade.tp_price}")
+                if ig_limit_level:
+                    tp_value = float(ig_limit_level)
+                    # CEEM pairs return scaled prices from IG
+                    if "CEEM" in (trade.symbol or "") and tp_value > 1000:
+                        tp_value = tp_value / 10000.0
+                        self.logger.info(f"📐 [SYNC CEEM] Normalized TP: {ig_limit_level} → {tp_value}")
+                    if abs(tp_value - (trade.tp_price or 0)) > 0.0001:
+                        old_tp = trade.tp_price
+                        trade.tp_price = tp_value
+                        self.logger.info(f"🔄 [SYNC TP] Trade {trade.id}: TP {old_tp} → {trade.tp_price}")
 
         # Store activity close data for P/L correlation
         if activity_close_data and status == "closed":
