@@ -291,6 +291,10 @@ class RejectionOutcomeAnalyzer:
         """
         Fetch candles for outcome analysis from ig_candles table.
 
+        Always fetches 1m candles as the base (since 5m/15m/60m data stopped
+        updating Jan 2026). If a higher timeframe is requested, resamples
+        from 1m. Falls back to the original timeframe if 1m data is unavailable.
+
         Args:
             epic: Currency pair epic
             start_time: Analysis window start
@@ -316,17 +320,72 @@ class RejectionOutcomeAnalyzer:
         """
 
         try:
+            if timeframe == 1:
+                # Already requesting 1m — fetch directly
+                df = self.db_manager.execute_query(query, {
+                    'epic': epic,
+                    'timeframe': 1,
+                    'start_time': start_time,
+                    'end_time': end_time
+                })
+                self.logger.debug(f"Fetched {len(df)} 1m candles for {epic}")
+                return df
+
+            # Higher timeframe requested — fetch 1m and resample
+            df_1m = self.db_manager.execute_query(query, {
+                'epic': epic,
+                'timeframe': 1,
+                'start_time': start_time,
+                'end_time': end_time
+            })
+
+            if not df_1m.empty:
+                self.logger.debug(f"Fetched {len(df_1m)} 1m candles for {epic}, resampling to {timeframe}m")
+                return self._resample_candles(df_1m, timeframe)
+
+            # Fallback: try the original timeframe (for historical data)
+            self.logger.debug(f"No 1m data for {epic}, falling back to {timeframe}m candles")
             df = self.db_manager.execute_query(query, {
                 'epic': epic,
                 'timeframe': timeframe,
                 'start_time': start_time,
                 'end_time': end_time
             })
-            self.logger.debug(f"Fetched {len(df)} {timeframe}m candles for {epic}")
+            self.logger.debug(f"Fallback: fetched {len(df)} {timeframe}m candles for {epic}")
             return df
+
         except Exception as e:
-            self.logger.error(f"Failed to fetch {timeframe}m candle data for {epic}: {e}")
+            self.logger.error(f"Failed to fetch candle data for {epic}: {e}")
             return pd.DataFrame()
+
+    def _resample_candles(self, candles_1m: pd.DataFrame, target_timeframe: int) -> pd.DataFrame:
+        """
+        Resample 1m candles to a higher timeframe.
+
+        Args:
+            candles_1m: DataFrame with 1m OHLC data (must have 'timestamp' column)
+            target_timeframe: Target timeframe in minutes (5, 15, 60)
+
+        Returns:
+            DataFrame with resampled OHLC data
+        """
+        if candles_1m.empty:
+            return candles_1m
+
+        df = candles_1m.copy()
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+        df = df.set_index('timestamp')
+
+        resampled = df.resample(f'{target_timeframe}min').agg({
+            'open': 'first',
+            'high': 'max',
+            'low': 'min',
+            'close': 'last'
+        }).dropna()
+
+        resampled = resampled.reset_index().rename(columns={'timestamp': 'timestamp'})
+        self.logger.debug(f"Resampled {len(candles_1m)} 1m candles to {len(resampled)} {target_timeframe}m candles")
+        return resampled
 
     def calculate_entry_exit_prices(
         self,
