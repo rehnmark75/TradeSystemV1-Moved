@@ -272,6 +272,7 @@ class RejectionOutcomeAnalyzer:
         WHERE r.scan_timestamp >= :start_date
           AND r.scan_timestamp < :end_date
           AND r.attempted_direction IS NOT NULL
+          AND r.current_price IS NOT NULL AND r.current_price != 0
           AND o.id IS NULL
         ORDER BY r.scan_timestamp ASC
         """
