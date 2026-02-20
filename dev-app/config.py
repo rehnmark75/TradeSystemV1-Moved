@@ -33,7 +33,7 @@ TRAILING_STOPS_ENABLED = True
 # This applies to BOTH fixed and dynamic trailing systems
 # Feature added: Jan 2026 - Ensures profitable trades stay profitable
 ENABLE_GUARANTEED_PROFIT_LOCK = True
-GUARANTEED_PROFIT_LOCK_TRIGGER = 10  # Pips profit to activate protection
+GUARANTEED_PROFIT_LOCK_TRIGGER = 15  # v3.3.0: 10→15 (match JPY early BE to avoid tiny wins)
 GUARANTEED_PROFIT_LOCK_MINIMUM = 1   # Minimum pips profit to lock (SL = entry + 1)
 
 # Additional epic mappings from broker transaction analyzer
@@ -675,7 +675,7 @@ SCALP_TRAILING_CONFIGS = {
     },
 
     'CS.D.EURJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 10,   # EURJPY: 31.3% capture, needs loosening
+        'early_breakeven_trigger_points': 15,   # v3.3.0: 10→15 (winners cut short at 10)
         'early_breakeven_buffer_points': 1.5,
         'stage1_trigger_points': 15,
         'stage1_lock_points': 8,
@@ -685,14 +685,14 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 6,
         'min_trail_distance': 10,               # 20 pip initial stop
-        'break_even_trigger_points': 10,
+        'break_even_trigger_points': 15,        # v3.3.0: 10→15 (match early BE)
         'enable_partial_close': False,
         'partial_close_trigger_points': 15,
         'partial_close_size': 0.5,
     },
 
     'CS.D.AUDJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 10,
+        'early_breakeven_trigger_points': 15,   # v3.3.0: 10→15 (winners cut short at 10)
         'early_breakeven_buffer_points': 1.5,
         'stage1_trigger_points': 15,
         'stage1_lock_points': 8,
@@ -702,7 +702,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 6,
         'min_trail_distance': 10,               # 20 pip initial stop
-        'break_even_trigger_points': 10,
+        'break_even_trigger_points': 15,        # v3.3.0: 10→15 (match early BE)
         'enable_partial_close': False,
         'partial_close_trigger_points': 15,
         'partial_close_size': 0.5,
