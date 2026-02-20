@@ -22,7 +22,6 @@
 | #3772 | 3:54 PM | 🔵 | RSI Block Zone Implementation - Per-Pair Configuration via Config Service | ~367 |
 | #3770 | " | 🔵 | RSI Blocked Zone Filter Implementation Details | ~364 |
 | #3768 | 3:53 PM | 🔵 | Extended PAIR_SCALP_FILTER: ADX, Regime, Volatility, and Quality Gates | ~387 |
-| #3767 | " | 🔵 | PAIR_SCALP_FILTER Implementation Deep Dive - Per-Pair Filter Configuration | ~461 |
 
 ### Feb 18, 2026
 
@@ -67,4 +66,10 @@
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
 | #4302 | 7:34 AM | ⚖️ | EURUSD SL/TP Optimization: SL9→SL20, TP10→TP15 Based on 270-Trade Backtest | ~551 |
+
+### Feb 20, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4419 | 9:12 AM | ⚖️ | Signal Quality Analysis Complete - Actionable Optimization Plan Developed | ~329 |
 </claude-mem-context>
