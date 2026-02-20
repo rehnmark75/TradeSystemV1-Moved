@@ -808,6 +808,47 @@ class TradeMonitor:
             "errors": enhanced_stats["verification_errors"] + enhanced_stats["api_errors"]
         }
 
+    def _update_peak_and_mae(self, trade: TradeLog, current_price: float, db: Session):
+        """
+        Track peak profit (MFE) and max adverse excursion (MAE) every monitoring cycle.
+
+        Writes to vsl_peak_profit_pips and vsl_mae_pips on the trade_log record.
+        These fields were previously only updated by the deprecated VSL system.
+        Now tracked for ALL trades to enable trailing stop optimization analysis.
+        """
+        try:
+            point_value = get_point_value(trade.symbol)
+            direction = trade.direction.upper()
+
+            if direction == "BUY":
+                current_profit_pips = (current_price - trade.entry_price) / point_value
+            else:
+                current_profit_pips = (trade.entry_price - current_price) / point_value
+
+            updated = False
+
+            # Update peak profit (MFE) if new high
+            current_peak = trade.vsl_peak_profit_pips or 0.0
+            if current_profit_pips > current_peak:
+                trade.vsl_peak_profit_pips = round(current_profit_pips, 2)
+                updated = True
+
+            # Update MAE if new worst drawdown
+            if current_profit_pips < 0:
+                adverse_pips = abs(current_profit_pips)
+                current_mae = trade.vsl_mae_pips or 0.0
+                if adverse_pips > current_mae:
+                    trade.vsl_mae_pips = round(adverse_pips, 2)
+                    trade.vsl_mae_price = current_price
+                    trade.vsl_mae_timestamp = datetime.utcnow()
+                    updated = True
+
+            if updated:
+                db.commit()
+
+        except Exception as e:
+            self.logger.debug(f"[PEAK/MAE] Trade {trade.id}: tracking error: {e}")
+
     async def process_single_trade(self, trade: TradeLog) -> bool:
         """Process a single trade with the advanced trailing system - FIXED METHOD CALLS"""
         try:
@@ -849,6 +890,9 @@ class TradeMonitor:
                 if not trade:
                     self.logger.error(f"❌ Trade {trade_id} not found when reloading for processing")
                     return False
+
+                # Track peak profit (MFE) and max adverse excursion (MAE) every cycle
+                self._update_peak_and_mae(trade, current_price, db)
 
                 if ENHANCED_PROCESSOR_AVAILABLE and hasattr(self.trade_processor, 'process_trade_with_combined_validation'):
                     # Use enhanced processor with validation
