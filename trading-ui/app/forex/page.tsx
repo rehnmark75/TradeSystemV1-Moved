@@ -137,7 +137,8 @@ const buildSparklinePoints = (values: number[]) => {
 
 export default function ForexAnalyticsPage() {
   const [section, setSection] = useState<"overview" | "analysis">("overview");
-  const [overviewDays, setOverviewDays] = useState(7);
+  const [overviewDays, setOverviewDays] = useState(1);
+  const [overviewRefreshKey, setOverviewRefreshKey] = useState(0);
   const [analysisDays, setAnalysisDays] = useState(30);
   const [overview, setOverview] = useState<OverviewPayload | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisPayload | null>(null);
@@ -162,7 +163,7 @@ export default function ForexAnalyticsPage() {
       })
       .finally(() => setLoadingOverview(false));
     return () => controller.abort();
-  }, [overviewDays]);
+  }, [overviewDays, overviewRefreshKey]);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -303,6 +304,14 @@ export default function ForexAnalyticsPage() {
                   </option>
                 ))}
               </select>
+              <button
+                className="refresh-btn"
+                onClick={() => setOverviewRefreshKey((k) => k + 1)}
+                disabled={loadingOverview}
+                title="Refresh data"
+              >
+                ↻
+              </button>
             </div>
             <div className="forex-badge">
               {overview?.stats.best_pair ? `Best: ${overview.stats.best_pair}` : "Best: -"}

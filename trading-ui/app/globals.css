@@ -260,6 +260,23 @@ input {
   flex-wrap: wrap;
 }
 
+.refresh-btn {
+  background: #2c6e5a;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  font-size: 1.1rem;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.refresh-btn:hover { background: #245a49; }
+.refresh-btn:disabled { opacity: 0.5; cursor: not-allowed; }
+
 .forex-badge {
   padding: 8px 14px;
   border-radius: 999px;
