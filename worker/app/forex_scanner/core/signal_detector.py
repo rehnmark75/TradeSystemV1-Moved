@@ -499,7 +499,8 @@ class SignalDetector:
             individual_results = {}
 
             # Determine which strategy to use via regime-based routing
-            routed_strategy = self._get_routed_strategy(epic, pair)
+            routing_result = self._get_routed_strategy(epic, pair)
+            routed_strategy = routing_result['strategy']
 
             if routed_strategy == 'RANGING_MARKET' and self._strategy_router:
                 try:
@@ -544,6 +545,18 @@ class SignalDetector:
                     except Exception as e:
                         self.logger.error(f"❌ [SMC SIMPLE] Error for {epic}: {e}")
                         individual_results['smc_simple'] = None
+
+            # Propagate regime info from routing to signals that don't have it
+            # (RANGING_MARKET and VOLUME_PROFILE strategies don't set these fields)
+            if all_signals and routing_result.get('regime'):
+                for sig in all_signals:
+                    if not sig.get('market_regime_detected'):
+                        sig['market_regime_detected'] = routing_result['regime']
+                        sig['regime_confidence'] = routing_result['regime_confidence']
+                        sig['adx_value'] = routing_result.get('adx_value')
+                        sig['volatility_state'] = routing_result.get('volatility_state')
+                    if not sig.get('market_regime'):
+                        sig['market_regime'] = routing_result['regime']
 
             # Add smart money analysis to all signals (if enabled)
             if all_signals:
@@ -887,7 +900,7 @@ class SignalDetector:
     # MULTI-STRATEGY ROUTING (v3.0.0)
     # =========================================================================
 
-    def _get_routed_strategy(self, epic: str, pair: str) -> str:
+    def _get_routed_strategy(self, epic: str, pair: str) -> Dict:
         """
         Determine which strategy to use based on ADX-derived market regime.
 
@@ -905,10 +918,17 @@ class SignalDetector:
             pair: Pair name (e.g., 'EURUSD')
 
         Returns:
-            Strategy name string (e.g., 'SMC_SIMPLE', 'RANGING_MARKET', 'VOLUME_PROFILE')
+            Dict with 'strategy', 'regime', 'regime_confidence', 'adx_value', 'volatility_state'
         """
+        default_result = {
+            'strategy': 'SMC_SIMPLE',
+            'regime': None,
+            'regime_confidence': None,
+            'adx_value': None,
+            'volatility_state': None,
+        }
         if not self._strategy_router:
-            return 'SMC_SIMPLE'
+            return default_result
 
         try:
             # Fetch 1h data for regime detection (same as backtest)
@@ -920,7 +940,7 @@ class SignalDetector:
             )
 
             if df is None or df.empty or len(df) < 20:
-                return 'SMC_SIMPLE'
+                return default_result
 
             # Get ADX from latest bar
             adx_value = None
@@ -986,11 +1006,28 @@ class SignalDetector:
                     f"🎯 [{epic}] Regime={regime} ADX={f'{adx_value:.1f}' if adx_value else 'N/A'} → SMC_SIMPLE"
                 )
 
-            return strategy_name
+            # Determine regime confidence based on classification
+            regime_confidence = 0.5  # default for trending
+            if regime == 'high_volatility':
+                regime_confidence = 0.85
+            elif regime == 'breakout':
+                regime_confidence = 0.75
+            elif regime == 'ranging':
+                regime_confidence = 0.85
+            elif regime == 'low_volatility':
+                regime_confidence = 0.6
+
+            return {
+                'strategy': strategy_name,
+                'regime': regime,
+                'regime_confidence': regime_confidence,
+                'adx_value': adx_value,
+                'volatility_state': volatility_state,
+            }
 
         except Exception as e:
             self.logger.warning(f"⚠️ Regime routing error for {epic}, defaulting to SMC_SIMPLE: {e}")
-            return 'SMC_SIMPLE'
+            return default_result
 
     def _get_current_session(self) -> str:
         """
