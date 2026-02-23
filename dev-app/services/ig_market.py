@@ -27,7 +27,8 @@ async def get_current_bid_price(auth_headers, epic):
         offer_price = data["snapshot"]["offer"]  # Ask/offer price for BUY trades
         currency_symbol = data["instrument"]["currencies"][0].get("symbol", "")
         currency_code = data["instrument"]["currencies"][0].get("code", "")
-        min_distance = data["dealingRules"].get("minNormalStopOrLimitDistance", {}).get("value", None)
+        min_stop_rule = data["dealingRules"].get("minNormalStopOrLimitDistance")
+        min_distance = min_stop_rule.get("value", None) if isinstance(min_stop_rule, dict) else None
 
 
         try:
