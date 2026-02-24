@@ -24,7 +24,8 @@ from database_monitoring_fix import DatabaseMonitoringFix  # ✅ CRITICAL FIX: E
 # Bulletproof trailing system imports (Jan 2026)
 from config import MISMATCH_DETECTION_ENABLED, TRAILING_ALERT_ENABLED
 from services.mismatch_detector import get_mismatch_detector, MismatchSeverity
-from services.trading_alert_service import get_alert_service 
+from services.trading_alert_service import get_alert_service
+from services.adjust_stop_service import adjust_stop_logic
 # services/shared_types.py
 """
 Shared types and configurations to avoid circular imports
@@ -943,6 +944,35 @@ class TradeMonitor:
                                             mismatch_pips=mismatch_report.stop_mismatch_pips,
                                             trailing_active=trailing_active
                                         )
+
+                                    # AUTO-CORRECT: Force IG stop to match DB for CRITICAL mismatches
+                                    if (mismatch_report.severity == MismatchSeverity.CRITICAL
+                                            and trade.sl_price is not None):
+                                        self.logger.warning(
+                                            f"🔧 [AUTO-CORRECT] Trade {trade.id} {trade.symbol}: "
+                                            f"Forcing IG stop to DB value {trade.sl_price:.5f} "
+                                            f"(IG has {mismatch_report.ig_stop}, {mismatch_report.stop_mismatch_pips} pips off)"
+                                        )
+                                        try:
+                                            correction_result = await adjust_stop_logic(
+                                                epic=trade.symbol,
+                                                new_stop=trade.sl_price,
+                                                dry_run=False
+                                            )
+                                            if correction_result.get("status") == "updated":
+                                                self.logger.info(
+                                                    f"✅ [AUTO-CORRECT SUCCESS] Trade {trade.id}: "
+                                                    f"IG stop corrected to {trade.sl_price:.5f}"
+                                                )
+                                            else:
+                                                self.logger.error(
+                                                    f"❌ [AUTO-CORRECT FAILED] Trade {trade.id}: "
+                                                    f"{correction_result.get('message', 'Unknown error')}"
+                                                )
+                                        except Exception as correction_error:
+                                            self.logger.error(
+                                                f"❌ [AUTO-CORRECT ERROR] Trade {trade.id}: {correction_error}"
+                                            )
                         except Exception as mismatch_error:
                             self.logger.debug(f"Mismatch check failed for trade {trade.id}: {mismatch_error}")
 
