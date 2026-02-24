@@ -675,36 +675,36 @@ SCALP_TRAILING_CONFIGS = {
     },
 
     'CS.D.EURJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 15,   # v3.3.0: 10→15 (winners cut short at 10)
+        'early_breakeven_trigger_points': 8,    # v3.4.0: 15→8 (ranging trades peak at ~9 pips avg, 15 never triggers)
         'early_breakeven_buffer_points': 1.5,
-        'stage1_trigger_points': 15,
-        'stage1_lock_points': 8,
-        'stage2_trigger_points': 20,            # Stage2 at +20 pips - lock solid profit
-        'stage2_lock_points': 15,               # Lock +15 pips
+        'stage1_trigger_points': 12,            # v3.4.0: 15→12 (achievable in ranging conditions)
+        'stage1_lock_points': 5,                # Lock +5 pips
+        'stage2_trigger_points': 18,            # Stage2 at +18 pips - for breakout trades
+        'stage2_lock_points': 12,               # Lock +12 pips
         'stage3_trigger_points': 22,            # Stage3 dynamic trailing starts at +22
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 6,
-        'min_trail_distance': 10,               # 20 pip initial stop
-        'break_even_trigger_points': 15,        # v3.3.0: 10→15 (match early BE)
+        'min_trail_distance': 8,                # v3.4.0: 10→8 (tighter for ranging)
+        'break_even_trigger_points': 8,         # v3.4.0: 15→8 (match early BE for ranging protection)
         'enable_partial_close': False,
-        'partial_close_trigger_points': 15,
+        'partial_close_trigger_points': 12,     # v3.4.0: 15→12
         'partial_close_size': 0.5,
     },
 
     'CS.D.AUDJPY.MINI.IP': {
-        'early_breakeven_trigger_points': 15,   # v3.3.0: 10→15 (winners cut short at 10)
+        'early_breakeven_trigger_points': 8,    # v3.4.0: 15→8 (ranging trades peak at ~6 pips avg, 15 never triggers)
         'early_breakeven_buffer_points': 1.5,
-        'stage1_trigger_points': 15,
-        'stage1_lock_points': 8,
-        'stage2_trigger_points': 20,            # Stage2 at +20 pips - lock solid profit
-        'stage2_lock_points': 15,               # Lock +15 pips
+        'stage1_trigger_points': 12,            # v3.4.0: 15→12 (achievable in ranging conditions)
+        'stage1_lock_points': 5,                # Lock +5 pips
+        'stage2_trigger_points': 18,            # Stage2 at +18 pips - for breakout trades
+        'stage2_lock_points': 12,               # Lock +12 pips
         'stage3_trigger_points': 22,            # Stage3 dynamic trailing starts at +22
         'stage3_atr_multiplier': 1.5,
         'stage3_min_distance': 6,
-        'min_trail_distance': 10,               # 20 pip initial stop
-        'break_even_trigger_points': 15,        # v3.3.0: 10→15 (match early BE)
+        'min_trail_distance': 8,                # v3.4.0: 10→8 (tighter for ranging)
+        'break_even_trigger_points': 8,         # v3.4.0: 15→8 (match early BE for ranging protection)
         'enable_partial_close': False,
-        'partial_close_trigger_points': 15,
+        'partial_close_trigger_points': 12,     # v3.4.0: 15→12
         'partial_close_size': 0.5,
     },
 
