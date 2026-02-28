@@ -752,32 +752,21 @@ class WatchlistScanner:
         """
         Enrich active watchlist results with trading metrics from stock_screening_metrics.
 
-        Pulls ATR, support/resistance levels, RS data, and calculates trade plan suggestions.
-
-        Trade plan uses fixed risk parameters for learning:
-        - Stop Loss: 3% below entry
-        - Take Profit 1: 5% above entry
-        - Take Profit 2: 10% above entry (for runners)
-        - R:R Ratio: 1.67 (5/3)
+        Pulls ATR, support/resistance levels, RS data, and calculates structure-based
+        trade plan using swing levels, order blocks, and ATR.
 
         Returns:
             Number of records enriched
         """
-        # Fixed trade parameters for learning phase:
-        # - Stop Loss: 3% below entry (0.97x)
-        # - Take Profit 1: 5% above entry (1.05x)
-        # - Take Profit 2: 10% above entry (1.10x)
-        # - R:R Ratio: 5/3 = 1.67
-
-        # Get all active watchlist results that need enrichment
+        # Step 1: Pull raw metrics from screening data
         query = """
             UPDATE stock_watchlist_results wr
             SET
-                -- ATR and volatility (for reference/position sizing)
+                -- ATR and volatility
                 atr_14 = sm.atr_14,
                 atr_percent = sm.atr_percent,
 
-                -- Support/Resistance from SMC analysis (for reference)
+                -- Support/Resistance from SMC analysis
                 swing_high = sm.swing_high,
                 swing_low = sm.swing_low,
                 swing_high_date = sm.swing_high_date,
@@ -796,23 +785,9 @@ class WatchlistScanner:
                 relative_volume = sm.relative_volume,
                 avg_daily_change_5d = sm.avg_daily_change_5d,
 
-                -- Fixed trade plan metrics (learning phase: 3% SL, 5% TP)
                 -- Entry zone: current price -0.5% to +1%
                 suggested_entry_low = wr.price * 0.995,
-                suggested_entry_high = wr.price * 1.01,
-
-                -- Stop loss: 3% below current price
-                suggested_stop_loss = wr.price * 0.97,
-
-                -- Target 1: 5% above current price
-                suggested_target_1 = wr.price * 1.05,
-
-                -- Target 2: 10% above current price (for runners)
-                suggested_target_2 = wr.price * 1.10,
-
-                -- Fixed risk metrics
-                risk_percent = 3.0,
-                risk_reward_ratio = 1.67
+                suggested_entry_high = wr.price * 1.01
 
             FROM stock_screening_metrics sm
             WHERE wr.ticker = sm.ticker
@@ -825,24 +800,23 @@ class WatchlistScanner:
             result = await self.db.fetch(query)
             enriched_count = len(result) if result else 0
 
-            # Now calculate risk metrics that depend on the values we just set
-            await self._calculate_risk_metrics()
+            # Calculate volume trend
+            await self._calculate_volume_trend()
+            # Calculate structure-based SL/TP levels
+            await self._calculate_structure_levels()
+            # Calculate trade-ready filter and score
+            await self._calculate_trade_ready()
 
             return enriched_count
         except Exception as e:
             logger.error(f"Failed to enrich watchlist with trading metrics: {e}")
             return 0
 
-    async def _calculate_risk_metrics(self) -> None:
-        """Calculate volume trend based on relative volume.
-
-        Note: Risk percent and R:R are now fixed at 3% SL / 5% TP (1.67 R:R)
-        for the learning phase, so they're set directly in enrich_with_trading_metrics().
-        """
+    async def _calculate_volume_trend(self) -> None:
+        """Calculate volume trend based on relative volume."""
         query = """
             UPDATE stock_watchlist_results
             SET
-                -- Volume trend based on relative volume
                 volume_trend = CASE
                     WHEN relative_volume >= 1.5 THEN 'accumulation'
                     WHEN relative_volume <= 0.7 THEN 'distribution'
@@ -855,3 +829,260 @@ class WatchlistScanner:
             await self.db.execute(query)
         except Exception as e:
             logger.error(f"Failed to calculate volume trend: {e}")
+
+    async def _calculate_structure_levels(self) -> None:
+        """
+        Calculate structure-based SL/TP using swing levels, order blocks, EMA 50, and ATR.
+
+        Stop Loss: Highest structural support below price (swing_low, bullish OB, ema_50),
+                   capped at 2x ATR if too wide, floored at 0.5x ATR if too tight.
+        Target 1:  Lowest structural resistance above price (swing_high, bearish OB),
+                   fallback to 2x risk distance.
+        Target 2:  3x risk distance above entry.
+        """
+        query = """
+            UPDATE stock_watchlist_results wr
+            SET
+                -- Structure-based stop loss
+                structure_stop_loss = CASE
+                    -- No ATR data: fallback to 3% below
+                    WHEN wr.atr_14 IS NULL OR wr.price IS NULL THEN wr.price * 0.97
+
+                    ELSE (
+                        SELECT CASE
+                            -- If best candidate is too far (> 2x ATR AND > 8% of price), cap at 2x ATR
+                            WHEN best_sl IS NOT NULL
+                                AND (wr.price - best_sl) > (2.0 * wr.atr_14)
+                                AND (wr.price - best_sl) / wr.price > 0.08
+                            THEN wr.price - (2.0 * wr.atr_14)
+
+                            -- If best candidate is too tight (< 0.5x ATR), widen to 0.5x ATR
+                            WHEN best_sl IS NOT NULL
+                                AND (wr.price - best_sl) < (0.5 * wr.atr_14)
+                            THEN wr.price - (0.5 * wr.atr_14)
+
+                            -- Good structural level
+                            WHEN best_sl IS NOT NULL THEN best_sl
+
+                            -- No structure data: fallback to 1.5x ATR
+                            ELSE wr.price - (1.5 * wr.atr_14)
+                        END
+                        FROM (
+                            SELECT MAX(candidate) AS best_sl
+                            FROM (
+                                SELECT wr.swing_low AS candidate
+                                WHERE wr.swing_low IS NOT NULL AND wr.swing_low < wr.price
+                                UNION ALL
+                                SELECT wr.nearest_ob_price AS candidate
+                                WHERE wr.nearest_ob_price IS NOT NULL
+                                    AND wr.nearest_ob_type = 'bullish'
+                                    AND wr.nearest_ob_price < wr.price
+                                UNION ALL
+                                SELECT wr.ema_50 AS candidate
+                                WHERE wr.ema_50 IS NOT NULL AND wr.ema_50 < wr.price
+                            ) candidates
+                        ) sl_calc
+                    )
+                END,
+
+                -- Structure-based target 1 (nearest resistance)
+                structure_target_1 = CASE
+                    WHEN wr.atr_14 IS NULL OR wr.price IS NULL THEN wr.price * 1.05
+                    ELSE COALESCE(
+                        (
+                            SELECT MIN(candidate)
+                            FROM (
+                                SELECT wr.swing_high AS candidate
+                                WHERE wr.swing_high IS NOT NULL AND wr.swing_high > wr.price
+                                UNION ALL
+                                SELECT wr.nearest_ob_price AS candidate
+                                WHERE wr.nearest_ob_price IS NOT NULL
+                                    AND wr.nearest_ob_type = 'bearish'
+                                    AND wr.nearest_ob_price > wr.price
+                            ) candidates
+                        ),
+                        -- Fallback: ensure minimum 2:1 R:R
+                        NULL
+                    )
+                END
+            WHERE wr.status = 'active'
+            AND wr.price IS NOT NULL
+        """
+        try:
+            await self.db.execute(query)
+        except Exception as e:
+            logger.error(f"Failed to calculate structure levels: {e}")
+            return
+
+        # Step 2: Fill in TP1 fallback (2x risk) and TP2, R:R, and populate suggested_ columns
+        query2 = """
+            UPDATE stock_watchlist_results wr
+            SET
+                -- If structure_target_1 is NULL or too close, use 2x risk distance
+                structure_target_1 = CASE
+                    WHEN structure_target_1 IS NOT NULL
+                        AND structure_stop_loss IS NOT NULL
+                        AND (structure_target_1 - wr.price) >= (wr.price - structure_stop_loss)
+                    THEN structure_target_1
+                    ELSE wr.price + 2.0 * (wr.price - COALESCE(structure_stop_loss, wr.price * 0.97))
+                END,
+
+                -- Target 2: 3x risk distance
+                structure_target_2 = wr.price + 3.0 * (wr.price - COALESCE(structure_stop_loss, wr.price * 0.97)),
+
+                -- R:R ratio
+                structure_rr_ratio = CASE
+                    WHEN structure_stop_loss IS NOT NULL
+                        AND (wr.price - structure_stop_loss) > 0
+                    THEN ROUND(
+                        COALESCE(
+                            CASE
+                                WHEN structure_target_1 IS NOT NULL
+                                    AND (structure_target_1 - wr.price) >= (wr.price - structure_stop_loss)
+                                THEN (structure_target_1 - wr.price)
+                                ELSE 2.0 * (wr.price - structure_stop_loss)
+                            END
+                            / (wr.price - structure_stop_loss)
+                        , 2.0)::numeric, 2)
+                    ELSE 2.00
+                END,
+
+                -- Populate existing suggested_ columns with structure values
+                suggested_stop_loss = structure_stop_loss,
+                suggested_target_1 = CASE
+                    WHEN structure_target_1 IS NOT NULL
+                        AND structure_stop_loss IS NOT NULL
+                        AND (structure_target_1 - wr.price) >= (wr.price - structure_stop_loss)
+                    THEN structure_target_1
+                    ELSE wr.price + 2.0 * (wr.price - COALESCE(structure_stop_loss, wr.price * 0.97))
+                END,
+                suggested_target_2 = wr.price + 3.0 * (wr.price - COALESCE(structure_stop_loss, wr.price * 0.97)),
+                risk_reward_ratio = CASE
+                    WHEN structure_stop_loss IS NOT NULL
+                        AND (wr.price - structure_stop_loss) > 0
+                    THEN ROUND(
+                        COALESCE(
+                            CASE
+                                WHEN structure_target_1 IS NOT NULL
+                                    AND (structure_target_1 - wr.price) >= (wr.price - structure_stop_loss)
+                                THEN (structure_target_1 - wr.price)
+                                ELSE 2.0 * (wr.price - structure_stop_loss)
+                            END
+                            / (wr.price - structure_stop_loss)
+                        , 2.0)::numeric, 2)
+                    ELSE 2.00
+                END,
+                risk_percent = CASE
+                    WHEN structure_stop_loss IS NOT NULL AND wr.price > 0
+                    THEN ROUND(((wr.price - structure_stop_loss) / wr.price * 100)::numeric, 2)
+                    ELSE 3.00
+                END
+            WHERE wr.status = 'active'
+            AND wr.price IS NOT NULL
+        """
+        try:
+            await self.db.execute(query2)
+        except Exception as e:
+            logger.error(f"Failed to calculate TP/RR levels: {e}")
+
+    async def _calculate_trade_ready(self) -> None:
+        """
+        Calculate trade-ready filter and composite score for active watchlist entries.
+
+        Pass/Fail Criteria (all must pass):
+        - DAQ grade >= B (score >= 60)
+        - RS percentile >= 55
+        - Earnings risk = FALSE
+        - RSI < 78
+        - ATR % between 1.5% and 10%
+        - Volume trend != 'distribution'
+        - R:R ratio >= 1.5
+        - Crossover age 1-25 days (crossover watchlists only)
+
+        Score (0-100): DAQ(30%) + RS(25%) + R:R(20%) + Volume(10%) + Freshness(15%)
+        """
+        query = """
+            UPDATE stock_watchlist_results wr
+            SET
+                trade_ready = (
+                    COALESCE(wr.daq_score, 0) >= 60
+                    AND COALESCE(wr.rs_percentile, 0) >= 55
+                    AND COALESCE(wr.daq_earnings_risk, TRUE) = FALSE
+                    AND COALESCE(wr.rsi_14, 80) < 78
+                    AND COALESCE(wr.atr_percent, 0) >= 1.5
+                    AND COALESCE(wr.atr_percent, 100) <= 10.0
+                    AND COALESCE(wr.volume_trend, 'distribution') != 'distribution'
+                    AND COALESCE(wr.structure_rr_ratio, 0) >= 1.5
+                    AND (
+                        wr.crossover_date IS NULL
+                        OR (
+                            (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 25
+                        )
+                    )
+                ),
+
+                trade_ready_score = (
+                    -- DAQ component (30% weight, max 30 points)
+                    LEAST(ROUND(COALESCE(wr.daq_score, 0) * 0.30), 30)
+
+                    -- RS component (25% weight, max 25 points)
+                    + LEAST(ROUND(COALESCE(wr.rs_percentile, 0) * 0.25), 25)
+
+                    -- R:R quality (20% weight): 1.5=50, 2.0=70, 3.0+=100
+                    + ROUND(LEAST(
+                        CASE
+                            WHEN COALESCE(wr.structure_rr_ratio, 0) >= 3.0 THEN 100
+                            WHEN COALESCE(wr.structure_rr_ratio, 0) >= 2.0 THEN 70 + (COALESCE(wr.structure_rr_ratio, 0) - 2.0) * 30
+                            WHEN COALESCE(wr.structure_rr_ratio, 0) >= 1.5 THEN 50 + (COALESCE(wr.structure_rr_ratio, 0) - 1.5) * 40
+                            ELSE COALESCE(wr.structure_rr_ratio, 0) * 33.3
+                        END
+                    , 100) * 0.20)
+
+                    -- Volume confirmation (10%): accumulation=100, neutral=50, distribution=0
+                    + ROUND(CASE
+                        WHEN wr.volume_trend = 'accumulation' THEN 100
+                        WHEN wr.volume_trend = 'neutral' THEN 50
+                        ELSE 0
+                    END * 0.10)
+
+                    -- Crossover freshness (15%): peak at 3-10 days
+                    + ROUND(CASE
+                        WHEN wr.crossover_date IS NULL THEN 50
+                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 3 AND 10 THEN 100
+                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 2 THEN 70
+                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 11 AND 15 THEN 70
+                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 16 AND 25 THEN 40
+                        ELSE 10
+                    END * 0.15)
+                )::integer,
+
+                trade_ready_reasons = (
+                    SELECT json_agg(json_build_object('criterion', criterion, 'passed', passed))::text
+                    FROM (VALUES
+                        ('DAQ >= B (60)', COALESCE(wr.daq_score, 0) >= 60),
+                        ('RS >= 55', COALESCE(wr.rs_percentile, 0) >= 55),
+                        ('No earnings risk', COALESCE(wr.daq_earnings_risk, TRUE) = FALSE),
+                        ('RSI < 78', COALESCE(wr.rsi_14, 80) < 78),
+                        ('ATR 1.5-10%', COALESCE(wr.atr_percent, 0) >= 1.5 AND COALESCE(wr.atr_percent, 100) <= 10.0),
+                        ('No distribution', COALESCE(wr.volume_trend, 'distribution') != 'distribution'),
+                        ('R:R >= 1.5', COALESCE(wr.structure_rr_ratio, 0) >= 1.5),
+                        ('Age 1-25d', wr.crossover_date IS NULL OR (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 25)
+                    ) AS criteria(criterion, passed)
+                )
+            WHERE wr.status = 'active'
+        """
+        try:
+            await self.db.execute(query)
+            # Log summary
+            count_query = """
+                SELECT
+                    COUNT(*) FILTER (WHERE trade_ready = TRUE) as ready,
+                    COUNT(*) as total
+                FROM stock_watchlist_results
+                WHERE status = 'active'
+            """
+            result = await self.db.fetchrow(count_query)
+            if result:
+                logger.info(f"Trade-ready filter: {result['ready']}/{result['total']} stocks passed")
+        except Exception as e:
+            logger.error(f"Failed to calculate trade-ready filter: {e}")

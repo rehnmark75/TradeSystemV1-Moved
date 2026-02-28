@@ -726,8 +726,8 @@ input {
 
 .list-header {
   display: grid;
-  grid-template-columns: 30px 80px 70px 80px 70px 70px 70px 70px 80px 80px 80px 70px 50px 50px;
-  gap: 10px;
+  grid-template-columns: 28px 72px 48px 60px 55px 55px 55px 65px 40px 72px 65px 40px 50px 50px 50px;
+  gap: 8px;
   font-size: 0.75rem;
   color: #6e6254;
   padding: 6px 12px;
@@ -750,8 +750,8 @@ input {
 
 .row {
   display: grid;
-  grid-template-columns: 30px 80px 70px 80px 70px 70px 70px 70px 80px 80px 80px 70px 50px 50px;
-  gap: 10px;
+  grid-template-columns: 28px 72px 48px 60px 55px 55px 55px 65px 40px 72px 65px 40px 50px 50px 50px;
+  gap: 8px;
   align-items: center;
   padding: 8px 12px;
   border-bottom: 1px solid #f3ede4;
@@ -785,6 +785,14 @@ input {
 
 .row-expanded {
   background: #fdf5e7;
+}
+
+.row-trade-ready {
+  background: #f0faf0;
+}
+
+.row-trade-ready.row-expanded {
+  background: #e8f5e8;
 }
 
 .row:hover {
@@ -2230,7 +2238,7 @@ input {
 
   .list-header,
   .row {
-    grid-template-columns: 24px 70px 60px 70px 60px 60px 60px 60px 70px 70px 70px 60px 40px 40px;
+    grid-template-columns: 24px 62px 42px 52px 48px 48px 48px 56px 36px 64px 58px 36px 44px 44px 44px;
   }
 
   .signals-header,

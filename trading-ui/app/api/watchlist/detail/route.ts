@@ -72,6 +72,13 @@ export async function GET(request: Request) {
           w.relative_volume,
           w.rs_percentile,
           w.rs_trend,
+          w.trade_ready,
+          w.trade_ready_score,
+          w.trade_ready_reasons,
+          w.structure_stop_loss,
+          w.structure_target_1,
+          w.structure_target_2,
+          w.structure_rr_ratio,
           i.earnings_date,
           CASE
             WHEN i.earnings_date IS NOT NULL AND i.earnings_date >= CURRENT_DATE

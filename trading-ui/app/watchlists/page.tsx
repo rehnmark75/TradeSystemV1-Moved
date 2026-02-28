@@ -29,6 +29,9 @@ type WatchlistRow = {
   daq_sector_underperforming: boolean | null;
   rs_percentile: number | null;
   rs_trend: string | null;
+  trade_ready: boolean | null;
+  trade_ready_score: number | null;
+  structure_rr_ratio: number | null;
   tv_overall_score: number | null;
   tv_overall_signal: string | null;
   perf_1w: number | null;
@@ -86,6 +89,10 @@ type WatchlistDetail = WatchlistRow & {
   risk_percent: number | null;
   volume_trend: string | null;
   relative_volume: number | null;
+  trade_ready_reasons: string | null;
+  structure_stop_loss: number | null;
+  structure_target_1: number | null;
+  structure_target_2: number | null;
   earnings_date: string | null;
   days_to_earnings: number | null;
   tv_osc_buy: number | null;
@@ -178,7 +185,8 @@ export default function Page() {
   const [noteEditing, setNoteEditing] = useState<Record<string, number | null>>({});
   const [noteEditDraft, setNoteEditDraft] = useState<Record<string, string>>({});
   const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
-  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days">("signal");
+  const [tradeReadyOnly, setTradeReadyOnly] = useState(false);
+  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready">("signal");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   const apiPath = (path: string) => `../api/${path}`;
@@ -219,12 +227,16 @@ export default function Page() {
   const watchlistInfo = WATCHLIST_DEFINITIONS[watchlist];
 
   const filteredRows = useMemo(() => {
-    if (!filter) {
-      return rows;
+    let data = rows;
+    if (tradeReadyOnly) {
+      data = data.filter((row) => row.trade_ready);
     }
-    const term = filter.toUpperCase();
-    return rows.filter((row) => row.ticker?.toUpperCase().includes(term));
-  }, [rows, filter]);
+    if (filter) {
+      const term = filter.toUpperCase();
+      data = data.filter((row) => row.ticker?.toUpperCase().includes(term));
+    }
+    return data;
+  }, [rows, filter, tradeReadyOnly]);
 
   const numberOrNull = (value: unknown) => {
     if (value === null || value === undefined || value === "") {
@@ -243,6 +255,8 @@ export default function Page() {
 
   const sortValue = (row: WatchlistRow) => {
     switch (sortKey) {
+      case "ready":
+        return (row.trade_ready ? 100000 : 0) + (numberOrNull(row.trade_ready_score) ?? 0);
       case "rs":
         return numberOrNull(row.rs_percentile) ?? -Infinity;
       case "daq":
@@ -270,7 +284,7 @@ export default function Page() {
     return data;
   }, [filteredRows, sortKey, sortDir, watchlist]);
 
-  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days") => {
+  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days" | "ready") => {
     if (sortKey === key) {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
     } else {
@@ -709,6 +723,16 @@ export default function Page() {
             <label>Filter Ticker</label>
             <input value={filter} onChange={(e) => setFilter(e.target.value)} placeholder="AAPL" />
           </div>
+          <div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={tradeReadyOnly}
+                onChange={(e) => setTradeReadyOnly(e.target.checked)}
+              />
+              Trade Ready Only
+            </label>
+          </div>
         </div>
 
         <div className="summary">
@@ -733,6 +757,9 @@ export default function Page() {
         <div className="list-header">
           <span></span>
           <span>Ticker</span>
+          <button className="sort-btn" onClick={() => toggleSort("ready")}>
+            Ready {sortKey === "ready" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
           <button className="sort-btn" onClick={() => toggleSort("signal")}>
             Signal {sortKey === "signal" ? (sortDir === "desc" ? "▾" : "▴") : ""}
           </button>
@@ -780,7 +807,7 @@ export default function Page() {
 
               return (
                 <div>
-                  <div className={`row ${expandedRow ? "row-expanded" : ""}`}>
+                  <div className={`row ${expandedRow ? "row-expanded" : ""}${row.trade_ready ? " row-trade-ready" : ""}`}>
                     <button className="expand-btn" onClick={() => toggleExpand(row.ticker)} aria-label="Toggle details">
                       {expandedRow ? "▾" : "▸"}
                     </button>
@@ -792,6 +819,13 @@ export default function Page() {
                         ↗
                       </Link>
                     </div>
+                    <span title={row.trade_ready_score != null ? `Score: ${row.trade_ready_score}` : ""}>
+                      {row.trade_ready ? (
+                        <span className="pill good">{row.trade_ready_score ?? "OK"}</span>
+                      ) : (
+                        <span className="pill bad">-</span>
+                      )}
+                    </span>
                     <span className="scan-cell">
                       {CROSSOVER.has(watchlist)
                         ? row.crossover_date
@@ -970,25 +1004,61 @@ export default function Page() {
                       </div>
                       <div className="expander">
                         <div>
-                          <h4>Trade Plan</h4>
+                          <h4>Trade Plan (Structure-Based)</h4>
                           {details[row.ticker] ? (
-                            <div className="detail-grid">
-                              <div className="detail-item">Entry Low: {formatValue(details[row.ticker]?.suggested_entry_low)}</div>
-                              <div className="detail-item">Entry High: {formatValue(details[row.ticker]?.suggested_entry_high)}</div>
-                              <div className="detail-item">Stop Loss: {formatValue(details[row.ticker]?.suggested_stop_loss)}</div>
-                              <div className="detail-item">Target 1: {formatValue(details[row.ticker]?.suggested_target_1)}</div>
-                              <div className="detail-item">Target 2: {formatValue(details[row.ticker]?.suggested_target_2)}</div>
-                              <div className="detail-item">R:R: {formatValue(details[row.ticker]?.risk_reward_ratio, 2)}</div>
-                              <div className="detail-item">ATR%: {formatValue(details[row.ticker]?.atr_percent, 2)}</div>
-                              <div className="detail-item">Volume Trend: {details[row.ticker]?.volume_trend ?? "-"}</div>
-                              <div className="detail-item">
-                                Relative Strength: {details[row.ticker]?.rs_percentile ?? "-"}{" "}
-                                {details[row.ticker]?.rs_trend ? `(${rsTrendText(details[row.ticker]?.rs_trend)})` : ""}
+                            <>
+                              <div className="detail-grid">
+                                <div className="detail-item">Entry Low: {formatValue(details[row.ticker]?.suggested_entry_low)}</div>
+                                <div className="detail-item">Entry High: {formatValue(details[row.ticker]?.suggested_entry_high)}</div>
+                                <div className="detail-item" style={{ fontWeight: 600, color: "#e74c3c" }}>
+                                  Stop Loss: {formatValue(details[row.ticker]?.structure_stop_loss ?? details[row.ticker]?.suggested_stop_loss)}
+                                  {details[row.ticker]?.price && details[row.ticker]?.structure_stop_loss
+                                    ? ` (${((Number(details[row.ticker]?.price) - Number(details[row.ticker]?.structure_stop_loss)) / Number(details[row.ticker]?.price) * 100).toFixed(1)}%)`
+                                    : ""}
+                                </div>
+                                <div className="detail-item" style={{ fontWeight: 600, color: "#27ae60" }}>
+                                  Target 1: {formatValue(details[row.ticker]?.structure_target_1 ?? details[row.ticker]?.suggested_target_1)}
+                                </div>
+                                <div className="detail-item" style={{ color: "#27ae60" }}>
+                                  Target 2: {formatValue(details[row.ticker]?.structure_target_2 ?? details[row.ticker]?.suggested_target_2)}
+                                </div>
+                                <div className="detail-item" style={{ fontWeight: 600 }}>
+                                  R:R: {formatValue(details[row.ticker]?.structure_rr_ratio ?? details[row.ticker]?.risk_reward_ratio, 2)}
+                                </div>
+                                <div className="detail-item">ATR%: {formatValue(details[row.ticker]?.atr_percent, 2)}</div>
+                                <div className="detail-item">Volume Trend: {details[row.ticker]?.volume_trend ?? "-"}</div>
+                                <div className="detail-item">
+                                  Relative Strength: {details[row.ticker]?.rs_percentile ?? "-"}{" "}
+                                  {details[row.ticker]?.rs_trend ? `(${rsTrendText(details[row.ticker]?.rs_trend)})` : ""}
+                                </div>
+                                <div className="detail-item">
+                                  Risk: {formatValue(details[row.ticker]?.risk_percent, 1)}%
+                                </div>
                               </div>
-                              <div className="detail-item">
-                                Risk: {formatValue(details[row.ticker]?.risk_percent, 1)}%
-                              </div>
-                            </div>
+                              {details[row.ticker]?.trade_ready_reasons ? (
+                                <div style={{ marginTop: 8 }}>
+                                  <strong>Trade Ready: {details[row.ticker]?.trade_ready ? (
+                                    <span className="pill good">PASS ({details[row.ticker]?.trade_ready_score})</span>
+                                  ) : (
+                                    <span className="pill bad">FAIL</span>
+                                  )}</strong>
+                                  <div className="detail-grid" style={{ marginTop: 4 }}>
+                                    {(() => {
+                                      try {
+                                        const reasons = JSON.parse(details[row.ticker]?.trade_ready_reasons || "[]");
+                                        return reasons.map((r: { criterion: string; passed: boolean }, i: number) => (
+                                          <div className="detail-item" key={i} style={{ color: r.passed ? "#27ae60" : "#e74c3c" }}>
+                                            {r.passed ? "✓" : "✗"} {r.criterion}
+                                          </div>
+                                        ));
+                                      } catch {
+                                        return null;
+                                      }
+                                    })()}
+                                  </div>
+                                </div>
+                              ) : null}
+                            </>
                           ) : (
                             <div className="footer-note">Loading details...</div>
                           )}
