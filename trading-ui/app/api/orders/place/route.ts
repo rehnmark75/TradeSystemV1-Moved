@@ -74,12 +74,21 @@ export async function POST(request: Request) {
       }
     }
 
+    // Resolve broker ticker (ARLO → ARLO.ny, AAPL → AAPL.nq)
+    const exchangeResult = await client.query(
+      `SELECT COALESCE(exchange, 'NASDAQ') as exchange FROM stock_instruments WHERE ticker = $1 LIMIT 1`,
+      [ticker]
+    );
+    const exchange = exchangeResult.rows[0]?.exchange || "NASDAQ";
+    const suffix = exchange.toUpperCase().includes("NYSE") ? ".ny" : ".nq";
+    const brokerTicker = `${ticker}${suffix}`;
+
     // POST to RoboMarkets
     const formData = new URLSearchParams();
-    formData.append("ticker", ticker);
+    formData.append("ticker", brokerTicker);
     formData.append("side", side);
     formData.append("type", order_type);
-    formData.append("quantity", String(quantity));
+    formData.append("volume", String(Math.floor(quantity)));
     if (price && order_type === "limit") {
       formData.append("price", String(price));
     }
@@ -103,13 +112,18 @@ export async function POST(request: Request) {
         body: formData.toString(),
       });
 
-      const brokerData = await brokerRes.json().catch(() => ({}));
+      const brokerText = await brokerRes.text().catch(() => "");
+      let brokerData: Record<string, unknown> = {};
+      try { brokerData = JSON.parse(brokerText); } catch { /* not JSON */ }
 
       if (!brokerRes.ok) {
         orderStatus = "rejected";
-        errorMessage = brokerData?.message || brokerData?.error || `Broker returned ${brokerRes.status}`;
+        errorMessage = String(
+          brokerData?.msg || brokerData?.message || brokerData?.error || brokerText || `Broker returned ${brokerRes.status}`
+        );
       } else {
-        brokerOrderId = brokerData?.orderId ? String(brokerData.orderId) : null;
+        const dataObj = brokerData?.data as Record<string, unknown> | undefined;
+        brokerOrderId = String(dataObj?.order_id || dataObj?.orderId || brokerData?.orderId || "");
       }
     } catch (err: unknown) {
       orderStatus = "rejected";
