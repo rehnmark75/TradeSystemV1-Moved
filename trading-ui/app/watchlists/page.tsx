@@ -189,6 +189,20 @@ export default function Page() {
   const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready">("signal");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
+  // Order form state (keyed by ticker)
+  const [orderOpen, setOrderOpen] = useState<Record<string, boolean>>({});
+  const [orderState, setOrderState] = useState<Record<string, {
+    orderType: "limit" | "market";
+    quantity: number;
+    price: number;
+    stopLoss: number;
+    takeProfit: number;
+    override: boolean;
+  }>>({});
+  const [orderLoading, setOrderLoading] = useState<Record<string, boolean>>({});
+  const [orderMessage, setOrderMessage] = useState<Record<string, { type: "success" | "error"; text: string } | null>>({});
+  const [orderConfirming, setOrderConfirming] = useState<Record<string, boolean>>({});
+
   const apiPath = (path: string) => `../api/${path}`;
 
   useEffect(() => {
@@ -589,6 +603,95 @@ export default function Page() {
     if (trend === "improving") return "gaining strength";
     if (trend === "deteriorating") return "weakening";
     return "holding steady";
+  };
+
+  const BUDGET = 500;
+
+  const initOrderState = (ticker: string) => {
+    const d = details[ticker];
+    const currentPrice = numberOrNull(d?.price ?? rows.find((r) => r.ticker === ticker)?.price) || 0;
+    const entryPrice = numberOrNull(d?.suggested_entry_low) || currentPrice;
+    const sl = numberOrNull(d?.structure_stop_loss ?? d?.suggested_stop_loss) || 0;
+    const tp = numberOrNull(d?.structure_target_1 ?? d?.suggested_target_1) || 0;
+    const qty = entryPrice > 0 ? Math.floor(BUDGET / entryPrice) : 0;
+    return {
+      orderType: "limit" as const,
+      quantity: qty,
+      price: Number(entryPrice.toFixed(2)),
+      stopLoss: Number(sl.toFixed(2)),
+      takeProfit: Number(tp.toFixed(2)),
+      override: false,
+    };
+  };
+
+  const toggleOrder = (ticker: string) => {
+    const next = !orderOpen[ticker];
+    setOrderOpen((prev) => ({ ...prev, [ticker]: next }));
+    if (next && !orderState[ticker]) {
+      setOrderState((prev) => ({ ...prev, [ticker]: initOrderState(ticker) }));
+    }
+    setOrderConfirming((prev) => ({ ...prev, [ticker]: false }));
+    setOrderMessage((prev) => ({ ...prev, [ticker]: null }));
+  };
+
+  const updateOrder = (ticker: string, patch: Partial<typeof orderState[string]>) => {
+    setOrderState((prev) => {
+      const cur = prev[ticker];
+      if (!cur) return prev;
+      const updated = { ...cur, ...patch };
+      // Auto-recalculate quantity when price changes
+      if (patch.price !== undefined && patch.price > 0) {
+        updated.quantity = Math.floor(BUDGET / patch.price);
+      }
+      return { ...prev, [ticker]: updated };
+    });
+  };
+
+  const placeOrder = async (ticker: string) => {
+    const os = orderState[ticker];
+    if (!os) return;
+    setOrderLoading((prev) => ({ ...prev, [ticker]: true }));
+    setOrderMessage((prev) => ({ ...prev, [ticker]: null }));
+    const d = details[ticker];
+    try {
+      const res = await fetch(`${apiPath("orders/place")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker,
+          side: "buy",
+          order_type: os.orderType,
+          quantity: os.quantity,
+          price: os.orderType === "limit" ? os.price : undefined,
+          stop_loss: os.stopLoss,
+          take_profit: os.takeProfit > 0 ? os.takeProfit : undefined,
+          trade_ready_override: os.override,
+          signal_id: d?.signal_id || undefined,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOrderMessage((prev) => ({
+          ...prev,
+          [ticker]: { type: "error", text: data?.error || "Order failed" },
+        }));
+      } else {
+        setOrderMessage((prev) => ({
+          ...prev,
+          [ticker]: {
+            type: "success",
+            text: `Order ${data.status}! Broker ID: ${data.robomarkets_order_id || "pending"}, DB #${data.db_order_id}`,
+          },
+        }));
+        setOrderConfirming((prev) => ({ ...prev, [ticker]: false }));
+      }
+    } catch {
+      setOrderMessage((prev) => ({
+        ...prev,
+        [ticker]: { type: "error", text: "Network error placing order" },
+      }));
+    }
+    setOrderLoading((prev) => ({ ...prev, [ticker]: false }));
   };
 
   const daqWeighted = (score: unknown, maxPoints: number) => {
@@ -1090,6 +1193,160 @@ export default function Page() {
                             <div className="footer-note">No recorded broker trades for this ticker.</div>
                           )}
                         </div>
+                      </div>
+
+                      {/* Place Order Panel */}
+                      <div className="order-panel">
+                        <h4>
+                          Place Order
+                          <button className="order-toggle-btn" onClick={() => toggleOrder(row.ticker)}>
+                            {orderOpen[row.ticker] ? "Close" : "Open"}
+                          </button>
+                        </h4>
+                        {orderOpen[row.ticker] && orderState[row.ticker] && (() => {
+                          const os = orderState[row.ticker]!;
+                          const posValue = os.quantity * (os.orderType === "limit" ? os.price : (numberOrNull(row.price) || 0));
+                          const riskPerShare = os.orderType === "limit"
+                            ? os.price - os.stopLoss
+                            : (numberOrNull(row.price) || 0) - os.stopLoss;
+                          const refPrice = os.orderType === "limit" ? os.price : (numberOrNull(row.price) || 0);
+                          const rrRatio = riskPerShare > 0 && os.takeProfit > 0 && refPrice > 0
+                            ? ((os.takeProfit - refPrice) / riskPerShare).toFixed(2)
+                            : "-";
+                          const canReview = os.quantity > 0 && os.stopLoss > 0 && (os.orderType === "market" || os.price > 0);
+                          const isTradeReady = row.trade_ready;
+                          return (
+                            <div>
+                              <div className="order-summary-bar">
+                                <span>Budget: ${BUDGET}</span>
+                                <span>Position: ${posValue.toFixed(2)}</span>
+                                <span>Risk/share: ${riskPerShare > 0 ? riskPerShare.toFixed(2) : "-"}</span>
+                                <span>R:R: {rrRatio}</span>
+                              </div>
+                              <div className="order-grid">
+                                <div>
+                                  <label>Order Type</label>
+                                  <select
+                                    value={os.orderType}
+                                    onChange={(e) => updateOrder(row.ticker, { orderType: e.target.value as "limit" | "market" })}
+                                  >
+                                    <option value="limit">Limit</option>
+                                    <option value="market">Market</option>
+                                  </select>
+                                </div>
+                                {os.orderType === "limit" && (
+                                  <div>
+                                    <label>Limit Price</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={os.price}
+                                      onChange={(e) => updateOrder(row.ticker, { price: Number(e.target.value) })}
+                                    />
+                                  </div>
+                                )}
+                                <div>
+                                  <label>Shares</label>
+                                  <input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    value={os.quantity}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [row.ticker]: { ...prev[row.ticker]!, quantity: Number(e.target.value) }
+                                    }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label>Stop Loss</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={os.stopLoss}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [row.ticker]: { ...prev[row.ticker]!, stopLoss: Number(e.target.value) }
+                                    }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label>Take Profit</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={os.takeProfit}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [row.ticker]: { ...prev[row.ticker]!, takeProfit: Number(e.target.value) }
+                                    }))}
+                                  />
+                                </div>
+                              </div>
+                              {!isTradeReady && (
+                                <div className="order-override-row">
+                                  <input
+                                    type="checkbox"
+                                    checked={os.override}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [row.ticker]: { ...prev[row.ticker]!, override: e.target.checked }
+                                    }))}
+                                  />
+                                  <span>This stock is NOT trade-ready. Check to override.</span>
+                                </div>
+                              )}
+                              {!orderConfirming[row.ticker] ? (
+                                <div className="order-actions">
+                                  <button
+                                    className="order-review-btn"
+                                    disabled={!canReview || orderLoading[row.ticker]}
+                                    onClick={() => setOrderConfirming((prev) => ({ ...prev, [row.ticker]: true }))}
+                                  >
+                                    Review Order
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="order-confirm-box">
+                                  <h5>Confirm Order</h5>
+                                  <div className="order-confirm-summary">
+                                    <div>Ticker: <strong>{row.ticker}</strong></div>
+                                    <div>Side: <strong>BUY</strong></div>
+                                    <div>Type: <strong>{os.orderType.toUpperCase()}</strong></div>
+                                    <div>Shares: <strong>{os.quantity}</strong></div>
+                                    {os.orderType === "limit" && <div>Limit: <strong>${os.price.toFixed(2)}</strong></div>}
+                                    <div>Stop Loss: <strong>${os.stopLoss.toFixed(2)}</strong></div>
+                                    <div>Take Profit: <strong>{os.takeProfit > 0 ? `$${os.takeProfit.toFixed(2)}` : "None"}</strong></div>
+                                    <div>Total: <strong>${posValue.toFixed(2)}</strong></div>
+                                  </div>
+                                  <div className="order-confirm-actions">
+                                    <button
+                                      className="order-confirm-btn"
+                                      disabled={orderLoading[row.ticker]}
+                                      onClick={() => placeOrder(row.ticker)}
+                                    >
+                                      {orderLoading[row.ticker] ? "Placing..." : "Confirm & Place"}
+                                    </button>
+                                    <button
+                                      className="order-back-btn"
+                                      onClick={() => setOrderConfirming((prev) => ({ ...prev, [row.ticker]: false }))}
+                                    >
+                                      Back
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              {orderMessage[row.ticker] && (
+                                <div className={orderMessage[row.ticker]!.type === "success" ? "order-message-success" : "order-message-error"}>
+                                  {orderMessage[row.ticker]!.text}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
+                      </div>
+
+                      <div className="expander">
                         <div>
                           <h4>Technical Summary</h4>
                           {details[row.ticker] ? (
