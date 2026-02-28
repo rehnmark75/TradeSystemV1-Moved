@@ -997,7 +997,7 @@ class WatchlistScanner:
         - ATR % between 1.5% and 10%
         - Volume trend != 'distribution'
         - R:R ratio >= 1.5
-        - Crossover age 1-25 days (crossover watchlists only)
+        - Crossover age 1-10 days (crossover watchlists only)
 
         Score (0-100): DAQ(30%) + RS(25%) + R:R(20%) + Volume(10%) + Freshness(15%)
         """
@@ -1016,7 +1016,7 @@ class WatchlistScanner:
                     AND (
                         wr.crossover_date IS NULL
                         OR (
-                            (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 25
+                            (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 10
                         )
                     )
                 ),
@@ -1045,13 +1045,12 @@ class WatchlistScanner:
                         ELSE 0
                     END * 0.10)
 
-                    -- Crossover freshness (15%): peak at 3-10 days
+                    -- Crossover freshness (15%): peak at 3-7 days
                     + ROUND(CASE
                         WHEN wr.crossover_date IS NULL THEN 50
-                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 3 AND 10 THEN 100
+                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 3 AND 7 THEN 100
                         WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 2 THEN 70
-                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 11 AND 15 THEN 70
-                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 16 AND 25 THEN 40
+                        WHEN (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 8 AND 10 THEN 60
                         ELSE 10
                     END * 0.15)
                 )::integer,
@@ -1066,7 +1065,7 @@ class WatchlistScanner:
                         ('ATR 1.5-10%', COALESCE(wr.atr_percent, 0) >= 1.5 AND COALESCE(wr.atr_percent, 100) <= 10.0),
                         ('No distribution', COALESCE(wr.volume_trend, 'distribution') != 'distribution'),
                         ('R:R >= 1.5', COALESCE(wr.structure_rr_ratio, 0) >= 1.5),
-                        ('Age 1-25d', wr.crossover_date IS NULL OR (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 25)
+                        ('Age 1-10d', wr.crossover_date IS NULL OR (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 10)
                     ) AS criteria(criterion, passed)
                 )
             WHERE wr.status = 'active'
