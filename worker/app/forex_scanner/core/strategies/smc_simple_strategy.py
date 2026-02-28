@@ -3140,6 +3140,24 @@ class SMCSimpleStrategy:
                 confidence -= self.momentum_confidence_penalty
                 self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
 
+            # v2.40.0: RSI-based confidence adjustment
+            # Feb 2026 analysis: Winners avg RSI=52, Losers avg RSI=43
+            # Directional RSI penalty: penalize BUY when RSI < 40 (weak momentum)
+            # and SELL when RSI > 60 (strong upward momentum against trade)
+            if rsi_value is not None:
+                original_conf = confidence
+                if direction == 'BULL' and rsi_value < 40:
+                    # Buying into weak momentum - 10% penalty
+                    penalty = 0.10 * (1.0 - rsi_value / 40.0)  # Scales: RSI 40=0%, RSI 20=5%, RSI 0=10%
+                    confidence -= penalty
+                    self.logger.info(f"   📉 RSI penalty (BUY, RSI={rsi_value:.1f}): -{penalty*100:.1f}% → {confidence*100:.0f}%")
+                elif direction == 'BEAR' and rsi_value > 60:
+                    # Selling into strong upward momentum - 10% penalty
+                    penalty = 0.10 * ((rsi_value - 60.0) / 40.0)  # Scales: RSI 60=0%, RSI 80=5%, RSI 100=10%
+                    confidence -= penalty
+                    self.logger.info(f"   📉 RSI penalty (SELL, RSI={rsi_value:.1f}): -{penalty*100:.1f}% → {confidence*100:.0f}%")
+                confidence = max(confidence, 0.0)  # Floor at 0
+
             # v2.35.0: Apply HTF bias confidence multiplier
             # Only applies if htf_bias_confidence_multiplier_enabled=True and we have a valid score
             htf_bias_multiplier = trigger_details.get('htf_bias_confidence_multiplier')

@@ -660,7 +660,8 @@ class OrderExecutor:
                     self._update_alert_status(alert_id, 'placed')
                 elif result_status in ['error', 'skipped', 'blocked']:
                     # Order failed, was skipped (duplicate position), or blocked
-                    self._update_alert_status(alert_id, 'rejected')
+                    reason = f"Order {result_status}: {result.get('message', 'no details')}"
+                    self._update_alert_status(alert_id, 'rejected', rejection_reason=reason)
 
             # Track pending trade for performance monitoring (use internal epic for consistency)
             if result.get('status') == 'success':
@@ -685,7 +686,7 @@ class OrderExecutor:
 
             # v2.20.0 FIX: Update alert status on exception (was being skipped, leaving alerts stuck as 'pending')
             if alert_id:
-                self._update_alert_status(alert_id, 'rejected')
+                self._update_alert_status(alert_id, 'rejected', rejection_reason=error_msg)
                 self.logger.info(f"📝 Alert {alert_id} marked as 'rejected' after execution failure")
 
             return {
@@ -1666,15 +1667,17 @@ class OrderExecutor:
 
     # ========== v2.19.0: STATUS-BASED COOLDOWN SUPPORT ==========
 
-    def _update_alert_status(self, alert_id: int, status: str) -> bool:
+    def _update_alert_status(self, alert_id: int, status: str, rejection_reason: str = None) -> bool:
         """Update order_status in alert_history for status-based cooldowns.
 
         v2.19.0: Tracks order lifecycle for intelligent cooldown management.
+        v2.40.0: Added rejection_reason parameter to persist rejection details.
         Status values: pending, placed, filled, expired, rejected
 
         Args:
             alert_id: Database ID of the alert
             status: New order status
+            rejection_reason: Optional reason for rejection (persisted to notes column)
 
         Returns:
             True if update successful, False otherwise
@@ -1688,11 +1691,19 @@ class OrderExecutor:
                 password='postgres'
             )
             cursor = conn.cursor()
-            cursor.execute("""
-                UPDATE alert_history
-                SET order_status = %s, updated_at = NOW()
-                WHERE id = %s
-            """, (status, alert_id))
+            if rejection_reason and status == 'rejected':
+                cursor.execute("""
+                    UPDATE alert_history
+                    SET order_status = %s, updated_at = NOW(),
+                        notes = COALESCE(notes, '') || %s
+                    WHERE id = %s
+                """, (status, rejection_reason, alert_id))
+            else:
+                cursor.execute("""
+                    UPDATE alert_history
+                    SET order_status = %s, updated_at = NOW()
+                    WHERE id = %s
+                """, (status, alert_id))
             conn.commit()
             rows_updated = cursor.rowcount
             cursor.close()
@@ -1700,6 +1711,8 @@ class OrderExecutor:
 
             if rows_updated > 0:
                 self.logger.info(f"📊 Alert {alert_id} status -> {status}")
+                if rejection_reason:
+                    self.logger.info(f"   📝 Reason: {rejection_reason}")
                 return True
             else:
                 self.logger.warning(f"⚠️ Alert {alert_id} not found for status update")
