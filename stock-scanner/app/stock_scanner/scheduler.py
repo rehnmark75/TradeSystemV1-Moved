@@ -105,6 +105,14 @@ except ImportError:
     BrokerTradeSync = None
     RoboMarketsClient = None
 
+# Import stale order guardian
+try:
+    from stock_scanner.services.stale_order_guardian import StaleOrderGuardian
+    STALE_ORDER_GUARDIAN_AVAILABLE = True
+except ImportError:
+    STALE_ORDER_GUARDIAN_AVAILABLE = False
+    StaleOrderGuardian = None
+
 # Import deep analysis orchestrator for watchlist DAQ scoring
 try:
     from stock_scanner.services.deep_analysis import DeepAnalysisOrchestrator
@@ -185,6 +193,16 @@ class StockScheduler:
             'time': time(16, 0),      # 4:00 PM ET (market close)
             'type': 'broker',
             'description': 'Broker trades sync (market close)'
+        },
+        'stale_order_guardian_am': {
+            'time': time(9, 35),      # 9:35 AM ET (5 min after market open sync)
+            'type': 'guardian',
+            'description': 'Cancel stale unfilled orders (AM)'
+        },
+        'stale_order_guardian_pm': {
+            'time': time(16, 5),      # 4:05 PM ET (5 min after close sync)
+            'type': 'guardian',
+            'description': 'Cancel stale unfilled orders (PM)'
         },
         'post_market': {
             'time': time(16, 30),     # 4:30 PM ET
@@ -1176,6 +1194,62 @@ class StockScheduler:
         await self._log_pipeline_run('broker_sync', results, elapsed)
         return results
 
+    async def run_stale_order_guardian(self):
+        """
+        Check submitted orders and cancel stale ones.
+
+        Runs at:
+        - 9:35 AM ET (5 min after market open broker sync)
+        - 4:05 PM ET (5 min after market close broker sync)
+        """
+        logger.info("=" * 60)
+        logger.info("STALE ORDER GUARDIAN - Checking unfilled orders")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        if not STALE_ORDER_GUARDIAN_AVAILABLE:
+            logger.warning("[SKIP] Stale order guardian not available - missing dependencies")
+            return {'skipped': True, 'reason': 'dependencies not available'}
+
+        if not BROKER_SYNC_AVAILABLE:
+            logger.warning("[SKIP] Stale order guardian - broker client not available")
+            return {'skipped': True, 'reason': 'broker client not available'}
+
+        try:
+            api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
+            account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
+
+            if not api_key or not account_id:
+                logger.warning("[SKIP] Stale order guardian - missing API credentials")
+                return {'skipped': True, 'reason': 'missing API credentials'}
+
+            client = RoboMarketsClient(api_key=api_key, account_id=account_id)
+            guardian = StaleOrderGuardian(db_manager=self.db)
+
+            async with client:
+                results = await guardian.check_and_cancel(client)
+
+            logger.info(f"[OK] Guardian complete: "
+                       f"checked={results.get('checked', 0)}, "
+                       f"cancelled={results.get('cancelled', 0)}, "
+                       f"synced={results.get('synced', 0)}")
+
+            if results.get('reasons'):
+                for r in results['reasons']:
+                    logger.info(f"     Cancelled {r['ticker']} (order {r['db_id']}): {r['reason']}")
+
+        except Exception as e:
+            logger.error(f"Stale order guardian error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nStale order guardian complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('stale_order_guardian', results, elapsed)
+        return results
+
     async def weekly_sync(self):
         """Run weekly instrument sync from RoboMarkets + fundamentals update"""
         logger.info("=" * 60)
@@ -1501,6 +1575,8 @@ class StockScheduler:
                     await self.weekly_sync()
                 elif next_task in ("broker_sync_am", "broker_sync_pm"):
                     await self.run_broker_sync()
+                elif next_task in ("stale_order_guardian_am", "stale_order_guardian_pm"):
+                    await self.run_stale_order_guardian()
 
         except asyncio.CancelledError:
             logger.info("Scheduler cancelled")
@@ -1573,6 +1649,8 @@ async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[i
             await scheduler.fundamentals.run_fundamentals_pipeline()
         elif task == "brokersync":
             await scheduler.run_broker_sync()
+        elif task == "guardian":
+            await scheduler.run_stale_order_guardian()
         elif task == "techwldaq":
             if scheduler.deep_analysis_orchestrator:
                 results = await scheduler.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
@@ -1588,7 +1666,7 @@ async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[i
                 print("Deep Analysis Orchestrator not available")
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, techwldaq")
+            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, guardian, techwldaq")
     finally:
         await scheduler.cleanup()
 
@@ -1601,7 +1679,7 @@ def main():
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
-                               'techwldaq', 'status'],
+                               'guardian', 'techwldaq', 'status'],
                        help='Command to execute')
     parser.add_argument('--date', help='Watchlist scan date (YYYY-MM-DD) for recommendations')
     parser.add_argument('--limit', type=int, help='Max tickers to refresh (default config)')
@@ -1622,7 +1700,7 @@ def main():
 
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc', 'watchlist',
                           'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations', 'intraday',
-                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'techwldaq']:
+                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'guardian', 'techwldaq']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command, scan_date=args.date, limit=args.limit, force=args.force))
 
