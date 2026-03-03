@@ -7,5 +7,5 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #4842 | 10:12 AM | 🔵 | RS Calculator and Market Regime Classification System | ~431 |
+| #4838 | 10:10 AM | 🔵 | Separate dev-app Trading System with Order Execution | ~386 |
 </claude-mem-context>
