@@ -645,6 +645,7 @@ class BrokerTradeSync:
     async def sync_positions(self) -> Dict[str, int]:
         """
         Sync open positions from broker to database.
+        For new deals, applies any pending SL/TP from stock_orders via PUT /deals/{id}.
 
         Returns:
             Dict with sync statistics
@@ -656,6 +657,7 @@ class BrokerTradeSync:
 
             inserted = 0
             updated = 0
+            sl_tp_applied = 0
 
             for p in positions:
                 # Check if position exists
@@ -690,12 +692,68 @@ class BrokerTradeSync:
                     )
                     inserted += 1
 
-            logger.info(f"Synced positions: {inserted} inserted, {updated} updated")
-            return {"inserted": inserted, "updated": updated, "total": len(positions)}
+                    # If the deal has no SL/TP, check stock_orders for pending SL/TP
+                    if not p.stop_loss and not p.take_profit:
+                        applied = await self._apply_pending_sl_tp(p.deal_id, p.ticker)
+                        if applied:
+                            sl_tp_applied += 1
+
+            logger.info(f"Synced positions: {inserted} inserted, {updated} updated, {sl_tp_applied} SL/TP applied")
+            return {"inserted": inserted, "updated": updated, "total": len(positions), "sl_tp_applied": sl_tp_applied}
 
         except Exception as e:
             logger.error(f"Failed to sync positions: {e}")
             raise
+
+    async def _apply_pending_sl_tp(self, deal_id: str, broker_ticker: str) -> bool:
+        """
+        Check stock_orders for a matching order with SL/TP and apply it to the deal
+        via PUT /deals/{deal_id}. This handles the case where a limit order fills
+        and the broker doesn't carry over SL/TP from the order to the deal.
+
+        Args:
+            deal_id: Broker deal ID
+            broker_ticker: Broker ticker (e.g. ARLO.ny)
+
+        Returns:
+            True if SL/TP was successfully applied
+        """
+        # Strip exchange suffix to match our stock_orders ticker
+        plain_ticker = broker_ticker.split(".")[0]
+
+        try:
+            # Find the most recent submitted order for this ticker with SL/TP
+            order = await self.db.fetchrow("""
+                SELECT stop_loss, take_profit FROM stock_orders
+                WHERE ticker = $1 AND status = 'submitted'
+                  AND stop_loss IS NOT NULL AND stop_loss > 0
+                ORDER BY created_at DESC LIMIT 1
+            """, plain_ticker)
+
+            if not order or not order["stop_loss"]:
+                return False
+
+            sl = float(order["stop_loss"])
+            tp = float(order["take_profit"]) if order["take_profit"] else None
+
+            await self.client.modify_position(
+                deal_id=deal_id,
+                stop_loss=sl,
+                take_profit=tp
+            )
+
+            # Update broker_trades record with the applied SL/TP
+            await self.db.execute("""
+                UPDATE broker_trades SET stop_loss = $1, take_profit = $2, updated_at = NOW()
+                WHERE deal_id = $3
+            """, sl, tp, deal_id)
+
+            logger.info(f"Applied SL/TP to deal {deal_id} ({broker_ticker}): SL={sl}, TP={tp}")
+            return True
+
+        except Exception as e:
+            logger.error(f"Failed to apply SL/TP to deal {deal_id}: {e}")
+            return False
 
     async def sync_closed_trades(self, days: int = 30) -> Dict[str, int]:
         """

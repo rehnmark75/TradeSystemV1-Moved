@@ -444,10 +444,10 @@ class RoboMarketsClient:
             data["price"] = str(price)
 
         if stop_loss:
-            data["stopLoss"] = str(stop_loss)
+            data["stop_loss"] = str(stop_loss)
 
         if take_profit:
-            data["takeProfit"] = str(take_profit)
+            data["take_profit"] = str(take_profit)
 
         try:
             result = await self._request("POST", endpoint, data=data)
@@ -501,9 +501,9 @@ class RoboMarketsClient:
         if price:
             data["price"] = str(price)
         if stop_loss:
-            data["stopLoss"] = str(stop_loss)
+            data["stop_loss"] = str(stop_loss)
         if take_profit:
-            data["takeProfit"] = str(take_profit)
+            data["take_profit"] = str(take_profit)
 
         try:
             result = await self._request("PUT", endpoint, data=data)
@@ -641,9 +641,9 @@ class RoboMarketsClient:
 
         data = {}
         if stop_loss:
-            data["stopLoss"] = str(stop_loss)
+            data["stop_loss"] = str(stop_loss)
         if take_profit:
-            data["takeProfit"] = str(take_profit)
+            data["take_profit"] = str(take_profit)
 
         try:
             result = await self._request("PUT", endpoint, data=data)

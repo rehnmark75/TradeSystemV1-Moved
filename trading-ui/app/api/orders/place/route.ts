@@ -92,9 +92,9 @@ export async function POST(request: Request) {
     if (price && order_type === "limit") {
       formData.append("price", String(price));
     }
-    formData.append("stopLoss", String(stop_loss));
+    formData.append("stop_loss", String(stop_loss));
     if (take_profit && take_profit > 0) {
-      formData.append("takeProfit", String(take_profit));
+      formData.append("take_profit", String(take_profit));
     }
 
     let brokerOrderId: string | null = null;
@@ -128,6 +128,73 @@ export async function POST(request: Request) {
     } catch (err: unknown) {
       orderStatus = "rejected";
       errorMessage = err instanceof Error ? err.message : "Network error contacting broker";
+    }
+
+    // The broker ignores SL/TP sent during POST /orders creation.
+    // We must follow up with a PUT to apply them:
+    //   - Limit orders: PUT /orders/{order_id} (deal doesn't exist yet)
+    //   - Market orders: PUT /deals/{deal_id} (order fills instantly, creates a deal)
+    let slTpApplied = false;
+    if (orderStatus === "submitted" && brokerOrderId) {
+      const slTpForm = new URLSearchParams();
+      slTpForm.append("stop_loss", String(stop_loss));
+      if (take_profit && take_profit > 0) {
+        slTpForm.append("take_profit", String(take_profit));
+      }
+      const putHeaders = {
+        Authorization: `Bearer ${API_KEY}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+        Accept: "application/json",
+      };
+
+      try {
+        if (order_type === "limit") {
+          // Set SL/TP on the pending order — they'll carry over when it fills
+          const modifyRes = await fetch(
+            `${API_URL}/accounts/${ACCOUNT_ID}/orders/${brokerOrderId}`,
+            { method: "PUT", headers: putHeaders, body: slTpForm.toString() }
+          );
+          slTpApplied = modifyRes.ok;
+          if (!modifyRes.ok) {
+            const t = await modifyRes.text().catch(() => "");
+            console.error(`Failed to set SL/TP on order ${brokerOrderId}: ${t}`);
+          }
+        } else {
+          // Market order: wait for fill, then set SL/TP on the deal
+          await new Promise((r) => setTimeout(r, 1500));
+
+          const dealsRes = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/deals`, {
+            headers: { Authorization: `Bearer ${API_KEY}`, Accept: "application/json" },
+          });
+
+          if (dealsRes.ok) {
+            const dealsJson = await dealsRes.json() as Record<string, unknown>;
+            const deals = ((dealsJson?.data || []) as Array<Record<string, unknown>>);
+
+            // Find the most recent deal for our ticker (highest id)
+            const matchingDeals = deals
+              .filter((d) => d.ticker === brokerTicker)
+              .sort((a, b) => String(b.id).localeCompare(String(a.id)));
+
+            if (matchingDeals.length > 0) {
+              const dealId = String(matchingDeals[0].id);
+              const modifyRes = await fetch(
+                `${API_URL}/accounts/${ACCOUNT_ID}/deals/${dealId}`,
+                { method: "PUT", headers: putHeaders, body: slTpForm.toString() }
+              );
+              slTpApplied = modifyRes.ok;
+              if (!modifyRes.ok) {
+                const t = await modifyRes.text().catch(() => "");
+                console.error(`Failed to set SL/TP on deal ${dealId}: ${t}`);
+              }
+            } else {
+              console.warn(`No matching deal found for ${brokerTicker} to set SL/TP`);
+            }
+          }
+        }
+      } catch (slTpErr) {
+        console.error("Failed to apply SL/TP:", slTpErr);
+      }
     }
 
     // Write audit trail to stock_orders
@@ -171,6 +238,7 @@ export async function POST(request: Request) {
       price: price || null,
       stop_loss,
       take_profit: take_profit || null,
+      sl_tp_applied: slTpApplied,
     });
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : "Internal error";
