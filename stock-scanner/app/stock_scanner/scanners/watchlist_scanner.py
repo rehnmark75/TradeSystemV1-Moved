@@ -787,7 +787,15 @@ class WatchlistScanner:
 
                 -- Entry zone: current price -0.5% to +1%
                 suggested_entry_low = wr.price * 0.995,
-                suggested_entry_high = wr.price * 1.01
+                suggested_entry_high = wr.price * 1.01,
+
+                -- TradingView technical summary
+                tv_overall_score = sm.tv_overall_score,
+                tv_overall_signal = sm.tv_overall_signal,
+                tv_ma_buy = sm.tv_ma_buy,
+                tv_ma_sell = sm.tv_ma_sell,
+                tv_osc_buy = sm.tv_osc_buy,
+                tv_osc_sell = sm.tv_osc_sell
 
             FROM stock_screening_metrics sm
             WHERE wr.ticker = sm.ticker
@@ -998,8 +1006,9 @@ class WatchlistScanner:
         - Volume trend != 'distribution'
         - R:R ratio >= 1.5
         - Crossover age 1-10 days (crossover watchlists only)
+        - TV technical consensus not bearish (score > -20)
 
-        Score (0-100): DAQ(30%) + RS(25%) + R:R(20%) + Volume(10%) + Freshness(15%)
+        Score (0-100): DAQ(25%) + RS(20%) + TV Technical(15%) + R:R(17%) + Volume(8%) + Freshness(15%)
         """
         query = """
             UPDATE stock_watchlist_results wr
@@ -1019,16 +1028,21 @@ class WatchlistScanner:
                             (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 10
                         )
                     )
+                    AND COALESCE(wr.tv_overall_score, 0) > -20
                 ),
 
                 trade_ready_score = (
-                    -- DAQ component (30% weight, max 30 points)
-                    LEAST(ROUND(COALESCE(wr.daq_score, 0) * 0.30), 30)
+                    -- DAQ component (25% weight, max 25 points)
+                    LEAST(ROUND(COALESCE(wr.daq_score, 0) * 0.25), 25)
 
-                    -- RS component (25% weight, max 25 points)
-                    + LEAST(ROUND(COALESCE(wr.rs_percentile, 0) * 0.25), 25)
+                    -- RS component (20% weight, max 20 points)
+                    + LEAST(ROUND(COALESCE(wr.rs_percentile, 0) * 0.20), 20)
 
-                    -- R:R quality (20% weight): 1.5=50, 2.0=70, 3.0+=100
+                    -- TV Technical consensus (15% weight, max 15 points)
+                    -- tv_overall_score ranges -100 to +100, normalize to 0-100 then apply 15%
+                    + LEAST(ROUND(GREATEST((COALESCE(wr.tv_overall_score, 0) + 100) / 2, 0) * 0.15), 15)
+
+                    -- R:R quality (17% weight): 1.5=50, 2.0=70, 3.0+=100
                     + ROUND(LEAST(
                         CASE
                             WHEN COALESCE(wr.structure_rr_ratio, 0) >= 3.0 THEN 100
@@ -1036,14 +1050,14 @@ class WatchlistScanner:
                             WHEN COALESCE(wr.structure_rr_ratio, 0) >= 1.5 THEN 50 + (COALESCE(wr.structure_rr_ratio, 0) - 1.5) * 40
                             ELSE COALESCE(wr.structure_rr_ratio, 0) * 33.3
                         END
-                    , 100) * 0.20)
+                    , 100) * 0.17)
 
-                    -- Volume confirmation (10%): accumulation=100, neutral=50, distribution=0
+                    -- Volume confirmation (8%): accumulation=100, neutral=50, distribution=0
                     + ROUND(CASE
                         WHEN wr.volume_trend = 'accumulation' THEN 100
                         WHEN wr.volume_trend = 'neutral' THEN 50
                         ELSE 0
-                    END * 0.10)
+                    END * 0.08)
 
                     -- Crossover freshness (15%): peak at 3-7 days
                     + ROUND(CASE
@@ -1065,7 +1079,8 @@ class WatchlistScanner:
                         ('ATR 1.5-10%', COALESCE(wr.atr_percent, 0) >= 1.5 AND COALESCE(wr.atr_percent, 100) <= 10.0),
                         ('No distribution', COALESCE(wr.volume_trend, 'distribution') != 'distribution'),
                         ('R:R >= 1.5', COALESCE(wr.structure_rr_ratio, 0) >= 1.5),
-                        ('Age 1-10d', wr.crossover_date IS NULL OR (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 10)
+                        ('Age 1-10d', wr.crossover_date IS NULL OR (CURRENT_DATE - wr.crossover_date) + 1 BETWEEN 1 AND 10),
+                        ('TV not bearish (>-20)', COALESCE(wr.tv_overall_score, 0) > -20)
                     ) AS criteria(criterion, passed)
                 )
             WHERE wr.status = 'active'
