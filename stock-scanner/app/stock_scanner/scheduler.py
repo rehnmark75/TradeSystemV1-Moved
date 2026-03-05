@@ -651,6 +651,21 @@ class StockScheduler:
             logger.error(f"[FAIL] Technical Watchlist DAQ: {e}")
             results['technical_watchlist_daq'] = {'error': str(e)}
 
+        # === STAGE 8c: Recalculate trade_ready after DAQ scoring ===
+        # trade_ready is initially calculated in Stage 8 BEFORE DAQ scores exist,
+        # so it must be recalculated now that DAQ scores are populated.
+        logger.info("\n[STAGE 8c/11] Recalculating trade_ready with DAQ scores...")
+        try:
+            if self.scanner_manager:
+                from stock_scanner.scanners.watchlist_scanner import WatchlistScanner
+                wl_scanner = WatchlistScanner(self.db)
+                await wl_scanner.recalculate_trade_ready()
+                logger.info("[OK] Trade-ready recalculated with DAQ scores")
+            else:
+                logger.warning("[SKIP] Scanner Manager not available for trade_ready recalculation")
+        except Exception as e:
+            logger.error(f"[FAIL] Trade-ready recalculation: {e}")
+
         # === STAGE 9: Performance Tracking ===
         logger.info("\n[STAGE 9/11] Updating signal performance...")
         try:

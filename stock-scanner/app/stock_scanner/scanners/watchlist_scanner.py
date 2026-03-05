@@ -993,6 +993,10 @@ class WatchlistScanner:
         except Exception as e:
             logger.error(f"Failed to calculate TP/RR levels: {e}")
 
+    async def recalculate_trade_ready(self) -> None:
+        """Public method to recalculate trade_ready after DAQ scores are updated."""
+        await self._calculate_trade_ready()
+
     async def _calculate_trade_ready(self) -> None:
         """
         Calculate trade-ready filter and composite score for active watchlist entries.

@@ -116,7 +116,7 @@ export async function POST(request: Request) {
       let brokerData: Record<string, unknown> = {};
       try { brokerData = JSON.parse(brokerText); } catch { /* not JSON */ }
 
-      if (!brokerRes.ok) {
+      if (!brokerRes.ok || brokerData?.code === "error") {
         orderStatus = "rejected";
         errorMessage = String(
           brokerData?.msg || brokerData?.message || brokerData?.error || brokerText || `Broker returned ${brokerRes.status}`
