@@ -533,7 +533,8 @@ class AlertHistoryManager:
                         ema_9, ema_21, ema_50, ema_200, price_vs_ema_200, ema_stack_order,
                         candle_body_pips, candle_upper_wick_pips, candle_lower_wick_pips, candle_type,
                         htf_candle_direction, htf_candle_direction_prev,
-                        htf_bias_score, htf_bias_mode, htf_bias_details
+                        htf_bias_score, htf_bias_mode, htf_bias_details,
+                        lpf_penalty, lpf_would_block
                     ) VALUES (
                         %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
@@ -571,7 +572,8 @@ class AlertHistoryManager:
                         %(ema_9)s, %(ema_21)s, %(ema_50)s, %(ema_200)s, %(price_vs_ema_200)s, %(ema_stack_order)s,
                         %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s,
                         %(htf_candle_direction)s, %(htf_candle_direction_prev)s,
-                        %(htf_bias_score)s, %(htf_bias_mode)s, %(htf_bias_details)s
+                        %(htf_bias_score)s, %(htf_bias_mode)s, %(htf_bias_details)s,
+                        %(lpf_penalty)s, %(lpf_would_block)s
                     ) RETURNING id
                 '''
 
@@ -1561,6 +1563,10 @@ class AlertHistoryManager:
                 'htf_bias_score': signal.get('htf_bias_score'),
                 'htf_bias_mode': signal.get('htf_bias_mode'),
                 'htf_bias_details': signal.get('htf_bias_details'),
+
+                # Loss Prevention Filter
+                'lpf_penalty': signal.get('lpf_penalty'),
+                'lpf_would_block': signal.get('lpf_would_block', False),
 
                 # Deduplication
                 'signal_hash': signal_hash,

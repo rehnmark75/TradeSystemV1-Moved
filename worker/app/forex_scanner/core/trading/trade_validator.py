@@ -74,6 +74,14 @@ except ImportError:
     MARKET_INTELLIGENCE_AVAILABLE = False
     logging.warning("⚠️ Market intelligence not available - signals will be saved without market context")
 
+# NEW: Import loss prevention filter for pattern-based trade blocking
+try:
+    from core.trading.loss_prevention_filter import LossPreventionFilter
+    LPF_AVAILABLE = True
+except ImportError:
+    LPF_AVAILABLE = False
+    logging.warning("⚠️ Loss prevention filter not available - LPF disabled")
+
 # Import scanner config service for database-driven settings - REQUIRED, NO FALLBACK
 try:
     from forex_scanner.services.scanner_config_service import get_scanner_config
@@ -354,6 +362,19 @@ class TradeValidator:
             else:
                 self.logger.info("📊 Market Intelligence capture disabled in config")
         
+        # Loss Prevention Filter initialization
+        self.loss_prevention_filter = None
+        if LPF_AVAILABLE:
+            try:
+                self.loss_prevention_filter = LossPreventionFilter(backtest_mode=self.backtest_mode)
+                if self.loss_prevention_filter.is_enabled:
+                    self.logger.info(f"🛡️ Loss Prevention Filter initialized | mode={self.loss_prevention_filter.block_mode}")
+                else:
+                    self.logger.info("🛡️ Loss Prevention Filter loaded but disabled in config")
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to initialize Loss Prevention Filter: {e}")
+                self.loss_prevention_filter = None
+
         # Validation statistics
         self.validation_stats = {
             'total_validations': 0,
@@ -1292,6 +1313,44 @@ class TradeValidator:
                     self.logger.info(f"✅ BACKTEST STEP 12 COMPLETED - Market Intelligence capture")
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 12 SKIPPED - Market Intelligence capture (disabled)")
+
+            # 12. Loss Prevention Filter - pattern-based trade blocking
+            # Runs before Claude to save expensive API calls on known losing patterns
+            if self.loss_prevention_filter and self.loss_prevention_filter.is_enabled:
+                # In backtest mode, derive timestamp from signal
+                lpf_timestamp = None
+                if self.backtest_mode:
+                    for ts_field in ['signal_timestamp', 'market_timestamp', 'timestamp']:
+                        ts = signal.get(ts_field)
+                        if ts and isinstance(ts, datetime):
+                            lpf_timestamp = ts
+                            break
+
+                lpf_result = self.loss_prevention_filter.evaluate(signal, signal_timestamp=lpf_timestamp)
+
+                # Attach results to signal for alert_history storage
+                signal['lpf_penalty'] = lpf_result['total_penalty']
+                signal['lpf_would_block'] = lpf_result['decision'] in ('would_block', 'blocked')
+                signal['lpf_triggered_rules'] = [r['rule_name'] for r in lpf_result['triggered_rules']]
+
+                if not lpf_result['allowed']:
+                    self.validation_stats['failed_other'] += 1
+                    rules_str = ', '.join(signal['lpf_triggered_rules'])
+                    msg = f"LPF blocked (penalty={lpf_result['total_penalty']:.2f}, rules={rules_str})"
+                    if self.backtest_mode:
+                        self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - {msg}")
+                    return False, msg
+                elif lpf_result['decision'] == 'would_block':
+                    if self.backtest_mode:
+                        self.logger.info(f"👁️ BACKTEST STEP 12 MONITOR - LPF would block (penalty={lpf_result['total_penalty']:.2f})")
+                elif self.backtest_mode:
+                    self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Loss Prevention Filter (penalty={lpf_result['total_penalty']:.2f})")
+            else:
+                signal['lpf_penalty'] = None
+                signal['lpf_would_block'] = False
+                signal['lpf_triggered_rules'] = []
+                if self.backtest_mode:
+                    self.logger.info(f"✅ BACKTEST STEP 12 SKIPPED - Loss Prevention Filter (disabled)")
 
             # 13. ⭐ Claude AI filtering - FINAL VALIDATOR (if enabled) ⭐
             # Claude is the most comprehensive and expensive check, so it runs last
