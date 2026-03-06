@@ -80,16 +80,16 @@ class RangingMarketConfig:
     squeeze_kc_mult: float = 1.5
     squeeze_momentum_length: int = 12
 
-    # RSI
+    # RSI (widened for ranging - 30/70 too extreme, only fires in trending conditions)
     rsi_period: int = 14
-    rsi_overbought: int = 70
-    rsi_oversold: int = 30
+    rsi_overbought: int = 62
+    rsi_oversold: int = 38
 
-    # Stochastic
+    # Stochastic (widened for ranging - 20/80 too extreme, oscillators stay mid-range)
     stoch_period: int = 14
     stoch_smooth_k: int = 3
-    stoch_overbought: int = 80
-    stoch_oversold: int = 20
+    stoch_overbought: int = 72
+    stoch_oversold: int = 28
 
     # ==========================================================================
     # SIGNAL QUALIFICATION WEIGHTS (v4.0)
@@ -125,7 +125,7 @@ class RangingMarketConfig:
     # ==========================================================================
 
     sr_bounce_required: bool = False  # Made optional for flexibility
-    sr_lookback_bars: int = 20
+    sr_lookback_bars: int = 50  # Extended from 20 (5h on 15m = too short for range boundaries)
     sr_proximity_pips: float = 10.0
 
     # ==========================================================================
@@ -140,11 +140,16 @@ class RangingMarketConfig:
     ny_session_start: int = 12
     ny_session_end: int = 21
 
-    # Session quality bonuses (0-15 scale)
-    asian_session_bonus: int = 15    # Best for ranging
-    london_session_bonus: int = 5    # Moderate
-    ny_session_bonus: int = 5        # Moderate
-    overlap_session_bonus: int = 0   # Worst for ranging
+    # Session quality bonuses (can be negative to penalize bad sessions)
+    # Data-backed: London is ONLY profitable session in ranging (+$74, 57% WR)
+    # Asian early (0-3 UTC) loses money despite high WR due to win/loss asymmetry
+    # NY/Overlap/Off Hours are catastrophic (-$1,896 combined)
+    london_session_bonus: int = 20     # Best for ranging (57% WR, +$74)
+    asian_late_session_bonus: int = 10 # Hours 4-7 UTC, moderate
+    asian_early_session_bonus: int = 5 # Hours 0-3 UTC, poor despite WR
+    ny_session_bonus: int = -15        # 37.5% WR, -$837
+    overlap_session_bonus: int = -10   # 42.9% WR, -$659
+    off_hours_session_bonus: int = -20 # 35.7% WR, -$401
 
     # ==========================================================================
     # RISK MANAGEMENT
@@ -276,10 +281,9 @@ class RangingMarketConfig:
                             value = bool(value)
                         setattr(config, key, value)
 
-            # Load per-pair overrides
+            # Load ALL per-pair overrides (including disabled) so is_pair_enabled works
             cur.execute("""
                 SELECT * FROM ranging_market_pair_overrides
-                WHERE is_enabled = TRUE
             """)
             override_rows = cur.fetchall()
 
@@ -877,22 +881,42 @@ class RangingMarketStrategy(StrategyInterface):
             return 0  # ADX too high
 
     def _calc_session_score(self, current_timestamp: Optional[datetime] = None) -> Tuple[str, int]:
-        """Calculate session bonus score. Asian session best for ranging."""
+        """
+        Calculate session bonus/penalty score.
+
+        Data-backed session performance in ranging markets:
+        - London (7-11 excl 11, 12-15): ONLY profitable session, 60% WR, +125 pips
+        - Asian late (4-7): moderate, decent WR but low dollar returns
+        - Asian early (0-3): high WR but negative PnL due to win/loss asymmetry
+        - NY (16-20): catastrophic, 37.5% WR, -$837
+        - Overlap (12-15): 42.9% WR, -$659 (but London hours 12-15 are good)
+        - Off hours (21-23): 35.7% WR, -$401
+
+        Negative scores act as penalties, making it harder to reach quality threshold.
+        """
         now = current_timestamp or datetime.now(timezone.utc)
         if now.tzinfo is None:
             now = now.replace(tzinfo=timezone.utc)
         hour = now.hour
 
-        if self.config.asian_session_start <= hour < self.config.asian_session_end:
-            return 'asian', self.config.asian_session_bonus
-        elif self.config.london_session_start <= hour < self.config.ny_session_start:
+        # London pure session (7-11, best hours are 7-10, 12-15)
+        if 7 <= hour <= 15 and hour != 11:
             return 'london', self.config.london_session_bonus
-        elif self.config.ny_session_start <= hour < self.config.london_session_end:
-            return 'overlap', self.config.overlap_session_bonus
-        elif self.config.ny_session_start <= hour < self.config.ny_session_end:
+        # Hour 11 - London dead zone (20% WR, -8.75 avg pips)
+        elif hour == 11:
+            return 'london_dead', self.config.off_hours_session_bonus
+        # Asian late (4-7 UTC) - moderate
+        elif 4 <= hour < 7:
+            return 'asian_late', self.config.asian_late_session_bonus
+        # Asian early (0-3 UTC) - poor dollar returns
+        elif 0 <= hour < 4:
+            return 'asian_early', self.config.asian_early_session_bonus
+        # NY session (16-20)
+        elif 16 <= hour <= 20:
             return 'new_york', self.config.ny_session_bonus
+        # Off hours (21-23)
         else:
-            return 'off_hours', 0
+            return 'off_hours', self.config.off_hours_session_bonus
 
     # ==========================================================================
     # PHASE 4: SIGNAL BUILDING

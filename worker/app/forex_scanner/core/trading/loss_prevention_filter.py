@@ -212,6 +212,10 @@ class LossPreventionFilter:
                 return self._check_regime_and_alignment(cond, signal)
             elif rule_type == 'direction_and_indicator':
                 return self._check_direction_and_indicator(cond, signal)
+            elif rule_type == 'hour_and_regime':
+                return self._check_hours(cond, signal, signal_timestamp) and self._check_regime(cond, signal)
+            elif rule_type == 'session_and_regime':
+                return self._check_session(cond, signal) and self._check_regime(cond, signal)
             elif rule_type == 'indicator_threshold':
                 return self._check_indicator_threshold(cond, signal)
             else:
@@ -288,6 +292,10 @@ class LossPreventionFilter:
         if direction != expected_dir:
             return False
         return self._check_indicator_threshold(cond, signal)
+
+    def _check_session(self, cond: Dict, signal: Dict) -> bool:
+        session = signal.get('market_session', '') or signal.get('session', '')
+        return str(session).lower() == cond.get('session', '').lower()
 
     def _check_indicator_threshold(self, cond: Dict, signal: Dict) -> bool:
         indicator = cond.get('indicator', '')
