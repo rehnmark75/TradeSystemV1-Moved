@@ -505,7 +505,7 @@ class SignalDetector:
             if routed_strategy == 'RANGING_MARKET' and self._strategy_router:
                 try:
                     self.logger.debug(f"🔍 [RANGING_MARKET] Starting detection for {epic}")
-                    signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe)
+                    signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe, routing_context=routing_result)
                     individual_results['ranging_market'] = signal
                     if signal:
                         all_signals.append(signal)
@@ -1060,7 +1060,8 @@ class SignalDetector:
         pair: str,
         spread_pips: float = 1.5,
         timeframe: str = '15m',
-        current_timestamp: datetime = None
+        current_timestamp: datetime = None,
+        routing_context: Dict = None
     ) -> Optional[Dict]:
         """
         Detect signals using the Ranging Market strategy
@@ -1126,7 +1127,8 @@ class SignalDetector:
                 epic=epic,
                 pair=pair,
                 spread_pips=spread_pips,
-                current_timestamp=current_timestamp
+                current_timestamp=current_timestamp,
+                routing_context=routing_context
             )
 
             # Enhance signal with technical indicators if found

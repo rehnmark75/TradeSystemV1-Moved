@@ -476,21 +476,25 @@ class RangingMarketStrategy(StrategyInterface):
             return None
 
         if not self.config.is_pair_enabled(epic):
+            self.logger.info(f"[RANGING_MARKET] ⛔ {epic} - Pair disabled, skipping")
             return None
 
         if not self._check_cooldown(epic):
+            self.logger.info(f"[RANGING_MARKET] ⏳ {epic} - In cooldown, skipping")
             return None
 
         # Phase 1: Check regime/ADX filter
         adx_value = self._get_adx(df)
         regime_ok = self._check_regime_filter(epic, adx_value, routing_context)
         if not regime_ok:
+            self.logger.info(f"[RANGING_MARKET] ❌ {epic} - ADX {adx_value:.1f} too high, rejected")
             return None
 
         # Phase 2: Detect oscillator signals
         oscillator_results = self._detect_oscillator_confluence(df, epic)
         if not oscillator_results:
             self._log_rejection(epic, "NO_OSCILLATOR_SIGNALS")
+            self.logger.info(f"[RANGING_MARKET] 📊 {epic} - No oscillator confluence (need {self.config.get_pair_min_oscillator_agreement(epic)}/3)")
             return None
 
         # Phase 3: Qualify the signal
@@ -507,6 +511,15 @@ class RangingMarketStrategy(StrategyInterface):
                 epic,
                 qualification.rejection_reason or "QUALITY_TOO_LOW",
                 {'quality_score': qualification.quality_score}
+            )
+            self.logger.info(
+                f"[RANGING_MARKET] 📉 {epic} - Quality {qualification.quality_score} < "
+                f"{self.config.get_pair_min_quality_score(epic)} "
+                f"(osc={qualification.oscillators_agreeing}, session={qualification.session}, "
+                f"scores: osc_agree={qualification.oscillator_agreement_score}, "
+                f"osc_str={qualification.oscillator_strength_score}, "
+                f"sr={qualification.sr_proximity_score}, adx={qualification.adx_condition_score}, "
+                f"sess={qualification.session_bonus_score})"
             )
             return None
 
