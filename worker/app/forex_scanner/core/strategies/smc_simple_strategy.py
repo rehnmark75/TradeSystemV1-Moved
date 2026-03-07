@@ -1425,6 +1425,7 @@ class SMCSimpleStrategy:
         self.entry_tf = pair_config['entry_timeframe']
         self.min_confidence = pair_config['min_confidence']
         self.cooldown_hours = pair_config['cooldown_minutes'] / 60.0
+        self.scalp_cooldown_minutes = pair_config['cooldown_minutes']
         self.scalp_swing_break_tolerance_pips = pair_config['swing_break_tolerance_pips']
 
         # v2.22.0: Apply per-pair limit offset for scalp mode
@@ -3033,59 +3034,53 @@ class SMCSimpleStrategy:
                 self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips)")
                 self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
 
-            # Validate R:R - TEMPORARILY DISABLED
-            # TODO: Re-enable R:R validation after testing
-            # if rr_ratio < self.min_rr_ratio:
-            #     reason = f"R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})"
-            #     self.logger.info(f"   ❌ {reason}")
-            #     # Track rejection
-            #     risk_result = {
-            #         'entry_price': entry_price,
-            #         'stop_loss': stop_loss,
-            #         'take_profit': take_profit,
-            #         'risk_pips': risk_pips,
-            #         'reward_pips': reward_pips,
-            #         'rr_ratio': rr_ratio,
-            #     }
-            #     self._track_rejection(
-            #         stage='RISK_RR',
-            #         reason=reason,
-            #         epic=epic,
-            #         pair=pair,
-            #         candle_timestamp=candle_timestamp,
-            #         direction=direction,
-            #         context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
-            #     )
-            #     return None
+            # Validate R:R ratio (re-enabled Mar 2026 - data shows inverted R:R causes losses)
+            if rr_ratio < self.min_rr_ratio:
+                reason = f"R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})"
+                self.logger.info(f"   ❌ {reason}")
+                # Track rejection
+                risk_result = {
+                    'entry_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_pips': risk_pips,
+                    'reward_pips': reward_pips,
+                    'rr_ratio': rr_ratio,
+                }
+                self._track_rejection(
+                    stage='RISK_RR',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
+                )
+                return None
 
-            self.logger.info(f"   ⚠️ R:R check DISABLED - ratio: {rr_ratio:.2f} (min was {self.min_rr_ratio})")
-
-            # Validate minimum TP - TEMPORARILY DISABLED
-            # TODO: Re-enable TP validation after testing
-            # if reward_pips < self.min_tp_pips:
-            #     reason = f"TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)"
-            #     self.logger.info(f"   ❌ {reason}")
-            #     # Track rejection
-            #     risk_result = {
-            #         'entry_price': entry_price,
-            #         'stop_loss': stop_loss,
-            #         'take_profit': take_profit,
-            #         'risk_pips': risk_pips,
-            #         'reward_pips': reward_pips,
-            #         'rr_ratio': rr_ratio,
-            #     }
-            #     self._track_rejection(
-            #         stage='RISK_TP',
-            #         reason=reason,
-            #         epic=epic,
-            #         pair=pair,
-            #         candle_timestamp=candle_timestamp,
-            #         direction=direction,
-            #         context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
-            #     )
-            #     return None
-
-            self.logger.info(f"   ⚠️ TP check DISABLED - reward: {reward_pips:.1f} pips (min was {self.min_tp_pips})")
+            # Validate minimum TP (re-enabled Mar 2026)
+            if reward_pips < self.min_tp_pips:
+                reason = f"TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)"
+                self.logger.info(f"   ❌ {reason}")
+                # Track rejection
+                risk_result = {
+                    'entry_price': entry_price,
+                    'stop_loss': stop_loss,
+                    'take_profit': take_profit,
+                    'risk_pips': risk_pips,
+                    'reward_pips': reward_pips,
+                    'rr_ratio': rr_ratio,
+                }
+                self._track_rejection(
+                    stage='RISK_TP',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value, ema_result=ema_result, swing_result=swing_result, pullback_result=pullback_result, risk_result=risk_result, direction=direction)
+                )
+                return None
 
             # ================================================================
             # STEP 5: Calculate Confidence Score
@@ -3842,6 +3837,25 @@ class SMCSimpleStrategy:
             # ================================================================
             # v2.31.1: Track signal detected (before filters) for backtest stats
             self._track_signal_detected()
+
+            # ================================================================
+            # BREAKOUT REGIME BLOCK (Mar 2026)
+            # Data: 40% WR, -$901 on 20 breakout trades. Block all modes.
+            # ================================================================
+            regime_detected = signal.get('market_regime_detected', 'unknown')
+            if regime_detected == 'breakout':
+                reason = f"Breakout regime blocked (market_regime={regime_detected}, 40% WR historically)"
+                self.logger.info(f"\n🚫 REGIME FILTER: {reason}")
+                self._track_rejection(
+                    stage='REGIME_BREAKOUT',
+                    reason=reason,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=candle_timestamp,
+                    direction=direction,
+                    context=self._collect_market_context(df_trigger, df_4h, entry_df, pip_value, direction=direction)
+                )
+                return None
 
             if self.scalp_mode_enabled:
                 filter_passed, filter_reason = self._apply_pair_scalp_filters(
