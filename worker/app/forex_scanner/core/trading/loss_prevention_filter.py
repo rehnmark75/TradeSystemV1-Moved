@@ -218,6 +218,8 @@ class LossPreventionFilter:
                 return self._check_session(cond, signal) and self._check_regime(cond, signal)
             elif rule_type == 'indicator_threshold':
                 return self._check_indicator_threshold(cond, signal)
+            elif rule_type == 'move_exhaustion':
+                return self._check_move_exhaustion(cond, signal)
             else:
                 logger.debug(f"🛡️ LPF: Unknown rule type '{rule_type}' in {rule['rule_name']}")
                 return False
@@ -312,6 +314,75 @@ class LossPreventionFilter:
         if 'min_value' in cond:
             return val >= float(cond['min_value'])
         return False
+
+    def _check_move_exhaustion(self, cond: Dict, signal: Dict) -> bool:
+        """Check if multiple exhaustion dimensions converge against trade direction."""
+        direction = signal.get('signal_type', '').upper()
+        if direction == 'BEAR':
+            direction = 'SELL'
+        elif direction == 'BULL':
+            direction = 'BUY'
+
+        min_triggers = cond.get('min_triggers', 3)
+        triggers = 0
+        checked = 0
+
+        # 1. RSI extreme against direction
+        rsi = signal.get('rsi')
+        if rsi is not None:
+            checked += 1
+            rsi_threshold = cond.get('rsi_threshold', 25)
+            if direction == 'SELL' and float(rsi) < rsi_threshold:
+                triggers += 1
+            elif direction == 'BUY' and float(rsi) > (100 - rsi_threshold):
+                triggers += 1
+
+        # 2. Stochastic extreme against direction
+        stoch = signal.get('stoch_k')
+        if stoch is not None:
+            checked += 1
+            stoch_threshold = cond.get('stoch_threshold', 15)
+            if direction == 'SELL' and float(stoch) < stoch_threshold:
+                triggers += 1
+            elif direction == 'BUY' and float(stoch) > (100 - stoch_threshold):
+                triggers += 1
+
+        # 3. EMA overextension (price too far from mean)
+        ema_dist = signal.get('ema_distance_pips')
+        if ema_dist is not None:
+            checked += 1
+            ema_max_pips = cond.get('ema_max_distance_pips', 40)
+            if abs(float(ema_dist)) > ema_max_pips:
+                triggers += 1
+
+        # 4. Low efficiency ratio (choppy/exhausted market)
+        er = signal.get('efficiency_ratio')
+        if er is not None:
+            checked += 1
+            er_max = cond.get('er_max', 0.15)
+            if float(er) < er_max:
+                triggers += 1
+
+        # 5. Declining volume
+        vol_trend = signal.get('volume_trend', '')
+        if vol_trend:
+            checked += 1
+            if vol_trend == 'decreasing':
+                triggers += 1
+
+        # 6. ATR percentile extreme (volatility spike = exhaustion)
+        atr_pct = signal.get('atr_percentile')
+        if atr_pct is not None:
+            checked += 1
+            atr_pct_min = cond.get('atr_pct_min', 0.85)
+            if float(atr_pct) > atr_pct_min:
+                triggers += 1
+
+        # Need minimum data to make a decision
+        if checked < 3:
+            return False
+
+        return triggers >= min_triggers
 
     # ---- Helpers ----
 
