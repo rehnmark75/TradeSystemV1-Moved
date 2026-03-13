@@ -193,11 +193,11 @@ class LossPreventionFilter:
             if rule_type == 'pair':
                 return self._check_pair(cond, signal)
             elif rule_type == 'pair_and_confidence':
-                return self._check_pair(cond, signal) and self._check_confidence_min(cond, signal)
+                return self._check_pair(cond, signal) and self._check_direction(cond, signal) and self._check_confidence_range(cond, signal)
             elif rule_type == 'pair_and_regime':
-                return self._check_pair(cond, signal) and self._check_regime(cond, signal)
+                return self._check_pair(cond, signal) and self._check_direction(cond, signal) and self._check_regime(cond, signal)
             elif rule_type == 'pair_and_hours':
-                return self._check_pair(cond, signal) and self._check_hours(cond, signal, signal_timestamp)
+                return self._check_pair(cond, signal) and self._check_direction(cond, signal) and self._check_hours(cond, signal, signal_timestamp)
             elif rule_type == 'confidence_range':
                 return self._check_confidence_range(cond, signal)
             elif rule_type == 'multi_threshold':
@@ -216,6 +216,8 @@ class LossPreventionFilter:
                 return self._check_hours(cond, signal, signal_timestamp) and self._check_regime(cond, signal)
             elif rule_type == 'session_and_regime':
                 return self._check_session(cond, signal) and self._check_regime(cond, signal)
+            elif rule_type == 'pair_direction_bias':
+                return self._check_pair(cond, signal) and self._check_direction(cond, signal) and self._check_market_bias(cond, signal)
             elif rule_type == 'indicator_threshold':
                 return self._check_indicator_threshold(cond, signal)
             elif rule_type == 'move_exhaustion':
@@ -228,6 +230,18 @@ class LossPreventionFilter:
             return False
 
     # ---- Rule checkers ----
+
+    def _check_direction(self, cond: Dict, signal: Dict) -> bool:
+        """Check if signal direction matches rule's direction filter. Returns True if no filter or match."""
+        required_dir = cond.get('direction', '')
+        if not required_dir:
+            return True
+        sig_dir = signal.get('signal_type', '').upper()
+        if sig_dir == 'BEAR':
+            sig_dir = 'SELL'
+        elif sig_dir == 'BULL':
+            sig_dir = 'BUY'
+        return sig_dir == required_dir.upper()
 
     def _check_pair(self, cond: Dict, signal: Dict) -> bool:
         epic = signal.get('epic', '')
@@ -298,6 +312,10 @@ class LossPreventionFilter:
     def _check_session(self, cond: Dict, signal: Dict) -> bool:
         session = signal.get('market_session', '') or signal.get('session', '')
         return str(session).lower() == cond.get('session', '').lower()
+
+    def _check_market_bias(self, cond: Dict, signal: Dict) -> bool:
+        bias = signal.get('market_bias', '') or signal.get('htf_bias', '') or ''
+        return str(bias).lower() == cond.get('market_bias', '').lower()
 
     def _check_indicator_threshold(self, cond: Dict, signal: Dict) -> bool:
         indicator = cond.get('indicator', '')
