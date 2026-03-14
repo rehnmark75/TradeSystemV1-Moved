@@ -513,8 +513,9 @@ The following pairs are in **monitor-only mode** - signals are logged but NOT tr
 
 | Pair | Reason | Check Status |
 |------|--------|--------------|
-| **AUDUSD** | Moderate PF (1.80), filters degrade performance | `parameter_overrides->>'monitor_only'` |
 | **USDCHF** | Breakeven (0.99 PF), all filters degrade | `parameter_overrides->>'monitor_only'` |
+
+**Re-enabled:** AUDUSD was re-enabled Mar 14, 2026 after strong week (72.7% WR, +£505 in 11 trades).
 
 ```sql
 -- Check monitor-only status

@@ -552,9 +552,9 @@ PAIR_TRAILING_CONFIGS = {
 SCALP_TRAILING_CONFIGS = {
     # ========== USDCAD - HIGHEST PRIORITY (100% success rate) ==========
     'CS.D.USDCAD.MINI.IP': {
-        'early_breakeven_trigger_points': 6,    # Quick BE protection
+        'early_breakeven_trigger_points': 10,   # Raised from 6→10: 50% of 20-pip TP (was 30%)
         'early_breakeven_buffer_points': 1,     # Lock +1 pip (from data: improve from 0.5)
-        'stage1_trigger_points': 10,            # Stage1 at +10 pips
+        'stage1_trigger_points': 10,            # Stage1 at +10 pips (aligned with BE)
         'stage1_lock_points': 5,                # Lock +5 pips
         'stage2_trigger_points': 15,            # Stage2 at +15 pips - lock solid profit
         'stage2_lock_points': 10,               # Lock +10 pips
@@ -562,7 +562,7 @@ SCALP_TRAILING_CONFIGS = {
         'stage3_atr_multiplier': 1.5,           # Tighter ATR for scalping
         'stage3_min_distance': 5,
         'min_trail_distance': 6,                # 12 pip initial stop (optimal from data)
-        'break_even_trigger_points': 6,
+        'break_even_trigger_points': 10,        # Raised from 6→10: match early BE
         'enable_partial_close': False,
         'partial_close_trigger_points': 10,     # Close 50% at +10 pips
         'partial_close_size': 0.5,
