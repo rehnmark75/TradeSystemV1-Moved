@@ -41,13 +41,13 @@ class FVGRetestConfig:
     htf_ema_period: int = 200
 
     # SHARED RISK
-    fixed_stop_loss_pips: float = 12.0
+    fixed_stop_loss_pips: float = 10.0
     fixed_take_profit_pips: float = 12.0
     sl_buffer_pips: float = 3.0
     min_rr_ratio: float = 1.0
 
     # CONFIDENCE
-    min_confidence: float = 0.50
+    min_confidence: float = 0.65
     max_confidence: float = 0.90
 
     # SWING DETECTION (Pine: pivotLen=5 on higher TF; reduced to 3 for 5m chart)

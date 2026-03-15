@@ -354,7 +354,7 @@ class FVGRetestStrategy(StrategyInterface):
             # CLOSE-based break detection (Pine: crossover on close, not wick)
             # Look for a recent candle whose CLOSE crossed above the major high
             break_idx = None
-            for i in range(max(current_idx - 10, 0), current_idx + 1):
+            for i in range(max(current_idx - 15, 0), current_idx + 1):
                 if closes[i] > major_level and (i == 0 or closes[i - 1] <= major_level):
                     break_idx = i
 
@@ -379,7 +379,7 @@ class FVGRetestStrategy(StrategyInterface):
 
             # CLOSE-based break detection
             break_idx = None
-            for i in range(max(current_idx - 10, 0), current_idx + 1):
+            for i in range(max(current_idx - 15, 0), current_idx + 1):
                 if closes[i] < major_level and (i == 0 or closes[i - 1] >= major_level):
                     break_idx = i
 
@@ -681,15 +681,11 @@ class FVGRetestStrategy(StrategyInterface):
             self.logger.debug(f"[FVG_RETEST] {pair}: Type A SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
             return None
 
-        # Use fixed SL if configured and tighter
+        # Cap SL to fixed maximum — reject if FVG-based SL is too wide
         fixed_sl = config.get_pair_fixed_stop_loss(epic)
-        if fixed_sl and sl_pips > fixed_sl * 1.5:
-            # FVG-based SL is too wide, use fixed
-            if setup.direction == 'BULL':
-                sl_price = current_price - fixed_sl * pip_value
-            else:
-                sl_price = current_price + fixed_sl * pip_value
-            sl_pips = fixed_sl
+        if fixed_sl and sl_pips > fixed_sl:
+            self.logger.debug(f"[FVG_RETEST] {pair}: Type A SL too wide ({sl_pips:.1f} > {fixed_sl} pips cap)")
+            return None
 
         # TP: fixed per-pair config with R:R enforcement
         fixed_tp = config.get_pair_fixed_take_profit(epic)
@@ -768,14 +764,11 @@ class FVGRetestStrategy(StrategyInterface):
             self.logger.debug(f"[FVG_RETEST] {pair}: Type B SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
             return None
 
-        # Clamp SL to fixed max
+        # Cap SL to fixed maximum — reject if swing-based SL is too wide
         fixed_sl = config.get_pair_fixed_stop_loss(epic)
-        if fixed_sl and sl_pips > fixed_sl * 1.5:
-            if direction == 'BULL':
-                sl_price = current_price - fixed_sl * pip_value
-            else:
-                sl_price = current_price + fixed_sl * pip_value
-            sl_pips = fixed_sl
+        if fixed_sl and sl_pips > fixed_sl:
+            self.logger.debug(f"[FVG_RETEST] {pair}: Type B SL too wide ({sl_pips:.1f} > {fixed_sl} pips cap)")
+            return None
 
         # TP
         fixed_tp = config.get_pair_fixed_take_profit(epic)
