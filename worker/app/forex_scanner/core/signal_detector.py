@@ -38,6 +38,15 @@ except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 
+# FVG Retest strategy config (optional - strategy may not be deployed yet)
+try:
+    from services.fvg_retest_config_service import get_fvg_retest_config
+except ImportError:
+    try:
+        from forex_scanner.services.fvg_retest_config_service import get_fvg_retest_config
+    except ImportError:
+        get_fvg_retest_config = None
+
 
 class SignalDetector:
     """
@@ -87,6 +96,10 @@ class SignalDetector:
         # These strategies are lazy-loaded on first use
         self.ranging_market_strategy = None
         self.volume_profile_strategy = None
+
+        # FVG Retest strategy (v4.0.0) - dual-mode BOS + FVG entry
+        self.fvg_retest_strategy = None
+        self.fvg_retest_enabled = True
 
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
@@ -142,10 +155,12 @@ class SignalDetector:
             'RANGING': self._force_init_ranging_market,
             'VOLUME_PROFILE': self._force_init_volume_profile,
             'VP': self._force_init_volume_profile,
+            'FVG_RETEST': self._force_init_fvg_retest,
+            'FVG': self._force_init_fvg_retest,
         }
 
         if strategy_name not in init_map:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, VOLUME_PROFILE."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, VOLUME_PROFILE, FVG_RETEST."
 
         return init_map[strategy_name]()
 
@@ -179,6 +194,16 @@ class SignalDetector:
             return True, "Volume Profile strategy force-initialized"
         except Exception as e:
             return False, f"Failed to force-init Volume Profile: {e}"
+
+    def _force_init_fvg_retest(self) -> Tuple[bool, str]:
+        """Force-initialize FVG Retest strategy for backtest"""
+        try:
+            self.fvg_retest_enabled = True
+            self.fvg_retest_strategy = None  # Will be lazy-loaded on first use
+            self.logger.info("🔧 Force-initialized FVG Retest strategy (lazy-load)")
+            return True, "FVG Retest strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init FVG Retest: {e}"
 
     def _get_default_timeframe(self, timeframe: str = None) -> str:
         """Get default timeframe from database config if not specified"""
@@ -545,6 +570,21 @@ class SignalDetector:
                     except Exception as e:
                         self.logger.error(f"❌ [SMC SIMPLE] Error for {epic}: {e}")
                         individual_results['smc_simple'] = None
+
+            # FVG_RETEST runs concurrently with other strategies (not routed)
+            if self.fvg_retest_enabled:
+                try:
+                    self.logger.debug(f"🔍 [FVG_RETEST] Starting detection for {epic}")
+                    fvg_signal = self.detect_fvg_retest_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['fvg_retest'] = fvg_signal
+                    if fvg_signal:
+                        all_signals.append(fvg_signal)
+                        self.logger.info(f"✅ [FVG_RETEST] Signal detected for {epic}: {fvg_signal.get('signal')} ({fvg_signal.get('entry_type')}) @ {fvg_signal.get('entry_price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [FVG_RETEST] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [FVG_RETEST] Error for {epic}: {e}")
+                    individual_results['fvg_retest'] = None
 
             # Propagate regime info from routing to signals that don't have it
             # (RANGING_MARKET and VOLUME_PROFILE strategies don't set these fields)
@@ -1049,6 +1089,91 @@ class SignalDetector:
             return 'new_york'
         else:
             return 'asian'
+
+    # =========================================================================
+    # FVG RETEST STRATEGY DETECTION (v4.0.0)
+    # =========================================================================
+
+    def detect_fvg_retest_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """
+        Detect signals using FVG Retest strategy (dual-mode).
+
+        Fetches 1H data (240h lookback for 200 EMA warmup) and 5m data (12h lookback).
+        """
+        try:
+            if not self.fvg_retest_enabled:
+                return None
+
+            # Lazy-load strategy
+            if self.fvg_retest_strategy is None:
+                try:
+                    from forex_scanner.core.strategies.fvg_retest_strategy import FVGRetestStrategy
+                except ImportError:
+                    from .strategies.fvg_retest_strategy import FVGRetestStrategy
+                self.fvg_retest_strategy = FVGRetestStrategy()
+                # Pass data_fetcher reference for backtest time
+                self.fvg_retest_strategy._data_fetcher = self.data_fetcher
+                if self._is_backtest_mode:
+                    self.fvg_retest_strategy.reset_cooldowns()
+                self.logger.info("🔷 FVG Retest strategy lazy-loaded")
+
+            is_backtest = self._is_backtest_mode
+
+            # Fetch 1H data (need 200+ bars for EMA warmup)
+            htf_lookback = 300 if is_backtest else 240  # ~240 hours = 10 days
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=htf_lookback
+            )
+            df_1h = self._filter_incomplete_candles(df_1h, '1h')
+
+            if df_1h is None or len(df_1h) < 210:
+                self.logger.debug(f"⚠️ [FVG_RETEST] Insufficient 1H data for {epic} ({len(df_1h) if df_1h is not None else 0} bars, need 210)")
+                return None
+
+            # Fetch 5m data (~12h lookback = ~144 bars)
+            trigger_lookback = 24 if is_backtest else 12
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='5m',
+                lookback_hours=trigger_lookback
+            )
+            df_5m = self._filter_incomplete_candles(df_5m, '5m')
+
+            if df_5m is None or len(df_5m) < 30:
+                self.logger.debug(f"⚠️ [FVG_RETEST] Insufficient 5m data for {epic} ({len(df_5m) if df_5m is not None else 0} bars)")
+                return None
+
+            self.logger.debug(f"🔍 [FVG_RETEST] {pair}: 1H({len(df_1h)} bars), 5m({len(df_5m)} bars)")
+
+            # Detect signal
+            signal = self.fvg_retest_strategy.detect_signal(
+                df_trigger=df_5m,
+                df_4h=df_1h,
+                epic=epic,
+                pair=pair
+            )
+
+            if signal:
+                self.logger.info(f"✅ [FVG_RETEST] Signal detected for {epic}: {signal['signal']} ({signal.get('entry_type')}) @ {signal['entry_price']:.5f}")
+                signal = self._add_market_context(signal, df_5m)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ [FVG_RETEST] Error detecting signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
 
     # =========================================================================
     # MULTI-STRATEGY DETECTION METHODS (v3.0.0)

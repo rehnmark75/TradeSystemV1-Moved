@@ -886,6 +886,8 @@ class BacktestScanner(IntelligentForexScanner):
                 'SILVER_BULLET': 'detect_silver_bullet_signals',  # ICT Silver Bullet strategy
                 'SB': 'detect_silver_bullet_signals',  # Short form
                 'ICT_SILVER_BULLET': 'detect_silver_bullet_signals',  # Full name
+                'FVG_RETEST': 'detect_fvg_retest_signals',  # FVG Retest dual-mode strategy
+                'FVG': 'detect_fvg_retest_signals',  # Short form
             }
 
             # Use specific strategy if requested, otherwise use all strategies
