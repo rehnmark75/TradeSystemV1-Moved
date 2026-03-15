@@ -32,6 +32,7 @@ class FVGRetestConfig:
     strategy_name: str = "FVG_RETEST"
     version: str = "1.0.0"
     enabled: bool = True
+    monitor_only: bool = True  # Signals logged but not executed
 
     # TIMEFRAMES
     htf_timeframe: str = "1h"

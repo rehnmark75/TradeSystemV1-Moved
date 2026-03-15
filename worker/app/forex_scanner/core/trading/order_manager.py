@@ -403,9 +403,22 @@ class OrderManager:
             if alert_id:
                 self.logger.info(f"   Alert ID: {alert_id}")
 
-            # v2.39.0: Check if pair is in monitor_only mode (signals logged but not executed)
+            # v2.39.0: Check if pair/strategy is in monitor_only mode (signals logged but not executed)
             # This check is fail-safe: if config unavailable or error, execution proceeds normally
-            is_monitor_only = False
+            # Also checks signal-level monitor_only flag (used by FVG_RETEST and other new strategies)
+            is_monitor_only = signal.get('monitor_only', False)
+            if is_monitor_only:
+                strategy_name = signal.get('strategy', 'Unknown')
+                self.logger.info(f"👁️ MONITOR MODE: {epic} ({strategy_name}) - Signal logged but NOT executed")
+                self.logger.info(f"   ℹ️ Reason: strategy-level monitor_only=true")
+                return {
+                    'status': 'monitor_only',
+                    'executed': False,
+                    'reason': f'{epic} ({strategy_name}) is in monitor-only mode - signal tracked but not traded',
+                    'alert_id': alert_id,
+                    'signal': signal
+                }
+
             if SMC_CONFIG_AVAILABLE:
                 try:
                     smc_config = get_smc_simple_config()

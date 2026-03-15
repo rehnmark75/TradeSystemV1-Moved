@@ -757,6 +757,7 @@ class FVGRetestStrategy(StrategyInterface):
             'setup_age_minutes': round((now - setup.bos_time).total_seconds() / 60, 1),
             'timestamp': now.isoformat(),
             'is_scalp_trade': False,
+            'monitor_only': config.monitor_only,
         }
 
     def _build_type_b_signal(
@@ -845,6 +846,7 @@ class FVGRetestStrategy(StrategyInterface):
             'swing_level': swing_level,
             'timestamp': now.isoformat(),
             'is_scalp_trade': False,
+            'monitor_only': config.monitor_only,
         }
 
     # =========================================================================
