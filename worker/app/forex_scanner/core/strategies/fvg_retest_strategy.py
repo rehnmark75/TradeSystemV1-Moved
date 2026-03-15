@@ -76,6 +76,9 @@ class FVGRetestStrategy(StrategyInterface):
         self._major_highs: Dict[str, float] = {}
         self._major_lows: Dict[str, float] = {}
 
+        # BOS re-detection guard: track last break_idx per pair to avoid re-firing
+        self._last_bos_break_idx: Dict[str, int] = {}
+
         # Cooldown tracking per pair
         self._cooldowns: Dict[str, datetime] = {}
 
@@ -94,6 +97,7 @@ class FVGRetestStrategy(StrategyInterface):
         self._pending_setups.clear()
         self._major_highs.clear()
         self._major_lows.clear()
+        self._last_bos_break_idx.clear()
 
     def flush_rejections(self) -> None:
         pass
@@ -181,12 +185,13 @@ class FVGRetestStrategy(StrategyInterface):
 
         htf_direction = htf_result['direction']
         htf_ema_value = htf_result['ema_value']
+        htf_aligned = htf_result.get('htf_aligned', True)
 
         # =====================================================================
         # TIER 3 (checked before TIER 2): Check pending Type A setups for tap
         # =====================================================================
         tap_signal = self._check_pending_taps(
-            epic, pair, df_trigger, htf_direction, pip_value, config, now
+            epic, pair, df_trigger, htf_direction, pip_value, config, now, htf_aligned
         )
         if tap_signal:
             self._set_cooldown(epic, config, now)
@@ -198,6 +203,13 @@ class FVGRetestStrategy(StrategyInterface):
         bos_result = self._detect_swing_break(df_trigger, htf_direction, pip_value, config, epic)
         if not bos_result or not bos_result.get('valid'):
             return None
+
+        # BOS re-detection guard: skip if we already processed this exact break
+        break_idx = bos_result['break_candle']['idx']
+        last_idx = self._last_bos_break_idx.get(epic, -1)
+        if break_idx == last_idx:
+            return None
+        self._last_bos_break_idx[epic] = break_idx
 
         swing_level = bos_result['swing_level']
         break_candle = bos_result['break_candle']
@@ -211,7 +223,7 @@ class FVGRetestStrategy(StrategyInterface):
             # Type B: Institutional Initiation - enter immediately
             signal = self._build_type_b_signal(
                 epic, pair, df_trigger, htf_direction, swing_level,
-                break_candle, classification, htf_ema_value, pip_value, config, now
+                break_candle, classification, htf_ema_value, pip_value, config, now, htf_aligned
             )
             if signal:
                 self._set_cooldown(epic, config, now)
@@ -249,16 +261,25 @@ class FVGRetestStrategy(StrategyInterface):
         if pd.isna(ema_value):
             return None
 
-        # Determine direction: price vs EMA + candle body direction
+        # Determine direction: EMA position is the gate, candle direction is a modifier
+        # Pine Script: macroBullish = close > ema4H and c4H > o4H
+        # But requiring both eliminates 60-70% of windows (pullback candles in trends)
+        # Fix: Use EMA position only as gate, candle alignment stored for confidence scoring
         price_above_ema = close > ema_value
         candle_bullish = close > candle_open
 
-        if price_above_ema and candle_bullish:
-            return {'direction': 'BULL', 'ema_value': ema_value}
-        elif not price_above_ema and not candle_bullish:
-            return {'direction': 'BEAR', 'ema_value': ema_value}
-
-        return None
+        if price_above_ema:
+            return {
+                'direction': 'BULL',
+                'ema_value': ema_value,
+                'htf_aligned': candle_bullish,  # True = strong, False = counter-candle
+            }
+        else:
+            return {
+                'direction': 'BEAR',
+                'ema_value': ema_value,
+                'htf_aligned': not candle_bullish,
+            }
 
     # =========================================================================
     # TIER 2: SWING BREAK DETECTION (adapted from SMC_SIMPLE)
@@ -320,21 +341,9 @@ class FVGRetestStrategy(StrategyInterface):
 
         current_idx = len(df) - 1
 
-        # ======= VOLUME GATING (Pine: highVol = volume > sma(volume, 20) * volMult) =======
-        # Applied to ALL BOS entries, not just Type B
-        if volumes is not None:
-            vol_sma_period = config.volume_sma_period
-            recent_vol = volumes[max(0, current_idx - vol_sma_period):current_idx]
-            if len(recent_vol) > 0:
-                vol_sma = np.mean(recent_vol)
-                # Check if any of the last 3 candles had institutional volume
-                vol_check_range = range(max(0, current_idx - 2), current_idx + 1)
-                has_institutional_vol = any(
-                    volumes[i] > vol_sma * config.volume_threshold_multiplier
-                    for i in vol_check_range if i < len(volumes)
-                )
-                if not has_institutional_vol:
-                    return None
+        # Volume gating moved to _classify_bos() for Type B only.
+        # Type A (FVG tap) doesn't require institutional volume at BOS detection —
+        # it requires quality at the FVG entry point instead.
 
         if direction == 'BULL':
             # Pine: bullBreak = ta.crossover(close, lastMajorPH)
@@ -431,7 +440,7 @@ class FVGRetestStrategy(StrategyInterface):
         displacement_ratio = body_size / atr
         displacement_met = displacement_ratio >= config.displacement_atr_multiplier
 
-        # 2. Follow-through check
+        # 2. Follow-through check (use available bars only, don't require future bars)
         required_ft = config.follow_through_candles
         ft_count = 0
         direction = 'BULL' if break_candle['close'] > break_candle['open'] else 'BEAR'
@@ -439,16 +448,20 @@ class FVGRetestStrategy(StrategyInterface):
         closes = df['close'].values
         opens = df['open'].values
 
-        for i in range(1, required_ft + 1):
-            ft_idx = break_idx + i
-            if ft_idx > current_idx:
-                break
-            if direction == 'BULL' and closes[ft_idx] > opens[ft_idx]:
-                ft_count += 1
-            elif direction == 'BEAR' and closes[ft_idx] < opens[ft_idx]:
-                ft_count += 1
+        available_ft_bars = current_idx - break_idx
+        effective_required = min(required_ft, available_ft_bars)
 
-        follow_through_met = ft_count >= required_ft
+        if effective_required > 0:
+            for i in range(1, effective_required + 1):
+                ft_idx = break_idx + i
+                if ft_idx > current_idx:
+                    break
+                if direction == 'BULL' and closes[ft_idx] > opens[ft_idx]:
+                    ft_count += 1
+                elif direction == 'BEAR' and closes[ft_idx] < opens[ft_idx]:
+                    ft_count += 1
+
+        follow_through_met = effective_required > 0 and ft_count >= effective_required
 
         # 3. Volume check
         volume_met = False
@@ -503,8 +516,8 @@ class FVGRetestStrategy(StrategyInterface):
         current_price = df_trigger.iloc[-1]['close']
         target_type = FVGType.BULLISH if direction == 'BULL' else FVGType.BEARISH
 
-        # FVG bar proximity window (Pine: same bar; we allow ±3 bars for scan intervals)
-        fvg_proximity_bars = 3
+        # FVG bar proximity window (Pine: same bar; we allow ±6 bars = 30min on 5m)
+        fvg_proximity_bars = 6
 
         valid_fvgs = []
         for fvg in self._fvg_detector.fair_value_gaps:
@@ -565,7 +578,7 @@ class FVGRetestStrategy(StrategyInterface):
             )
 
     def _check_pending_taps(
-        self, epic, pair, df_trigger, htf_direction, pip_value, config, now
+        self, epic, pair, df_trigger, htf_direction, pip_value, config, now, htf_aligned: bool = True
     ) -> Optional[Dict]:
         """Check if price has tapped into any pending FVG zone"""
         setups = self._pending_setups.get(epic, [])
@@ -602,7 +615,7 @@ class FVGRetestStrategy(StrategyInterface):
             )
 
             signal = self._build_type_a_signal(
-                epic, pair, df_trigger, setup, pip_value, config, now
+                epic, pair, df_trigger, setup, pip_value, config, now, htf_aligned
             )
 
             # Remove this setup regardless of signal validity
@@ -646,7 +659,7 @@ class FVGRetestStrategy(StrategyInterface):
     # =========================================================================
 
     def _build_type_a_signal(
-        self, epic, pair, df_trigger, setup: PendingFVGSetup, pip_value, config, now
+        self, epic, pair, df_trigger, setup: PendingFVGSetup, pip_value, config, now, htf_aligned: bool = True
     ) -> Optional[Dict]:
         """Build signal for Type A (Deep Value / FVG Tap) entry"""
         fvg = setup.fvg
@@ -695,7 +708,7 @@ class FVGRetestStrategy(StrategyInterface):
 
         # Confidence scoring (5 components × 20%)
         confidence = self._calculate_type_a_confidence(
-            setup, df_trigger, rr_ratio, pip_value, config
+            setup, df_trigger, rr_ratio, pip_value, config, htf_aligned
         )
 
         min_conf = config.get_pair_min_confidence(epic)
@@ -734,7 +747,7 @@ class FVGRetestStrategy(StrategyInterface):
 
     def _build_type_b_signal(
         self, epic, pair, df_trigger, direction, swing_level,
-        break_candle, classification, htf_ema_value, pip_value, config, now
+        break_candle, classification, htf_ema_value, pip_value, config, now, htf_aligned: bool = True
     ) -> Optional[Dict]:
         """Build signal for Type B (Institutional Initiation) entry"""
         current_price = df_trigger.iloc[-1]['close']
@@ -782,7 +795,7 @@ class FVGRetestStrategy(StrategyInterface):
         # Confidence scoring
         confidence = self._calculate_type_b_confidence(
             classification, df_trigger, direction, htf_ema_value,
-            rr_ratio, pip_value, config
+            rr_ratio, pip_value, config, htf_aligned
         )
 
         min_conf = config.get_pair_min_confidence(epic)
@@ -827,12 +840,12 @@ class FVGRetestStrategy(StrategyInterface):
     # CONFIDENCE SCORING
     # =========================================================================
 
-    def _calculate_type_a_confidence(self, setup, df_trigger, rr_ratio, pip_value, config) -> float:
+    def _calculate_type_a_confidence(self, setup, df_trigger, rr_ratio, pip_value, config, htf_aligned: bool = True) -> float:
         """5-component confidence for Type A (Deep Value)"""
         scores = []
 
-        # 1. HTF alignment (20%) - binary: EMA + candle direction passed in TIER 1
-        scores.append(0.20)
+        # 1. HTF alignment (20%) - EMA position always passes, candle direction is modifier
+        scores.append(0.20 if htf_aligned else 0.10)
 
         # 2. FVG significance (20%) - from FVG detector
         fvg_score = min(setup.fvg.significance, 1.0) * 0.20
@@ -872,13 +885,13 @@ class FVGRetestStrategy(StrategyInterface):
 
     def _calculate_type_b_confidence(
         self, classification, df_trigger, direction, htf_ema_value,
-        rr_ratio, pip_value, config
+        rr_ratio, pip_value, config, htf_aligned: bool = True
     ) -> float:
         """5-component confidence for Type B (Initiation)"""
         scores = []
 
-        # 1. HTF alignment (20%)
-        scores.append(0.20)
+        # 1. HTF alignment (20%) - EMA position always passes, candle direction is modifier
+        scores.append(0.20 if htf_aligned else 0.10)
 
         # 2. Displacement ratio (20%) - how strong the break candle was
         disp_ratio = classification['displacement_ratio']

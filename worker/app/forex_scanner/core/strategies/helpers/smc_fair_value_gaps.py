@@ -128,16 +128,16 @@ class SMCFairValueGaps:
                 previous_candle = df.iloc[i-1]
                 prev_prev_candle = df.iloc[i-2]
 
-                # Check for bullish FVG
+                # Check for bullish FVG (pass positional index for proximity checks)
                 bullish_fvg = self._check_bullish_fvg(
-                    prev_prev_candle, previous_candle, current_candle, min_gap_size, pip_value
+                    prev_prev_candle, previous_candle, current_candle, min_gap_size, pip_value, i
                 )
                 if bullish_fvg:
                     self.fair_value_gaps.append(bullish_fvg)
 
                 # Check for bearish FVG
                 bearish_fvg = self._check_bearish_fvg(
-                    prev_prev_candle, previous_candle, current_candle, min_gap_size, pip_value
+                    prev_prev_candle, previous_candle, current_candle, min_gap_size, pip_value, i
                 )
                 if bearish_fvg:
                     self.fair_value_gaps.append(bearish_fvg)
@@ -151,7 +151,8 @@ class SMCFairValueGaps:
         candle2: pd.Series,
         candle3: pd.Series,
         min_gap_size: float,
-        pip_value: float = 0.0001
+        pip_value: float = 0.0001,
+        positional_index: int = 0
     ) -> Optional[FairValueGap]:
         """Check for bullish Fair Value Gap pattern"""
         try:
@@ -181,7 +182,7 @@ class SMCFairValueGaps:
             )
 
             return FairValueGap(
-                start_index=candle3.name if hasattr(candle3, 'name') else 0,
+                start_index=positional_index,
                 high_price=gap_low,  # Top of the gap
                 low_price=gap_high,  # Bottom of the gap
                 gap_type=FVGType.BULLISH,
@@ -201,7 +202,8 @@ class SMCFairValueGaps:
         candle2: pd.Series,
         candle3: pd.Series,
         min_gap_size: float,
-        pip_value: float = 0.0001
+        pip_value: float = 0.0001,
+        positional_index: int = 0
     ) -> Optional[FairValueGap]:
         """Check for bearish Fair Value Gap pattern"""
         try:
@@ -231,7 +233,7 @@ class SMCFairValueGaps:
             )
 
             return FairValueGap(
-                start_index=candle3.name if hasattr(candle3, 'name') else 0,
+                start_index=positional_index,
                 high_price=gap_low,   # Top of the gap
                 low_price=gap_high,   # Bottom of the gap
                 gap_type=FVGType.BEARISH,

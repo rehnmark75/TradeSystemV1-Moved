@@ -50,9 +50,9 @@ class FVGRetestConfig:
     min_confidence: float = 0.50
     max_confidence: float = 0.90
 
-    # SWING DETECTION (Pine: pivotLen=5 both sides for MAJOR pivots only)
+    # SWING DETECTION (Pine: pivotLen=5 on higher TF; reduced to 3 for 5m chart)
     swing_lookback_bars: int = 40
-    swing_strength_bars: int = 5
+    swing_strength_bars: int = 3
     atr_period: int = 14
 
     # TYPE A: FVG TAP (DEEP VALUE)
