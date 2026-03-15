@@ -76,8 +76,8 @@ class FVGRetestStrategy(StrategyInterface):
         self._major_highs: Dict[str, float] = {}
         self._major_lows: Dict[str, float] = {}
 
-        # BOS re-detection guard: track last break_idx per pair to avoid re-firing
-        self._last_bos_break_idx: Dict[str, int] = {}
+        # BOS re-detection guard: track last break timestamp per pair to avoid re-firing
+        self._last_bos_break_time: Dict[str, datetime] = {}
 
         # Cooldown tracking per pair
         self._cooldowns: Dict[str, datetime] = {}
@@ -97,7 +97,7 @@ class FVGRetestStrategy(StrategyInterface):
         self._pending_setups.clear()
         self._major_highs.clear()
         self._major_lows.clear()
-        self._last_bos_break_idx.clear()
+        self._last_bos_break_time.clear()
 
     def flush_rejections(self) -> None:
         pass
@@ -178,7 +178,7 @@ class FVGRetestStrategy(StrategyInterface):
         # =====================================================================
         # TIER 1: HTF Macro Filter (1H 200 EMA + candle direction)
         # =====================================================================
-        htf_result = self._check_htf_bias(df_4h, config)
+        htf_result = self._check_htf_bias(df_4h, config, pip_value)
         if htf_result is None:
             self.logger.debug(f"[FVG_RETEST] {pair}: HTF filter failed")
             return None
@@ -186,6 +186,20 @@ class FVGRetestStrategy(StrategyInterface):
         htf_direction = htf_result['direction']
         htf_ema_value = htf_result['ema_value']
         htf_aligned = htf_result.get('htf_aligned', True)
+
+        # =====================================================================
+        # COUNTER-TREND BLOCK: Only allow signals when HTF candle confirms direction
+        # The 1H EMA determines direction, but if the last 1H candle closed
+        # against that direction, it's a counter-trend signal → block it.
+        # This eliminates the systematic losses on EURUSD/AUDUSD/USDCHF
+        # where all signals were SELL during uptrends (or vice versa).
+        # =====================================================================
+        if not htf_aligned:
+            self.logger.debug(
+                f"[FVG_RETEST] {pair}: Counter-trend blocked "
+                f"(HTF direction={htf_direction} but candle disagrees)"
+            )
+            return None
 
         # =====================================================================
         # TIER 3 (checked before TIER 2): Check pending Type A setups for tap
@@ -204,12 +218,13 @@ class FVGRetestStrategy(StrategyInterface):
         if not bos_result or not bos_result.get('valid'):
             return None
 
-        # BOS re-detection guard: skip if we already processed this exact break
+        # BOS re-detection guard: use timestamp to avoid re-firing same break
         break_idx = bos_result['break_candle']['idx']
-        last_idx = self._last_bos_break_idx.get(epic, -1)
-        if break_idx == last_idx:
+        break_time = df_trigger.index[break_idx] if break_idx < len(df_trigger) else now
+        last_break_time = self._last_bos_break_time.get(epic)
+        if last_break_time is not None and break_time == last_break_time:
             return None
-        self._last_bos_break_idx[epic] = break_idx
+        self._last_bos_break_time[epic] = break_time
 
         swing_level = bos_result['swing_level']
         break_candle = bos_result['break_candle']
@@ -241,7 +256,7 @@ class FVGRetestStrategy(StrategyInterface):
     # TIER 1: HTF BIAS
     # =========================================================================
 
-    def _check_htf_bias(self, df_1h: pd.DataFrame, config) -> Optional[Dict]:
+    def _check_htf_bias(self, df_1h: pd.DataFrame, config, pip_value: float = 0.0001) -> Optional[Dict]:
         """Check 1H 200 EMA position and candle direction"""
         ema_col = f'ema_{config.htf_ema_period}'
 
@@ -261,10 +276,12 @@ class FVGRetestStrategy(StrategyInterface):
         if pd.isna(ema_value):
             return None
 
-        # Determine direction: EMA position is the gate, candle direction is a modifier
-        # Pine Script: macroBullish = close > ema4H and c4H > o4H
-        # But requiring both eliminates 60-70% of windows (pullback candles in trends)
-        # Fix: Use EMA position only as gate, candle alignment stored for confidence scoring
+        # EMA proximity guard - block if price is hugging the EMA (within 10 pips)
+        # Ambiguous direction at EMA crossover zones leads to whipsaw signals
+        ema_distance_pips = abs(close - ema_value) / pip_value
+        if ema_distance_pips < 10:
+            return None
+
         price_above_ema = close > ema_value
         candle_bullish = close > candle_open
 
@@ -272,7 +289,7 @@ class FVGRetestStrategy(StrategyInterface):
             return {
                 'direction': 'BULL',
                 'ema_value': ema_value,
-                'htf_aligned': candle_bullish,  # True = strong, False = counter-candle
+                'htf_aligned': candle_bullish,
             }
         else:
             return {
@@ -516,8 +533,9 @@ class FVGRetestStrategy(StrategyInterface):
         current_price = df_trigger.iloc[-1]['close']
         target_type = FVGType.BULLISH if direction == 'BULL' else FVGType.BEARISH
 
-        # FVG bar proximity window (Pine: same bar; we allow ±6 bars = 30min on 5m)
-        fvg_proximity_bars = 6
+        # FVG bar proximity window (Pine: same bar; we allow ±12 bars = 60min on 5m)
+        # Widened from 6: institutional BOS moves often have FVGs forming 3-5 bars before break
+        fvg_proximity_bars = 12
 
         valid_fvgs = []
         for fvg in self._fvg_detector.fair_value_gaps:

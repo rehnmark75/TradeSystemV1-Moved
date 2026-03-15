@@ -57,16 +57,16 @@ class FVGRetestConfig:
 
     # TYPE A: FVG TAP (DEEP VALUE)
     fvg_min_size_pips: float = 3.0
-    fvg_max_age_bars: int = 20
+    fvg_max_age_bars: int = 48  # was 20; aligned with 4h setup_expiry on 5m bars
     fvg_max_fill_pct: float = 0.80
     setup_expiry_hours: float = 4.0
     max_pending_per_pair: int = 3
 
     # TYPE B: INSTITUTIONAL INITIATION
     initiation_enabled: bool = True
-    displacement_atr_multiplier: float = 1.5
-    follow_through_candles: int = 2
-    volume_threshold_multiplier: float = 1.1
+    displacement_atr_multiplier: float = 1.2  # was 1.5; captures more institutional breaks
+    follow_through_candles: int = 1  # was 2; single follow-through is sufficient on 5m
+    volume_threshold_multiplier: float = 1.05  # was 1.1; lower bar for volume confirmation
 
     # VOLUME
     volume_sma_period: int = 20
