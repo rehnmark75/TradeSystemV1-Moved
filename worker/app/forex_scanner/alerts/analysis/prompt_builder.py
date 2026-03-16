@@ -745,6 +745,7 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 8. ✓ Does the price action show clean trend structure?
 9. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
 10. ✓ Does the entry type box (5m) show favorable conditions?
+11. ✓ **SWING PROXIMITY CHECK:** For BUY — is entry too close to a recent swing HIGH (buying into resistance)? For SELL — is entry too close to a recent swing LOW (selling into support)? If within 5-10 pips, this is a MAJOR concern.
 """
 
             # v2.3.0: Enhanced entry type explanation
@@ -923,6 +924,8 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - Price too close to 4H EMA (<2.5 pips) - buffer zone violation
 - S/R level on 15m blocking more than 75% of path to target (15 pips)
 - EMA 9/21 crossed against signal direction on 15m
+- **BUY entry near a recent swing HIGH (buying into resistance)**
+- **SELL entry near a recent swing LOW (selling into support)**
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 
@@ -999,6 +1002,11 @@ The chart shows multi-timeframe analysis:
 4. Is there clean price structure (not choppy/ranging)?
 5. Is stop loss behind a valid structural level?
 6. Are there any reversal patterns at entry (engulfing, pin bars against direction)?
+7. **CRITICAL - SWING PROXIMITY CHECK:**
+   - For BUY signals: Is entry price dangerously close to a recent swing HIGH? Buying near swing highs means buying into resistance — HIGH REJECTION RISK
+   - For SELL signals: Is entry price dangerously close to a recent swing LOW? Selling near swing lows means selling into support — HIGH REJECTION RISK
+   - Look at the 5m chart for nearby swing highs/lows relative to entry price
+   - If entry is within 5-10 pips of a swing high (for buys) or swing low (for sells), this is a MAJOR concern
 """
 
             prompt = f"""You are a SENIOR FOREX TECHNICAL ANALYST specializing in Smart Money Concepts (SMC) and Fair Value Gap analysis.
@@ -1057,6 +1065,8 @@ REASON: [2-3 sentences. Focus on: trend alignment quality, BOS clarity, {'FVG zo
 - BOS not clearly visible on 5m chart
 - Reversal candlestick patterns at entry level
 - Choppy, range-bound price action with no clear structure
+- **BUY entry near a recent swing HIGH (buying into resistance)**
+- **SELL entry near a recent swing LOW (selling into support)**
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 
