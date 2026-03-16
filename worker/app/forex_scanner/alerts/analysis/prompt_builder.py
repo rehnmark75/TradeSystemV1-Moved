@@ -734,18 +734,21 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - GREEN dashed line with "ENTRY" label: Entry price level
 - "NOW" marker: Shows where current price is relative to entry
 {momentum_note}
-**CRITICAL CHART ANALYSIS CHECKLIST:**
-1. ✓ Is price clearly respecting the 4H EMA trend direction?
-2. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
-3. ✓ Are EMA 9/21 aligned with the trade direction on 15m chart?
-4. ✓ Is entry clear of nearby S/R obstacles shown on 15m?
-5. ✓ For PULLBACK: Is entry within or near the optimal Fibonacci zone (5m)?
-6. ✓ For MOMENTUM: Is breakout clean with strong directional candles?
-7. ✓ Is stop loss placement below a valid structure low (for longs)?
-8. ✓ Does the price action show clean trend structure?
-9. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
-10. ✓ Does the entry type box (5m) show favorable conditions?
-11. ✓ **SWING PROXIMITY CHECK:** For BUY — is entry too close to a recent swing HIGH (buying into resistance)? For SELL — is entry too close to a recent swing LOW (selling into support)? If within 5-10 pips, this is a MAJOR concern.
+**CRITICAL CHART ANALYSIS CHECKLIST (in priority order):**
+
+1. ✓ **4H TREND STRUCTURE (HIGHEST PRIORITY):** Look at the 4H chart candles — is the trend making Higher Highs/Higher Lows (bullish) or Lower Highs/Lower Lows (bearish)? This is MORE important than EMA position alone. A BUY signal in a 4H downtrend (LH/LL) or SELL signal in a 4H uptrend (HH/HL) is COUNTER-TREND and must score ≤4.
+2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number (x.x000, x.x500)? For SELL — is entry near a recent swing LOW, support zone, or round number? If within 10 pips of a major level, this is a HIGH-RISK entry. Buying AT resistance or selling AT support = score ≤4.
+3. ✓ **POSITION IN RANGE:** Is entry at a favorable location? For BUY: entry should be near the BOTTOM of a local range (at demand/support). For SELL: entry should be near the TOP of a local range (at supply/resistance). Entry at the TOP of a recovery in a downtrend = buying the worst location.
+4. ✓ Is price clearly respecting the 4H EMA trend direction?
+5. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
+6. ✓ Are EMA 9/21 aligned with the trade direction on 15m chart?
+7. ✓ Is entry clear of nearby S/R obstacles shown on 15m?
+8. ✓ For PULLBACK: Is entry within or near the optimal Fibonacci zone (5m)?
+9. ✓ For MOMENTUM: Is breakout clean with strong directional candles?
+10. ✓ Is stop loss placement below a valid structure low (for longs)?
+11. ✓ Does the price action show clean trend structure?
+12. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
+13. ✓ Does the entry type box (5m) show favorable conditions?
 """
 
             # v2.3.0: Enhanced entry type explanation
@@ -900,12 +903,19 @@ SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
 REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, and any visual concerns from the chart. Do NOT penalize for low R:R or small TP - we are testing small quick profits.]
 
-**SCORING GUIDELINES FOR v2.8.1 (SMALL PROFIT TEST MODE):**
-- 8-10: Strong trend alignment, clean swing break on 15m, volume confirmed, EMA 9/21 aligned on 15m
-- 6-7: Good setup with minor concerns (e.g., momentum slightly extended, volume not confirmed, S/R nearby but manageable)
-- 4-5: Marginal setup - weak trend, entry quality issues, or EMA micro-structure conflict on 15m
-- 1-3: Poor setup - counter-trend, S/R blocking target, or technical breakdown
-⚠️ TESTING MODE: R:R and TP minimums are DISABLED. We are testing small, quick profits. Do NOT reject based on low R:R or small TP. Focus on trend alignment and entry quality only.
+**SCORING GUIDELINES FOR v2.9.0 (HTF-STRICT MODE):**
+- 8-10: Strong 4H trend alignment (HH/HL or LH/LL confirmed), clean swing break on 15m, volume confirmed, EMA 9/21 aligned, entry at favorable range location
+- 6-7: Good 4H trend alignment with minor concerns (e.g., momentum slightly extended, volume not confirmed, minor S/R nearby)
+- 4-5: Marginal setup - 4H trend unclear/choppy, entry near resistance/support level, or EMA micro-structure conflict
+- 1-3: Poor setup - counter-trend to 4H structure, entry AT resistance/support, or technical breakdown
+
+**HARD SCORE CAPS (cannot exceed these regardless of other factors):**
+- Counter-trend to 4H structure (BUY in LH/LL downtrend, SELL in HH/HL uptrend): MAX SCORE 4, REJECT
+- Entry within 10 pips of major resistance (for BUY) or support (for SELL): MAX SCORE 4, REJECT
+- Entry at round number psychological level (x.x000, x.x500) against HTF trend: MAX SCORE 3, REJECT
+- Entry at TOP of local recovery in a downtrend (or BOTTOM of local selloff in uptrend): MAX SCORE 4, REJECT
+
+⚠️ TESTING MODE: R:R and TP minimums are DISABLED. We are testing small, quick profits. Do NOT reject based on low R:R or small TP. Focus on trend alignment, HTF structure, and entry location quality.
 
 **ENTRY TYPE EVALUATION:**
 - PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone (check 5m chart). Outside zone = lower score but not automatic rejection
@@ -918,14 +928,15 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - For BEAR: Support should be BEYOND take profit level
 - S/R within 50% of target distance = caution, within 25% = strong concern
 
-**AUTOMATIC REJECTION CRITERIA:**
-- Counter-trend trades (price on wrong side of 4H EMA)
+**AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
+- **4H trend structure opposes signal** — BUY when 4H shows Lower Highs/Lower Lows, or SELL when 4H shows Higher Highs/Higher Lows. Look at the CANDLE STRUCTURE, not just EMA position.
+- **Entry AT resistance (BUY) or AT support (SELL)** — If price is within 10 pips of a visible resistance/support zone, swing high/low, or round number (x.x000, x.x500), REJECT. This is the #1 reason good-looking setups fail.
+- **Entry at top of local recovery in downtrend** — If 4H is bearish but 15m/5m show a rally, and entry is near the TOP of that rally (not at a pullback), this is buying into supply. REJECT.
+- Counter-trend trades (price on wrong side of 4H EMA with confirming bearish/bullish candle structure)
 - MOMENTUM entry showing reversal candles on 15m (engulfing, pin bars against direction)
 - Price too close to 4H EMA (<2.5 pips) - buffer zone violation
-- S/R level on 15m blocking more than 75% of path to target (15 pips)
+- S/R level on 15m blocking more than 75% of path to target
 - EMA 9/21 crossed against signal direction on 15m
-- **BUY entry near a recent swing HIGH (buying into resistance)**
-- **SELL entry near a recent swing LOW (selling into support)**
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 
