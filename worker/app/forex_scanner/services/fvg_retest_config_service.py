@@ -45,6 +45,7 @@ class FVGRetestConfig:
     fixed_stop_loss_pips: float = 10.0
     fixed_take_profit_pips: float = 12.0
     sl_buffer_pips: float = 3.0
+    min_stop_loss_pips: float = 8.0  # configurable SL floor (was hardcoded)
     min_rr_ratio: float = 1.0
 
     # CONFIDENCE
@@ -73,7 +74,7 @@ class FVGRetestConfig:
     volume_sma_period: int = 20
 
     # COOLDOWN
-    signal_cooldown_minutes: int = 60
+    signal_cooldown_minutes: int = 30  # was 60; reduced to allow more signals per session
 
     # ENABLED PAIRS
     enabled_pairs: List[str] = field(default_factory=list)

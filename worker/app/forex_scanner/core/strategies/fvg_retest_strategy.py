@@ -694,7 +694,7 @@ class FVGRetestStrategy(StrategyInterface):
             sl_pips = (sl_price - current_price) / pip_value
 
         # Minimum SL floor - reject signals with unrealistic tiny stops
-        min_sl_pips = 8.0
+        min_sl_pips = config.get_for_pair(epic, 'min_stop_loss_pips', default=6.0)
         if sl_pips < min_sl_pips:
             self.logger.debug(f"[FVG_RETEST] {pair}: Type A SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
             return None
@@ -778,7 +778,7 @@ class FVGRetestStrategy(StrategyInterface):
             sl_pips = (sl_price - current_price) / pip_value
 
         # Minimum SL floor - reject signals with unrealistic tiny stops
-        min_sl_pips = 8.0
+        min_sl_pips = config.get_for_pair(epic, 'min_stop_loss_pips', default=6.0)
         if sl_pips < min_sl_pips:
             self.logger.debug(f"[FVG_RETEST] {pair}: Type B SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
             return None
