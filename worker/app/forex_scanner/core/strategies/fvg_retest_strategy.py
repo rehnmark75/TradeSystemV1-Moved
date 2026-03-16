@@ -555,7 +555,7 @@ class FVGRetestStrategy(StrategyInterface):
             valid_fvgs.append(fvg)
 
         if not valid_fvgs:
-            self.logger.debug(f"[FVG_RETEST] {pair}: BOS found but no valid FVGs for Type A setup")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: BOS found ({direction}) but no valid FVGs within ±12 bars")
             return
 
         # Sort by significance and take the best
@@ -696,13 +696,13 @@ class FVGRetestStrategy(StrategyInterface):
         # Minimum SL floor - reject signals with unrealistic tiny stops
         min_sl_pips = config.get_for_pair(epic, 'min_stop_loss_pips', default=6.0)
         if sl_pips < min_sl_pips:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type A SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type A REJECTED - SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
             return None
 
         # Cap SL to fixed maximum — reject if FVG-based SL is too wide
         fixed_sl = config.get_pair_fixed_stop_loss(epic)
         if fixed_sl and sl_pips > fixed_sl:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type A SL too wide ({sl_pips:.1f} > {fixed_sl} pips cap)")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type A REJECTED - SL too wide ({sl_pips:.1f} > {fixed_sl} pips cap)")
             return None
 
         # TP: fixed per-pair config with R:R enforcement
@@ -717,7 +717,7 @@ class FVGRetestStrategy(StrategyInterface):
         # R:R check
         rr_ratio = tp_pips / sl_pips if sl_pips > 0 else 0
         if rr_ratio < config.min_rr_ratio:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type A R:R too low ({rr_ratio:.2f} < {config.min_rr_ratio})")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type A REJECTED - R:R too low ({rr_ratio:.2f} < {config.min_rr_ratio})")
             return None
 
         # Confidence scoring (5 components × 20%)
@@ -727,7 +727,7 @@ class FVGRetestStrategy(StrategyInterface):
 
         min_conf = config.get_pair_min_confidence(epic)
         if confidence < min_conf:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type A confidence too low ({confidence:.2f} < {min_conf})")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type A REJECTED - confidence too low ({confidence:.2f} < {min_conf})")
             return None
 
         signal_type = 'BUY' if setup.direction == 'BULL' else 'SELL'
@@ -780,13 +780,13 @@ class FVGRetestStrategy(StrategyInterface):
         # Minimum SL floor - reject signals with unrealistic tiny stops
         min_sl_pips = config.get_for_pair(epic, 'min_stop_loss_pips', default=6.0)
         if sl_pips < min_sl_pips:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type B SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type B REJECTED - SL too tight ({sl_pips:.1f} < {min_sl_pips} pips)")
             return None
 
         # Cap SL to fixed maximum — reject if swing-based SL is too wide
         fixed_sl = config.get_pair_fixed_stop_loss(epic)
         if fixed_sl and sl_pips > fixed_sl:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type B SL too wide ({sl_pips:.1f} > {fixed_sl} pips cap)")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type B REJECTED - SL too wide ({sl_pips:.1f} > {fixed_sl} pips cap)")
             return None
 
         # TP
@@ -801,7 +801,7 @@ class FVGRetestStrategy(StrategyInterface):
         # R:R check
         rr_ratio = tp_pips / sl_pips if sl_pips > 0 else 0
         if rr_ratio < config.min_rr_ratio:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type B R:R too low ({rr_ratio:.2f} < {config.min_rr_ratio})")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type B REJECTED - R:R too low ({rr_ratio:.2f} < {config.min_rr_ratio})")
             return None
 
         # Confidence scoring
@@ -812,7 +812,7 @@ class FVGRetestStrategy(StrategyInterface):
 
         min_conf = config.get_pair_min_confidence(epic)
         if confidence < min_conf:
-            self.logger.debug(f"[FVG_RETEST] {pair}: Type B confidence too low ({confidence:.2f} < {min_conf})")
+            self.logger.info(f"🔷 [FVG_RETEST] {pair}: Type B REJECTED - confidence too low ({confidence:.2f} < {min_conf})")
             return None
 
         signal_type = 'BUY' if direction == 'BULL' else 'SELL'
