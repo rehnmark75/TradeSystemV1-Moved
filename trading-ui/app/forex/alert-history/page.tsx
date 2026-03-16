@@ -75,6 +75,7 @@ export default function ForexAlertHistoryPage() {
   const [payload, setPayload] = useState<AlertHistoryPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [lightboxSrc, setLightboxSrc] = useState<string | null>(null);
 
   const loadAlerts = () => {
     setLoading(true);
@@ -317,9 +318,15 @@ export default function ForexAlertHistoryPage() {
                         <div>
                           {row.vision_chart_url ? (
                             <img
-                              src={row.vision_chart_url}
+                              src={`/trading/api/forex/chart-image/?url=${encodeURIComponent(row.vision_chart_url)}`}
                               alt="Alert chart"
                               className="alert-chart"
+                              style={{ cursor: "pointer" }}
+                              onClick={() =>
+                                setLightboxSrc(
+                                  `/trading/api/forex/chart-image/?url=${encodeURIComponent(row.vision_chart_url!)}`
+                                )
+                              }
                             />
                           ) : (
                             <div className="chart-placeholder">No chart image available.</div>
@@ -358,6 +365,18 @@ export default function ForexAlertHistoryPage() {
           </>
         )}
       </div>
+      {lightboxSrc && (
+        <div
+          className="chart-lightbox"
+          onClick={() => setLightboxSrc(null)}
+          onKeyDown={(e) => e.key === "Escape" && setLightboxSrc(null)}
+          tabIndex={0}
+          role="dialog"
+          ref={(el) => el?.focus()}
+        >
+          <img src={lightboxSrc} alt="Chart (enlarged)" />
+        </div>
+      )}
     </div>
   );
 }
