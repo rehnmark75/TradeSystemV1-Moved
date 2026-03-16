@@ -87,6 +87,8 @@ class SMCRejectionHistoryManager:
     STAGE_TIER1_HTF_CANDLE = 'TIER1_HTF_CANDLE'  # HTF candle direction conflicts with signal
     # v2.38.0: Per-pair scalp filters (EMA stack, efficiency ratio checks)
     STAGE_PAIR_SCALP_FILTER = 'PAIR_SCALP_FILTER'  # Per-pair scalp mode filter rejection
+    # Regime-based rejection stages
+    STAGE_REGIME_BREAKOUT = 'REGIME_BREAKOUT'  # Breakout regime blocked (40% WR historically)
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -107,7 +109,9 @@ class SMCRejectionHistoryManager:
         # v2.35.4: HTF candle alignment filter
         STAGE_TIER1_HTF_CANDLE,
         # v2.38.0: Per-pair scalp filters
-        STAGE_PAIR_SCALP_FILTER
+        STAGE_PAIR_SCALP_FILTER,
+        # Regime-based rejections
+        STAGE_REGIME_BREAKOUT
     ]
 
     def __init__(self, db_manager, config=None):
