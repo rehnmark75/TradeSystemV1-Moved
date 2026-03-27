@@ -490,20 +490,25 @@ async def ig_place_order(
                 }
             )
 
-        # Check if min_distance is too large (> 4 points)
-        if min_distance and min_distance > 4:
+        # Check if min_distance is too large - per-epic thresholds
+        # EURUSD CEEM consistently returns 6pt min_distance even in normal conditions
+        MAX_MIN_DISTANCE = {
+            "EURUSD.1.MINI": 8,
+        }
+        max_allowed = MAX_MIN_DISTANCE.get(epic, 4)
+        if min_distance and min_distance > max_allowed:
             logger.warning(
-                f"⚠️ ORDER REJECTED: {symbol} broker min_distance={min_distance}pt exceeds maximum allowed (4pt). "
+                f"⚠️ ORDER REJECTED: {symbol} broker min_distance={min_distance}pt exceeds maximum allowed ({max_allowed}pt). "
                 f"Market conditions unfavorable - wide spreads or low liquidity detected."
             )
             raise HTTPException(
                 status_code=400,
                 detail={
                     "error": "Broker minimum distance too large",
-                    "message": f"Broker requires {min_distance}pt minimum distance, maximum allowed is 4pt. "
+                    "message": f"Broker requires {min_distance}pt minimum distance, maximum allowed is {max_allowed}pt. "
                              f"Market conditions not suitable for tight stop placement.",
                     "broker_min_distance": min_distance,
-                    "max_allowed_min_distance": 4,
+                    "max_allowed_min_distance": max_allowed,
                     "epic": symbol,
                     "alert_id": alert_id,
                     "reason": "min_distance_too_large"
