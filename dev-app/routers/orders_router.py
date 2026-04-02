@@ -491,11 +491,18 @@ async def ig_place_order(
             )
 
         # Check if min_distance is too large - per-epic thresholds
-        # EURUSD CEEM consistently returns 6pt min_distance even in normal conditions
+        # IG API minNormalStopOrLimitDistance (POINTS): EURJPY=18, EURUSD=2(normal)/6(wide), USDJPY=2, USDCAD=4, GBPUSD=4
+        # EURJPY 18pt = 18 pips (1pt=0.01 JPY) - this is IG's permanent minimum, not a market condition
         MAX_MIN_DISTANCE = {
-            "EURUSD.1.MINI": 8,
+            "CS.D.EURUSD.CEEM.IP": 8,      # Normal=2, can spike to 6 during volatility
+            "CS.D.EURJPY.MINI.IP": 20,      # IG permanent min=18pt for this instrument
+            "CS.D.USDJPY.MINI.IP": 8,       # Normal=2
+            "CS.D.GBPJPY.MINI.IP": 20,      # JPY cross - likely similar to EURJPY
+            "CS.D.AUDJPY.MINI.IP": 20,      # JPY cross - likely similar to EURJPY
+            "CS.D.USDCAD.MINI.IP": 8,       # Normal=4
+            "CS.D.GBPUSD.MINI.IP": 8,       # Normal=4
         }
-        max_allowed = MAX_MIN_DISTANCE.get(epic, 4)
+        max_allowed = MAX_MIN_DISTANCE.get(epic, 8)
         if min_distance and min_distance > max_allowed:
             logger.warning(
                 f"⚠️ ORDER REJECTED: {symbol} broker min_distance={min_distance}pt exceeds maximum allowed ({max_allowed}pt). "
