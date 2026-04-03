@@ -512,6 +512,18 @@ class SMCSimpleConfig:
                 return override['swing_proximity_enabled']
         return self.swing_proximity_enabled
 
+    def get_pair_require_body_close_break(self, epic: str) -> bool:
+        """Get require_body_close_break for a specific pair.
+
+        Returns pair-specific value from parameter_overrides if set, otherwise global default.
+        Enabled per-pair for pairs where wick-only breaks produce failed breakouts (e.g., JPY pairs).
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('require_body_close_break') is not None:
+                return bool(override['require_body_close_break'])
+        return self.require_body_close_break
+
     def get_pair_swing_proximity_min_distance(self, epic: str) -> int:
         """Get swing proximity minimum distance in pips for a specific pair.
 

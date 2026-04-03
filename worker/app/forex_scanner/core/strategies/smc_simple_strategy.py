@@ -4071,25 +4071,28 @@ class SMCSimpleStrategy:
             self.logger.info(f"   📐 EMA slope: {ema_slope_atr:.3f}x ATR, direction: {direction}")
 
             # v2.16.0 Option 2: Asymmetric validation
-            # BULL requires EMA to be rising (slope >= 0) or flat
-            # BEAR requires EMA to be falling (slope <= 0) or flat
-            if direction == 'BULL' and ema_slope_atr < 0:
-                # Price is above EMA but EMA is falling = bearish retest, NOT bullish
+            # BULL requires EMA to be rising above minimum threshold
+            # BEAR requires EMA to be falling below minimum threshold
+            # v2.40.0: Use ema_slope_min_atr_multiplier instead of sign-only check
+            # A barely-positive slope (0.001 ATR) in a flat market should not qualify as trending
+            min_slope = getattr(self, 'ema_slope_min_atr_multiplier', 0.0)
+            if direction == 'BULL' and ema_slope_atr < min_slope:
+                # Price is above EMA but EMA slope is too weak/falling
                 return {
                     'valid': False,
                     'rejection_type': 'EMA_SLOPE',  # v2.16.0: Track slope rejections separately
                     'ema_slope_atr': ema_slope_atr,
                     'attempted_direction': direction,
-                    'reason': f"BULL rejected: EMA is FALLING (slope: {ema_slope_atr:.3f}x ATR) - need rising EMA for BULL"
+                    'reason': f"BULL rejected: EMA slope {ema_slope_atr:.3f}x ATR < min {min_slope}x ATR"
                 }
-            elif direction == 'BEAR' and ema_slope_atr > 0:
-                # Price is below EMA but EMA is rising = bullish retest, NOT bearish
+            elif direction == 'BEAR' and ema_slope_atr > -min_slope:
+                # Price is below EMA but EMA slope is too weak/rising
                 return {
                     'valid': False,
                     'rejection_type': 'EMA_SLOPE',  # v2.16.0: Track slope rejections separately
                     'ema_slope_atr': ema_slope_atr,
                     'attempted_direction': direction,
-                    'reason': f"BEAR rejected: EMA is RISING (slope: {ema_slope_atr:.3f}x ATR) - need falling EMA for BEAR"
+                    'reason': f"BEAR rejected: EMA slope {ema_slope_atr:.3f}x ATR > min -{min_slope}x ATR"
                 }
 
         # ================================================================
@@ -4205,6 +4208,11 @@ class SMCSimpleStrategy:
                 'reason': f"Insufficient {self.trigger_tf} data ({len(df)} < {effective_lookback + 1} bars)"
             }
 
+        # v2.40.0: Per-pair body close requirement for swing breaks
+        require_body_close = self.require_body_close
+        if epic and hasattr(self, 'config') and self.config and hasattr(self.config, 'get_pair_require_body_close_break'):
+            require_body_close = self.config.get_pair_require_body_close_break(epic)
+
         # Find swing points
         highs = df['high'].values
         lows = df['low'].values
@@ -4282,7 +4290,12 @@ class SMCSimpleStrategy:
                 # In scalp mode, allow breaks within tolerance (near-breaks)
                 break_threshold = swing_level - scalp_tolerance
                 for check_idx in range(swing_idx + 1, current_idx + 1):
-                    if highs[check_idx] > break_threshold:
+                    price_broke = highs[check_idx] > break_threshold
+                    # v2.40.0: When require_body_close is enabled, require candle CLOSE above level
+                    # Wick-only breaks are often failed breakouts that immediately reverse
+                    if require_body_close and price_broke:
+                        price_broke = closes[check_idx] > break_threshold
+                    if price_broke:
                         # Found a break of this swing!
                         if not break_found or swing_level > best_swing_level:
                             # Prefer higher swing levels (stronger breaks)
@@ -4349,7 +4362,12 @@ class SMCSimpleStrategy:
                 # In scalp mode, allow breaks within tolerance (near-breaks)
                 break_threshold = swing_level + scalp_tolerance
                 for check_idx in range(swing_idx + 1, current_idx + 1):
-                    if lows[check_idx] < break_threshold:
+                    price_broke = lows[check_idx] < break_threshold
+                    # v2.40.0: When require_body_close is enabled, require candle CLOSE below level
+                    # Wick-only breaks are often failed breakouts that immediately reverse
+                    if require_body_close and price_broke:
+                        price_broke = closes[check_idx] < break_threshold
+                    if price_broke:
                         # Found a break of this swing!
                         if not break_found or swing_level < best_swing_level:
                             # Prefer lower swing levels (stronger breaks)
