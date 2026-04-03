@@ -622,6 +622,27 @@ class SMCSimpleStrategy:
             self.divergence_as_entry_enabled = getattr(config, 'divergence_as_entry_enabled', False)
             self.divergence_entry_min_strength = getattr(config, 'divergence_entry_min_strength', 0.50)
 
+            # v2.41.0: Swing Significance Classification
+            self.swing_significance_enabled = getattr(config, 'swing_significance_enabled', True)
+            self.swing_significance_filter_mode = getattr(config, 'swing_significance_filter_mode', 'MONITORING')
+            self.min_swing_significance = getattr(config, 'min_swing_significance', 0.30)
+            self.swing_sig_confidence_weight = getattr(config, 'swing_sig_confidence_weight', 0.35)
+            self.swing_sig_depth_weight = getattr(config, 'swing_sig_depth_weight', 0.30)
+            self.swing_sig_duration_weight = getattr(config, 'swing_sig_duration_weight', 0.25)
+            self.swing_sig_touch_weight = getattr(config, 'swing_sig_touch_weight', 0.20)
+            self.swing_sig_volume_weight = getattr(config, 'swing_sig_volume_weight', 0.15)
+            self.swing_sig_clean_weight = getattr(config, 'swing_sig_clean_weight', 0.10)
+
+            # v2.41.0: MFI Filter
+            self.mfi_filter_enabled = getattr(config, 'mfi_filter_enabled', True)
+            self.mfi_filter_mode = getattr(config, 'mfi_filter_mode', 'MONITORING')
+            self.mfi_period = getattr(config, 'mfi_period', 14)
+            self.mfi_overbought_threshold = getattr(config, 'mfi_overbought_threshold', 80.0)
+            self.mfi_oversold_threshold = getattr(config, 'mfi_oversold_threshold', 20.0)
+            self.mfi_min_slope = getattr(config, 'mfi_min_slope', -5.0)
+            self.mfi_confidence_penalty = getattr(config, 'mfi_confidence_penalty', 0.03)
+            self.mfi_confidence_bonus_enabled = getattr(config, 'mfi_confidence_bonus_enabled', True)
+
             self.logger.info(f"✅ SMC Simple config v{config.version} loaded from DATABASE (source: {config.source})")
 
             # SCALP MODE: Load scalp configuration first (before overrides)
@@ -2186,10 +2207,15 @@ class SMCSimpleStrategy:
             opposite_swing = swing_result['opposite_swing']  # v1.6.0: For Fib calculation
             break_candle = swing_result['break_candle']
             volume_confirmed = swing_result['volume_confirmed']
+            # v2.41.0: Inject significance into break_candle so it flows to _calculate_confidence
+            swing_significance = swing_result.get('swing_significance', 0.5)
+            break_candle['swing_significance'] = swing_significance
 
             self.logger.info(f"   ✅ Swing {'Low' if direction == 'BEAR' else 'High'} Break: {swing_level:.5f}")
             self.logger.info(f"   ✅ Opposite Swing: {opposite_swing:.5f}")  # v1.6.0
             self.logger.info(f"   ✅ Body Close Confirmed: Yes")
+            if self.swing_significance_enabled:
+                self.logger.info(f"   📐 Swing significance: {swing_significance:.2f}")
             if self.volume_enabled:
                 self.logger.info(f"   {'✅' if volume_confirmed else '⚠️ '} Volume Spike: {'Yes' if volume_confirmed else 'No (optional)'}")
 
@@ -3519,6 +3545,74 @@ class SMCSimpleStrategy:
                 pass  # Config not available, skip MACD filter
 
             # ================================================================
+            # v2.41.0: MFI MONEY FLOW INDEX FILTER
+            # ================================================================
+            # Confirms that money is flowing in the direction of the trade.
+            # Uses tick volume from IG (standard proxy for real volume in forex).
+            # Starts in MONITORING mode: logs issues but doesn't block signals.
+            try:
+                mfi_filter_enabled = getattr(self, 'mfi_filter_enabled', False)
+                if mfi_filter_enabled and self._config_service and epic:
+                    try:
+                        mfi_filter_enabled = self._config_service.get_pair_mfi_filter_enabled(epic)
+                    except Exception:
+                        pass
+
+                if mfi_filter_enabled and 'mfi' in df_trigger.columns:
+                    mfi_value = float(df_trigger['mfi'].iloc[-1])
+                    mfi_slope = float(df_trigger['mfi_slope'].iloc[-1]) if 'mfi_slope' in df_trigger.columns else 0.0
+                    mfi_mode = getattr(self, 'mfi_filter_mode', 'MONITORING')
+                    if self._config_service and epic:
+                        try:
+                            mfi_mode = self._config_service.get_pair_mfi_filter_mode(epic)
+                        except Exception:
+                            pass
+                    mfi_ob = getattr(self, 'mfi_overbought_threshold', 80.0)
+                    mfi_os = getattr(self, 'mfi_oversold_threshold', 20.0)
+                    mfi_min_slope = getattr(self, 'mfi_min_slope', -5.0)
+                    mfi_penalty = getattr(self, 'mfi_confidence_penalty', 0.03)
+
+                    mfi_issue = None
+                    if direction == 'BULL':
+                        if mfi_value > mfi_ob:
+                            mfi_issue = f"MFI overbought ({mfi_value:.0f} > {mfi_ob:.0f})"
+                        elif mfi_slope < mfi_min_slope:
+                            mfi_issue = f"MFI declining ({mfi_slope:.1f} < {mfi_min_slope:.1f})"
+                    else:  # BEAR
+                        if mfi_value < mfi_os:
+                            mfi_issue = f"MFI oversold ({mfi_value:.0f} < {mfi_os:.0f})"
+                        elif mfi_slope > -mfi_min_slope:
+                            mfi_issue = f"MFI rising ({mfi_slope:.1f} > {-mfi_min_slope:.1f})"
+
+                    if mfi_issue:
+                        if mfi_mode == 'ACTIVE':
+                            self.logger.info(f"\n❌ MFI filter blocked: {mfi_issue}")
+                            self._track_rejection(
+                                stage='MFI_FILTER',
+                                reason=mfi_issue,
+                                epic=epic,
+                                pair=pair,
+                                candle_timestamp=candle_timestamp,
+                                direction=direction,
+                                context={'mfi_value': mfi_value, 'mfi_slope': mfi_slope,
+                                         'confidence_score': confidence}
+                            )
+                            return None
+                        else:
+                            # MONITORING: log and apply small confidence penalty
+                            self.logger.info(f"   ⚠️ [MFI MONITOR] {mfi_issue} — applying -{mfi_penalty*100:.0f}% confidence penalty")
+                            confidence -= mfi_penalty
+                    else:
+                        self.logger.info(f"   ✅ MFI confirmed: {mfi_value:.0f} (slope: {mfi_slope:+.1f})")
+                        # Small confidence bonus when MFI strongly confirms direction
+                        if getattr(self, 'mfi_confidence_bonus_enabled', True):
+                            if 30 < mfi_value < 70 and abs(mfi_slope) > 5:
+                                confidence += 0.02
+                                self.logger.info(f"   ➕ MFI bonus: +2% (neutral zone with directional slope)")
+            except Exception as e:
+                self.logger.debug(f"   MFI filter error (skipping): {e}")
+
+            # ================================================================
             # v2.17.0: FINALIZE ORDER TYPE BASED ON CONFIDENCE
             # Now that confidence is calculated, finalize the order routing decision
             # High confidence + strong trend = market order (immediate entry)
@@ -4250,6 +4344,26 @@ class SMCSimpleStrategy:
             if is_swing_low:
                 swing_lows.append((i, lows[i]))
 
+        # v2.41.0: Score each swing by structural significance
+        atr_for_sig = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not df['atr'].isna().all() else None
+        if self.swing_significance_enabled and atr_for_sig:
+            swing_highs = [
+                (idx, price, self._calculate_swing_significance(
+                    highs, lows, closes, volumes, idx, 'high', atr_for_sig, swing_highs
+                ))
+                for idx, price in swing_highs
+            ]
+            swing_lows = [
+                (idx, price, self._calculate_swing_significance(
+                    highs, lows, closes, volumes, idx, 'low', atr_for_sig, swing_lows
+                ))
+                for idx, price in swing_lows
+            ]
+        else:
+            # No significance scoring — add default 0.5 significance
+            swing_highs = [(idx, price, 0.5) for idx, price in swing_highs]
+            swing_lows = [(idx, price, 0.5) for idx, price in swing_lows]
+
         # Check for break based on direction
         current_idx = len(df) - 1
         current_close = closes[-1]
@@ -4281,11 +4395,12 @@ class SMCSimpleStrategy:
             best_swing_level = None
             best_swing_idx = None
             best_break_idx = None
+            best_swing_sig = 0.0  # v2.41.0: significance of the best broken swing
 
             # Scalp mode: allow near-breaks with tolerance (0.5 pips)
             scalp_tolerance = getattr(self, 'scalp_swing_break_tolerance_pips', 0) * pip_value if self.scalp_mode_enabled else 0
 
-            for swing_idx, swing_level in recent_highs:
+            for swing_idx, swing_level, swing_sig in recent_highs:
                 # Check all candles AFTER this swing for a break
                 # In scalp mode, allow breaks within tolerance (near-breaks)
                 break_threshold = swing_level - scalp_tolerance
@@ -4297,12 +4412,16 @@ class SMCSimpleStrategy:
                         price_broke = closes[check_idx] > break_threshold
                     if price_broke:
                         # Found a break of this swing!
-                        if not break_found or swing_level > best_swing_level:
-                            # Prefer higher swing levels (stronger breaks)
+                        # v2.41.0: Prefer most significant swing; fall back to highest level
+                        is_better = (not break_found or
+                                     swing_sig > best_swing_sig or
+                                     (swing_sig == best_swing_sig and swing_level > best_swing_level))
+                        if is_better:
                             break_found = True
                             best_swing_level = swing_level
                             best_swing_idx = swing_idx
                             best_break_idx = check_idx
+                            best_swing_sig = swing_sig
                         break  # Found break for this swing, check next swing
 
             if not break_found:
@@ -4353,11 +4472,12 @@ class SMCSimpleStrategy:
             best_swing_level = None
             best_swing_idx = None
             best_break_idx = None
+            best_swing_sig = 0.0  # v2.41.0: significance of the best broken swing
 
             # Scalp mode: allow near-breaks with tolerance (0.5 pips)
             scalp_tolerance = getattr(self, 'scalp_swing_break_tolerance_pips', 0) * pip_value if self.scalp_mode_enabled else 0
 
-            for swing_idx, swing_level in recent_lows:
+            for swing_idx, swing_level, swing_sig in recent_lows:
                 # Check all candles AFTER this swing for a break
                 # In scalp mode, allow breaks within tolerance (near-breaks)
                 break_threshold = swing_level + scalp_tolerance
@@ -4369,12 +4489,16 @@ class SMCSimpleStrategy:
                         price_broke = closes[check_idx] < break_threshold
                     if price_broke:
                         # Found a break of this swing!
-                        if not break_found or swing_level < best_swing_level:
-                            # Prefer lower swing levels (stronger breaks)
+                        # v2.41.0: Prefer most significant swing; fall back to lowest level
+                        is_better = (not break_found or
+                                     swing_sig > best_swing_sig or
+                                     (swing_sig == best_swing_sig and swing_level < best_swing_level))
+                        if is_better:
                             break_found = True
                             best_swing_level = swing_level
                             best_swing_idx = swing_idx
                             best_break_idx = check_idx
+                            best_swing_sig = swing_sig
                         break  # Found break for this swing, check next swing
 
             if not break_found:
@@ -4480,10 +4604,28 @@ class SMCSimpleStrategy:
                 # Fallback: use the highest high in the range before the swing
                 opposite_swing = max(highs[max(0, best_swing_idx - effective_lookback):best_swing_idx])
 
+        # v2.41.0: Swing significance filter
+        if self.swing_significance_enabled and atr_for_sig:
+            sig_filter_mode = self.swing_significance_filter_mode
+            if hasattr(self, '_config_service') and self._config_service and epic:
+                try:
+                    sig_filter_mode = self._config_service.get_pair_swing_significance_filter_mode(epic)
+                except Exception:
+                    pass
+            if best_swing_sig < self.min_swing_significance:
+                sig_msg = (f"Swing significance {best_swing_sig:.2f} below min {self.min_swing_significance:.2f}")
+                if sig_filter_mode == 'ACTIVE':
+                    return {'valid': False, 'rejection_type': 'SWING_SIGNIFICANCE', 'reason': sig_msg}
+                else:
+                    self.logger.debug(f"   ⚠️ [SIG MONITOR] {sig_msg}")
+            else:
+                self.logger.debug(f"   ✅ Swing significance: {best_swing_sig:.2f} (min: {self.min_swing_significance:.2f})")
+
         return {
             'valid': True,
             'swing_level': swing_level,
             'opposite_swing': opposite_swing,  # v1.6.0: For accurate Fib calculation
+            'swing_significance': best_swing_sig,  # v2.41.0: Structural importance of broken swing
             'break_candle': {
                 'open': break_open,
                 'close': break_close,
@@ -4494,6 +4636,110 @@ class SMCSimpleStrategy:
             'volume_confirmed': volume_confirmed,
             'reason': f"Swing break confirmed ({current_idx - break_candle_idx} bars ago)"
         }
+
+    def _calculate_swing_significance(
+        self,
+        highs: 'np.ndarray',
+        lows: 'np.ndarray',
+        closes: 'np.ndarray',
+        volumes,  # Optional ndarray
+        swing_idx: int,
+        swing_type: str,  # 'high' or 'low'
+        atr: float,
+        all_swings: list
+    ) -> float:
+        """v2.41.0: Score a swing point by its structural significance (0.0–1.0).
+
+        Five factors determine structural importance:
+        - Prominence (30%): How far the swing extends from surrounding bars vs ATR
+        - Duration (25%): How many bars from the previous opposite swing
+        - Touch count (20%): How many times price revisited this level
+        - Volume (15%): Volume at swing candle vs surrounding average
+        - Clean rejection (10%): Sharpness of the reversal at the swing
+
+        Args:
+            highs/lows/closes/volumes: OHLCV arrays for the trigger timeframe
+            swing_idx: Bar index of the swing point
+            swing_type: 'high' or 'low'
+            atr: Current ATR value for normalization
+            all_swings: List of (idx, price, ...) tuples for the same swing type
+                        — used to measure duration between swings
+
+        Returns:
+            Significance score 0.0–1.0
+        """
+        n = len(highs)
+        if atr <= 0 or swing_idx < 2 or swing_idx >= n - 1:
+            return 0.5
+
+        swing_price = highs[swing_idx] if swing_type == 'high' else lows[swing_idx]
+
+        # ── Factor 1: Prominence (30%) ─────────────────────────────────────
+        # How much does this swing stand out from the surrounding bars?
+        window = max(2, min(5, swing_idx, n - swing_idx - 1))
+        surrounding_slice = slice(max(0, swing_idx - window), min(n, swing_idx + window + 1))
+        if swing_type == 'high':
+            surrounding_vals = highs[surrounding_slice]
+            prominence = (swing_price - surrounding_vals.mean()) / atr
+        else:
+            surrounding_vals = lows[surrounding_slice]
+            prominence = (surrounding_vals.mean() - swing_price) / atr
+        prominence_score = min(max(prominence / 1.5, 0.0), 1.0)  # 1.5 ATR = perfect
+
+        # ── Factor 2: Duration (25%) ───────────────────────────────────────
+        # Bars since the previous swing of the same type
+        prev_swings = [(idx, price) for idx, price, *_ in all_swings if idx < swing_idx]
+        if prev_swings:
+            prev_idx = max(prev_swings, key=lambda x: x[0])[0]
+            bars_since_prev = swing_idx - prev_idx
+        else:
+            bars_since_prev = swing_idx  # First swing: use distance from start
+        duration_score = min(bars_since_prev / 15.0, 1.0)  # 15 bars = perfect
+
+        # ── Factor 3: Touch count (20%) ────────────────────────────────────
+        # How many candles came within 0.3 ATR of this level (respecting it)
+        tolerance = 0.3 * atr
+        lookback_start = max(0, swing_idx - 30)
+        if swing_type == 'high':
+            touches = int(((highs[lookback_start:swing_idx] >= swing_price - tolerance) &
+                           (highs[lookback_start:swing_idx] <= swing_price + tolerance)).sum())
+        else:
+            touches = int(((lows[lookback_start:swing_idx] >= swing_price - tolerance) &
+                           (lows[lookback_start:swing_idx] <= swing_price + tolerance)).sum())
+        touch_score = min(touches / 3.0, 1.0)  # 3+ touches = perfect
+
+        # ── Factor 4: Volume at swing (15%) ───────────────────────────────
+        if volumes is not None and len(volumes) > swing_idx:
+            vol_at_swing = volumes[swing_idx]
+            avg_vol_start = max(0, swing_idx - 20)
+            avg_vol = volumes[avg_vol_start:swing_idx].mean() if swing_idx > avg_vol_start else vol_at_swing
+            vol_ratio = vol_at_swing / avg_vol if avg_vol > 0 else 1.0
+            volume_score = min(vol_ratio / 1.5, 1.0)  # 1.5x avg = perfect
+        else:
+            volume_score = 0.5  # Neutral when no volume data
+
+        # ── Factor 5: Clean rejection (10%) ───────────────────────────────
+        # Body-to-range ratio of swing candle: a large body = decisive rejection
+        swing_range = highs[swing_idx] - lows[swing_idx]
+        swing_body = abs(closes[swing_idx] - (highs[swing_idx] if swing_type == 'high' else lows[swing_idx]))
+        clean_score = min(swing_body / swing_range, 1.0) if swing_range > 0 else 0.5
+
+        # ── Weighted total ─────────────────────────────────────────────────
+        significance = (
+            prominence_score  * self.swing_sig_depth_weight +
+            duration_score    * self.swing_sig_duration_weight +
+            touch_score       * self.swing_sig_touch_weight +
+            volume_score      * self.swing_sig_volume_weight +
+            clean_score       * self.swing_sig_clean_weight
+        )
+        # Normalize to ensure sum-of-weights = 1.0 (weights may not sum to 1)
+        total_weight = (self.swing_sig_depth_weight + self.swing_sig_duration_weight +
+                        self.swing_sig_touch_weight + self.swing_sig_volume_weight +
+                        self.swing_sig_clean_weight)
+        if total_weight > 0:
+            significance /= total_weight
+
+        return round(min(max(significance, 0.0), 1.0), 3)
 
     def _check_pullback_zone(
         self,
@@ -4931,7 +5177,7 @@ class SMCSimpleStrategy:
             ema_score = min(ema_distance / 30, 1.0) * 0.20
 
         # ================================================================
-        # 2. SWING BREAK QUALITY (20% weight) - NEW in v2.2.0
+        # 2. SWING BREAK QUALITY (20% weight) - v2.41.0: added swing significance
         # ================================================================
         swing_break_score = 0.10  # Default to 50% if no break_candle data
 
@@ -4958,8 +5204,21 @@ class SMCSimpleStrategy:
             bars_ago = break_candle.get('bars_ago', 10)
             recency_score = max(0.3, 1.0 - (bars_ago / 20))  # 0 bars = 1.0, 20+ bars = 0.3
 
+            # v2.41.0: Factor D: Swing significance (structural importance of broken swing)
+            sig_weight = getattr(self, 'swing_sig_confidence_weight', 0.35)
+            significance = break_candle.get('swing_significance', 0.5)  # Passed via swing_result
+            # Redistribute weights: body/strength each lose half of sig_weight, recency loses the rest
+            body_w = max(0.0, 0.40 - sig_weight * 0.40)
+            strength_w = max(0.0, 0.40 - sig_weight * 0.40)
+            recency_w = max(0.0, 0.20 - sig_weight * 0.20)
+
             # Combined swing break quality (weighted average)
-            swing_break_score = (body_score * 0.4 + break_strength * 0.4 + recency_score * 0.2) * 0.20
+            swing_break_score = (
+                body_score    * body_w +
+                break_strength * strength_w +
+                recency_score * recency_w +
+                significance  * sig_weight
+            ) * 0.20
 
         # ================================================================
         # 3. VOLUME STRENGTH (20% weight) - Gradient scoring

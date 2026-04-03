@@ -71,7 +71,10 @@ class VolumeAnalyzer:
         
         # Accumulation/Distribution approximation
         df_vol = self._add_accumulation_distribution(df_vol)
-        
+
+        # Money Flow Index (volume-weighted RSI)
+        df_vol = self._add_money_flow_index(df_vol)
+
         return df_vol
     
     def _add_accumulation_distribution(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -91,5 +94,39 @@ class VolumeAnalyzer:
         
         # Accumulation/Distribution Line
         df['accumulation_distribution'] = df['money_flow_volume'].cumsum()
-        
+
+        return df
+
+    def _add_money_flow_index(self, df: pd.DataFrame, period: int = 14) -> pd.DataFrame:
+        """Add Money Flow Index (volume-weighted RSI, 0-100 scale)
+
+        Uses tick volume (ltv) as a proxy for real volume, which is standard
+        for forex where true volume is unavailable.
+        """
+        if 'ltv' not in df.columns:
+            return df
+
+        # Typical price
+        tp = (df['high'] + df['low'] + df['close']) / 3
+
+        # Raw money flow = typical price * volume
+        raw_mf = tp * df['ltv']
+
+        # Separate into positive (rising TP) and negative (falling TP)
+        tp_change = tp.diff()
+        positive_mf = raw_mf.where(tp_change > 0, 0.0)
+        negative_mf = raw_mf.where(tp_change < 0, 0.0)
+
+        # Rolling sums over period
+        pos_sum = positive_mf.rolling(window=period, min_periods=1).sum()
+        neg_sum = negative_mf.rolling(window=period, min_periods=1).sum()
+
+        # MFI = 100 - (100 / (1 + money_flow_ratio))
+        mf_ratio = pos_sum / neg_sum.replace(0, np.nan)
+        df['mfi'] = 100 - (100 / (1 + mf_ratio))
+        df['mfi'] = df['mfi'].fillna(50.0)  # Neutral default when undefined
+
+        # MFI slope over 3 bars for direction detection
+        df['mfi_slope'] = df['mfi'].diff(3)
+
         return df
