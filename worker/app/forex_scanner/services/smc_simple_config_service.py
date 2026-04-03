@@ -206,7 +206,7 @@ class SMCSimpleConfig:
     # Mode: MONITORING = log only, ACTIVE = hard filter
     swing_significance_enabled: bool = True          # Calculate scores (safe: just adds data)
     swing_significance_filter_mode: str = 'MONITORING'  # 'MONITORING' or 'ACTIVE'
-    min_swing_significance: float = 0.30             # Hard filter threshold (0.0-1.0)
+    min_swing_significance: float = 0.40             # Hard filter threshold (0.0-1.0)
     swing_sig_confidence_weight: float = 0.35        # Weight within swing break component
     swing_sig_depth_weight: float = 0.30             # Prominence/depth factor weight
     swing_sig_duration_weight: float = 0.25          # Formation duration factor weight
@@ -223,7 +223,7 @@ class SMCSimpleConfig:
     mfi_period: int = 14
     mfi_overbought_threshold: float = 80.0           # Reject BULL if MFI > this
     mfi_oversold_threshold: float = 20.0             # Reject BEAR if MFI < this
-    mfi_min_slope: float = -5.0                      # Min slope for BULL (negative = allow declining)
+    mfi_min_slope: float = -15.0                     # Min slope for BULL (negative = allow declining)
     mfi_confidence_penalty: float = 0.03             # Confidence reduction in MONITORING mode
     mfi_confidence_bonus_enabled: bool = True        # Small bonus when MFI strongly confirms
 
@@ -577,6 +577,26 @@ class SMCSimpleConfig:
             if override.get('mfi_filter_mode') is not None:
                 return str(override['mfi_filter_mode'])
         return self.mfi_filter_mode
+
+    def get_pair_mfi_min_slope(self, epic: str) -> float:
+        """Get MFI minimum slope threshold for a specific pair.
+
+        For BULL: flag if slope < threshold (MFI declining).
+        For BEAR: flag if slope > -threshold (MFI rising).
+        """
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('mfi_min_slope') is not None:
+                return float(override['mfi_min_slope'])
+        return self.mfi_min_slope
+
+    def get_pair_min_swing_significance(self, epic: str) -> float:
+        """Get minimum swing significance threshold for a specific pair (0.0-1.0)."""
+        if epic in self._pair_overrides:
+            override = self._pair_overrides[epic]
+            if override.get('min_swing_significance') is not None:
+                return float(override['min_swing_significance'])
+        return self.min_swing_significance
 
     def get_pair_swing_proximity_min_distance(self, epic: str) -> int:
         """Get swing proximity minimum distance in pips for a specific pair.
@@ -2070,6 +2090,14 @@ class SMCSimpleConfigService:
     def get_pair_mfi_filter_mode(self, epic: str) -> str:
         """Get MFI filter mode for a specific pair"""
         return self.get_config().get_pair_mfi_filter_mode(epic)
+
+    def get_pair_mfi_min_slope(self, epic: str) -> float:
+        """Get MFI minimum slope threshold for a specific pair"""
+        return self.get_config().get_pair_mfi_min_slope(epic)
+
+    def get_pair_min_swing_significance(self, epic: str) -> float:
+        """Get minimum swing significance threshold for a specific pair"""
+        return self.get_config().get_pair_min_swing_significance(epic)
 
     def get_pair_require_body_close_break(self, epic: str) -> bool:
         """Check if body-close break requirement is enabled for a specific pair"""

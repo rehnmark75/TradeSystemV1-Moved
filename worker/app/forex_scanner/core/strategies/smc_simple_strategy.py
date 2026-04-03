@@ -3574,7 +3574,12 @@ class SMCSimpleStrategy:
                             pass
                     mfi_ob = getattr(self, 'mfi_overbought_threshold', 80.0)
                     mfi_os = getattr(self, 'mfi_oversold_threshold', 20.0)
-                    mfi_min_slope = getattr(self, 'mfi_min_slope', -5.0)
+                    mfi_min_slope = getattr(self, 'mfi_min_slope', -15.0)
+                    if self._config_service and epic:
+                        try:
+                            mfi_min_slope = self._config_service.get_pair_mfi_min_slope(epic)
+                        except Exception:
+                            pass
                     mfi_penalty = getattr(self, 'mfi_confidence_penalty', 0.03)
 
                     mfi_issue = None
@@ -4619,19 +4624,21 @@ class SMCSimpleStrategy:
         # v2.41.0: Swing significance filter
         if self.swing_significance_enabled and atr_for_sig:
             sig_filter_mode = self.swing_significance_filter_mode
+            min_sig = self.min_swing_significance
             if hasattr(self, '_config_service') and self._config_service and epic:
                 try:
                     sig_filter_mode = self._config_service.get_pair_swing_significance_filter_mode(epic)
+                    min_sig = self._config_service.get_pair_min_swing_significance(epic)
                 except Exception:
                     pass
-            if best_swing_sig < self.min_swing_significance:
-                sig_msg = (f"Swing significance {best_swing_sig:.2f} below min {self.min_swing_significance:.2f}")
+            if best_swing_sig < min_sig:
+                sig_msg = (f"Swing significance {best_swing_sig:.2f} below min {min_sig:.2f}")
                 if sig_filter_mode == 'ACTIVE':
                     return {'valid': False, 'rejection_type': 'SWING_SIGNIFICANCE', 'reason': sig_msg}
                 else:
                     self.logger.debug(f"   ⚠️ [SIG MONITOR] {sig_msg}")
             else:
-                self.logger.debug(f"   ✅ Swing significance: {best_swing_sig:.2f} (min: {self.min_swing_significance:.2f})")
+                self.logger.debug(f"   ✅ Swing significance: {best_swing_sig:.2f} (min: {min_sig:.2f})")
 
         return {
             'valid': True,
