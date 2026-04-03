@@ -557,25 +557,25 @@ class SMCSimpleConfig:
     def get_pair_swing_significance_filter_mode(self, epic: str) -> str:
         """Get swing significance filter mode for a specific pair (MONITORING or ACTIVE)."""
         if epic in self._pair_overrides:
-            override = self._pair_overrides[epic]
-            if override.get('swing_significance_filter_mode') is not None:
-                return str(override['swing_significance_filter_mode'])
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('swing_significance_filter_mode') is not None:
+                return str(po['swing_significance_filter_mode'])
         return self.swing_significance_filter_mode
 
     def get_pair_mfi_filter_enabled(self, epic: str) -> bool:
         """Check if MFI filter is enabled for a specific pair."""
         if epic in self._pair_overrides:
-            override = self._pair_overrides[epic]
-            if override.get('mfi_filter_enabled') is not None:
-                return bool(override['mfi_filter_enabled'])
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('mfi_filter_enabled') is not None:
+                return bool(po['mfi_filter_enabled'])
         return self.mfi_filter_enabled
 
     def get_pair_mfi_filter_mode(self, epic: str) -> str:
         """Get MFI filter mode for a specific pair (MONITORING or ACTIVE)."""
         if epic in self._pair_overrides:
-            override = self._pair_overrides[epic]
-            if override.get('mfi_filter_mode') is not None:
-                return str(override['mfi_filter_mode'])
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('mfi_filter_mode') is not None:
+                return str(po['mfi_filter_mode'])
         return self.mfi_filter_mode
 
     def get_pair_mfi_min_slope(self, epic: str) -> float:
@@ -585,17 +585,17 @@ class SMCSimpleConfig:
         For BEAR: flag if slope > -threshold (MFI rising).
         """
         if epic in self._pair_overrides:
-            override = self._pair_overrides[epic]
-            if override.get('mfi_min_slope') is not None:
-                return float(override['mfi_min_slope'])
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('mfi_min_slope') is not None:
+                return float(po['mfi_min_slope'])
         return self.mfi_min_slope
 
     def get_pair_min_swing_significance(self, epic: str) -> float:
         """Get minimum swing significance threshold for a specific pair (0.0-1.0)."""
         if epic in self._pair_overrides:
-            override = self._pair_overrides[epic]
-            if override.get('min_swing_significance') is not None:
-                return float(override['min_swing_significance'])
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('min_swing_significance') is not None:
+                return float(po['min_swing_significance'])
         return self.min_swing_significance
 
     def get_pair_swing_proximity_min_distance(self, epic: str) -> int:
