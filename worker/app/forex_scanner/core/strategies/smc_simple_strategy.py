@@ -632,6 +632,11 @@ class SMCSimpleStrategy:
             self.swing_sig_touch_weight = getattr(config, 'swing_sig_touch_weight', 0.20)
             self.swing_sig_volume_weight = getattr(config, 'swing_sig_volume_weight', 0.15)
             self.swing_sig_clean_weight = getattr(config, 'swing_sig_clean_weight', 0.10)
+            # Pre-cache total weight to avoid recomputing on every significance call
+            _tw = (self.swing_sig_depth_weight + self.swing_sig_duration_weight +
+                   self.swing_sig_touch_weight + self.swing_sig_volume_weight +
+                   self.swing_sig_clean_weight)
+            self._swing_sig_inv_total_weight = 1.0 / _tw if _tw > 0 else 1.0
 
             # v2.41.0: MFI Filter
             self.mfi_filter_enabled = getattr(config, 'mfi_filter_enabled', True)
@@ -4344,25 +4349,8 @@ class SMCSimpleStrategy:
             if is_swing_low:
                 swing_lows.append((i, lows[i]))
 
-        # v2.41.0: Score each swing by structural significance
+        # v2.41.0: Get ATR for significance scoring (deferred — only score broken swings)
         atr_for_sig = float(df['atr'].iloc[-1]) if 'atr' in df.columns and not df['atr'].isna().all() else None
-        if self.swing_significance_enabled and atr_for_sig:
-            swing_highs = [
-                (idx, price, self._calculate_swing_significance(
-                    highs, lows, closes, volumes, idx, 'high', atr_for_sig, swing_highs
-                ))
-                for idx, price in swing_highs
-            ]
-            swing_lows = [
-                (idx, price, self._calculate_swing_significance(
-                    highs, lows, closes, volumes, idx, 'low', atr_for_sig, swing_lows
-                ))
-                for idx, price in swing_lows
-            ]
-        else:
-            # No significance scoring — add default 0.5 significance
-            swing_highs = [(idx, price, 0.5) for idx, price in swing_highs]
-            swing_lows = [(idx, price, 0.5) for idx, price in swing_lows]
 
         # Check for break based on direction
         current_idx = len(df) - 1
@@ -4395,12 +4383,12 @@ class SMCSimpleStrategy:
             best_swing_level = None
             best_swing_idx = None
             best_break_idx = None
-            best_swing_sig = 0.0  # v2.41.0: significance of the best broken swing
+            broken_swing_idxs = []  # v2.41.0: collect all broken swings, score only these
 
             # Scalp mode: allow near-breaks with tolerance (0.5 pips)
             scalp_tolerance = getattr(self, 'scalp_swing_break_tolerance_pips', 0) * pip_value if self.scalp_mode_enabled else 0
 
-            for swing_idx, swing_level, swing_sig in recent_highs:
+            for swing_idx, swing_level in recent_highs:
                 # Check all candles AFTER this swing for a break
                 # In scalp mode, allow breaks within tolerance (near-breaks)
                 break_threshold = swing_level - scalp_tolerance
@@ -4412,17 +4400,29 @@ class SMCSimpleStrategy:
                         price_broke = closes[check_idx] > break_threshold
                     if price_broke:
                         # Found a break of this swing!
-                        # v2.41.0: Prefer most significant swing; fall back to highest level
-                        is_better = (not break_found or
-                                     swing_sig > best_swing_sig or
-                                     (swing_sig == best_swing_sig and swing_level > best_swing_level))
-                        if is_better:
+                        broken_swing_idxs.append((swing_idx, swing_level, check_idx))
+                        if not break_found or swing_level > best_swing_level:
+                            # Prefer higher swing levels (stronger breaks) — significance applied below
                             break_found = True
                             best_swing_level = swing_level
                             best_swing_idx = swing_idx
                             best_break_idx = check_idx
-                            best_swing_sig = swing_sig
                         break  # Found break for this swing, check next swing
+
+            # v2.41.0: Score only broken swings and pick the most significant one
+            best_swing_sig = 0.5
+            if self.swing_significance_enabled and atr_for_sig and broken_swing_idxs:
+                best_sig = -1.0
+                for s_idx, s_level, b_idx in broken_swing_idxs:
+                    sig = self._calculate_swing_significance(
+                        highs, lows, closes, volumes, s_idx, 'high', atr_for_sig, swing_highs
+                    )
+                    if sig > best_sig:
+                        best_sig = sig
+                        best_swing_level = s_level
+                        best_swing_idx = s_idx
+                        best_break_idx = b_idx
+                best_swing_sig = best_sig if best_sig >= 0 else 0.5
 
             if not break_found:
                 # Fallback: check if current price is above the highest recent swing
@@ -4472,12 +4472,12 @@ class SMCSimpleStrategy:
             best_swing_level = None
             best_swing_idx = None
             best_break_idx = None
-            best_swing_sig = 0.0  # v2.41.0: significance of the best broken swing
+            broken_swing_idxs = []  # v2.41.0: collect all broken swings, score only these
 
             # Scalp mode: allow near-breaks with tolerance (0.5 pips)
             scalp_tolerance = getattr(self, 'scalp_swing_break_tolerance_pips', 0) * pip_value if self.scalp_mode_enabled else 0
 
-            for swing_idx, swing_level, swing_sig in recent_lows:
+            for swing_idx, swing_level in recent_lows:
                 # Check all candles AFTER this swing for a break
                 # In scalp mode, allow breaks within tolerance (near-breaks)
                 break_threshold = swing_level + scalp_tolerance
@@ -4489,17 +4489,29 @@ class SMCSimpleStrategy:
                         price_broke = closes[check_idx] < break_threshold
                     if price_broke:
                         # Found a break of this swing!
-                        # v2.41.0: Prefer most significant swing; fall back to lowest level
-                        is_better = (not break_found or
-                                     swing_sig > best_swing_sig or
-                                     (swing_sig == best_swing_sig and swing_level < best_swing_level))
-                        if is_better:
+                        broken_swing_idxs.append((swing_idx, swing_level, check_idx))
+                        if not break_found or swing_level < best_swing_level:
+                            # Prefer lower swing levels (stronger breaks) — significance applied below
                             break_found = True
                             best_swing_level = swing_level
                             best_swing_idx = swing_idx
                             best_break_idx = check_idx
-                            best_swing_sig = swing_sig
                         break  # Found break for this swing, check next swing
+
+            # v2.41.0: Score only broken swings and pick the most significant one
+            best_swing_sig = 0.5
+            if self.swing_significance_enabled and atr_for_sig and broken_swing_idxs:
+                best_sig = -1.0
+                for s_idx, s_level, b_idx in broken_swing_idxs:
+                    sig = self._calculate_swing_significance(
+                        highs, lows, closes, volumes, s_idx, 'low', atr_for_sig, swing_lows
+                    )
+                    if sig > best_sig:
+                        best_sig = sig
+                        best_swing_level = s_level
+                        best_swing_idx = s_idx
+                        best_break_idx = b_idx
+                best_swing_sig = best_sig if best_sig >= 0 else 0.5
 
             if not break_found:
                 # Fallback: check if current price is below the lowest recent swing
@@ -4687,13 +4699,12 @@ class SMCSimpleStrategy:
         prominence_score = min(max(prominence / 1.5, 0.0), 1.0)  # 1.5 ATR = perfect
 
         # ── Factor 2: Duration (25%) ───────────────────────────────────────
-        # Bars since the previous swing of the same type
-        prev_swings = [(idx, price) for idx, price, *_ in all_swings if idx < swing_idx]
-        if prev_swings:
-            prev_idx = max(prev_swings, key=lambda x: x[0])[0]
-            bars_since_prev = swing_idx - prev_idx
-        else:
-            bars_since_prev = swing_idx  # First swing: use distance from start
+        # Bars since the previous swing of the same type — scan backwards for speed
+        prev_idx = -1
+        for s in all_swings:
+            if s[0] < swing_idx and s[0] > prev_idx:
+                prev_idx = s[0]
+        bars_since_prev = swing_idx - prev_idx if prev_idx >= 0 else swing_idx
         duration_score = min(bars_since_prev / 15.0, 1.0)  # 15 bars = perfect
 
         # ── Factor 3: Touch count (20%) ────────────────────────────────────
@@ -4724,20 +4735,14 @@ class SMCSimpleStrategy:
         swing_body = abs(closes[swing_idx] - (highs[swing_idx] if swing_type == 'high' else lows[swing_idx]))
         clean_score = min(swing_body / swing_range, 1.0) if swing_range > 0 else 0.5
 
-        # ── Weighted total ─────────────────────────────────────────────────
+        # ── Weighted total (use pre-cached inverse weight) ─────────────────
         significance = (
             prominence_score  * self.swing_sig_depth_weight +
             duration_score    * self.swing_sig_duration_weight +
             touch_score       * self.swing_sig_touch_weight +
             volume_score      * self.swing_sig_volume_weight +
             clean_score       * self.swing_sig_clean_weight
-        )
-        # Normalize to ensure sum-of-weights = 1.0 (weights may not sum to 1)
-        total_weight = (self.swing_sig_depth_weight + self.swing_sig_duration_weight +
-                        self.swing_sig_touch_weight + self.swing_sig_volume_weight +
-                        self.swing_sig_clean_weight)
-        if total_weight > 0:
-            significance /= total_weight
+        ) * getattr(self, '_swing_sig_inv_total_weight', 1.0)
 
         return round(min(max(significance, 0.0), 1.0), 3)
 
