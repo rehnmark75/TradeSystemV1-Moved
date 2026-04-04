@@ -261,7 +261,7 @@ class SMCSimpleStrategy:
     3. TIER 3: 15m price pulls back to Fibonacci zone (entry timing)
     """
 
-    def __init__(self, config, logger=None, db_manager=None, config_override: dict = None):
+    def __init__(self, config=None, logger=None, db_manager=None, config_override: dict = None):
         """Initialize SMC Simple Strategy
 
         Args:
@@ -281,6 +281,14 @@ class SMCSimpleStrategy:
         self._backtest_mode = config_override is not None
         self._config_override = config_override
 
+        # v2.46.0: Rolling performance adaptive gate
+        # Stores recent trade outcomes per epic as a deque of booleans (True=win, False=loss)
+        # Updated by record_backtest_outcome() (backtest) or record_live_outcome() (live)
+        # MUST be initialized before _load_config() so _load_config() can set _rolling_perf_enabled
+        from collections import deque
+        self._rolling_outcomes: dict = {}  # {epic: deque([True, False, ...])}
+        self._rolling_perf_enabled: bool = False  # Overwritten by _load_config() from DB
+
         # Load configuration (sets self.rejection_tracking_enabled)
         self._load_config()
 
@@ -293,13 +301,6 @@ class SMCSimpleStrategy:
         self.pair_consecutive_losses = {}  # {pair: int} - consecutive loss count
         self.pair_last_session = {}  # {pair: session_name} - track session changes
         self._trade_outcome_cache = {}  # {pair: {'outcome': dict, 'cached_at': datetime}}
-
-        # v2.46.0: Rolling performance adaptive gate
-        # Stores recent trade outcomes per epic as a deque of booleans (True=win, False=loss)
-        # Updated by record_backtest_outcome() (backtest) or record_live_outcome() (live)
-        from collections import deque
-        self._rolling_outcomes: dict = {}  # {epic: deque([True, False, ...])}
-        self._rolling_perf_enabled: bool = False  # Set from DB config after load
 
         # v3.2.0: Cooldowns now read directly from alert_history database (single source of truth)
         # No startup load needed - each cooldown check queries the database directly
@@ -6436,6 +6437,7 @@ class SMCSimpleStrategy:
             is_winner: True if trade was profitable, False if a loss
         """
         if not self._rolling_perf_enabled:
+            self.logger.debug(f"[RollingPerf] record_backtest_outcome called but disabled (epic={epic})")
             return
         from collections import deque
         cfg = self._db_config
@@ -6449,6 +6451,10 @@ class SMCSimpleStrategy:
                 self._rolling_outcomes[epic] = deque(list(existing)[-window_size:], maxlen=window_size)
         self._rolling_outcomes[epic].append(is_winner)
         recent_wr = sum(self._rolling_outcomes[epic]) / len(self._rolling_outcomes[epic])
+        self.logger.info(
+            f"📊 [RollingPerf] {epic}: {'WIN' if is_winner else 'LOSS'} — "
+            f"rolling WR={recent_wr*100:.0f}% ({len(self._rolling_outcomes[epic])} trades)"
+        )
         self.logger.debug(
             f"[RollingPerf] {epic}: {'WIN' if is_winner else 'LOSS'} recorded — "
             f"rolling WR={recent_wr*100:.0f}% ({len(self._rolling_outcomes[epic])} trades)"
