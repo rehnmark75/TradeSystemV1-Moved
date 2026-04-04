@@ -1242,7 +1242,7 @@ class BacktestScanner(IntelligentForexScanner):
                 epic=epic,
                 pair=pair,
                 timeframe='1h',
-                lookback_hours=72
+                lookback_hours=720  # Extended for weekly consistency check (4+ weeks of 1h data)
             )
 
             if df is None or df.empty or len(df) < 20:
@@ -1298,11 +1298,89 @@ class BacktestScanner(IntelligentForexScanner):
                     if regime == 'trending' and adx_value and adx_value < 25:
                         regime = 'low_volatility'
 
+            # --- Enhanced regime validation: efficiency ratio + weekly consistency ---
+            if regime == 'trending':
+                # Check 1: Efficiency ratio from KAMA
+                er_value = None
+                for col in ('efficiency_ratio', 'kama_er', 'kama_10_er', 'kama_14_er'):
+                    if col in df_ts.columns:
+                        val = df_ts[col].iloc[-1]
+                        if val is not None and not pd.isna(val):
+                            er_value = float(val)
+                            break
+
+                if er_value is not None and er_value < 0.25:
+                    self.logger.debug(
+                        f"📉 [BT] [{epic}] Regime downgraded trending→ranging: "
+                        f"efficiency_ratio={er_value:.3f} < 0.25"
+                    )
+                    regime = 'ranging'
+                else:
+                    # Check 2: Weekly directional consistency
+                    weekly_result = self._check_weekly_consistency_from_df(df_ts)
+                    if weekly_result.get('is_oscillating', False):
+                        self.logger.debug(
+                            f"📉 [BT] [{epic}] Regime downgraded trending→ranging: "
+                            f"weekly oscillation ({weekly_result.get('pattern', '')})"
+                        )
+                        regime = 'ranging'
+
             return (regime, adx_value, volatility_state)
 
         except Exception as e:
             self.logger.debug(f"⚠️ Error calculating regime from data for {epic}: {e}")
             return ('trending', None, 'normal')
+
+    def _check_weekly_consistency_from_df(self, df) -> dict:
+        """Check weekly directional consistency from an hourly DataFrame.
+
+        Returns dict with 'is_oscillating', 'pattern', 'alternations'.
+        """
+        default = {'is_oscillating': False, 'pattern': '', 'alternations': 0}
+        try:
+            if df is None or df.empty or len(df) < 100:
+                return default
+
+            # Ensure DatetimeIndex for resample
+            if not isinstance(df.index, pd.DatetimeIndex):
+                for ts_col in ('start_time', 'market_timestamp', 'timestamp'):
+                    if ts_col in df.columns:
+                        df = df.set_index(ts_col)
+                        break
+                else:
+                    return default
+
+            ohlc = df.resample('W').agg({
+                'open': 'first',
+                'close': 'last'
+            }).dropna()
+
+            if len(ohlc) < 3:
+                return default
+
+            recent = ohlc.iloc[-5:-1] if len(ohlc) > 4 else ohlc.iloc[:-1]
+            if len(recent) < 3:
+                return default
+
+            directions = []
+            for _, row in recent.iterrows():
+                directions.append(1 if row['close'] > row['open'] else -1)
+
+            alternations = 0
+            for i in range(1, len(directions)):
+                if directions[i] != directions[i - 1]:
+                    alternations += 1
+
+            pattern = '→'.join(['B' if d == 1 else 'S' for d in directions])
+            is_oscillating = alternations >= min(len(directions) - 1, 3)
+
+            return {
+                'is_oscillating': is_oscillating,
+                'pattern': pattern,
+                'alternations': alternations
+            }
+        except Exception:
+            return default
 
     def _get_session_from_timestamp(self, timestamp: datetime) -> str:
         """

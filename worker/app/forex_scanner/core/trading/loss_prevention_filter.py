@@ -222,6 +222,8 @@ class LossPreventionFilter:
                 return self._check_indicator_threshold(cond, signal)
             elif rule_type == 'move_exhaustion':
                 return self._check_move_exhaustion(cond, signal)
+            elif rule_type == 'regime_and_efficiency':
+                return self._check_regime_and_efficiency(cond, signal)
             else:
                 logger.debug(f"🛡️ LPF: Unknown rule type '{rule_type}' in {rule['rule_name']}")
                 return False
@@ -401,6 +403,25 @@ class LossPreventionFilter:
             return False
 
         return triggers >= min_triggers
+
+    def _check_regime_and_efficiency(self, cond: Dict, signal: Dict) -> bool:
+        """Block signals when regime is 'trending' but efficiency ratio indicates no real trend."""
+        regime = self._get_regime(signal)
+        target_regime = cond.get('regime', 'trending')
+        if regime != target_regime:
+            return False
+
+        er = signal.get('efficiency_ratio')
+        if er is None:
+            return False
+
+        try:
+            er = float(er)
+        except (ValueError, TypeError):
+            return False
+
+        max_er = float(cond.get('max_efficiency_ratio', 0.30))
+        return er < max_er
 
     # ---- Helpers ----
 
