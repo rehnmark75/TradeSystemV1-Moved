@@ -261,7 +261,7 @@ class SMCSimpleStrategy:
     3. TIER 3: 15m price pulls back to Fibonacci zone (entry timing)
     """
 
-    def __init__(self, config, logger=None, db_manager=None, config_override: dict = None):
+    def __init__(self, config=None, logger=None, db_manager=None, config_override: dict = None):
         """Initialize SMC Simple Strategy
 
         Args:
@@ -280,6 +280,13 @@ class SMCSimpleStrategy:
         # CRITICAL: Backtest mode detection for parameter isolation
         self._backtest_mode = config_override is not None
         self._config_override = config_override
+
+        # v2.46.0: Rolling performance adaptive gate (LIVE TRADING ONLY)
+        # Reads recent closed trade outcomes from trade_log DB — no in-memory tracking needed.
+        # MUST be initialized before _load_config() so _load_config() can set _rolling_perf_enabled
+        self._rolling_perf_enabled: bool = False  # Overwritten by _load_config() from DB
+        self._rolling_live_cache: dict = {}  # {epic: (cached_at: datetime, outcomes: list[bool])}
+        self._rolling_backtest_skip_logged: bool = False  # suppress repeat log in backtest
 
         # Load configuration (sets self.rejection_tracking_enabled)
         self._load_config()
@@ -587,6 +594,9 @@ class SMCSimpleStrategy:
 
             # v2.6.0: Pair-specific parameter overrides (now from DB)
             self.pair_parameter_overrides = {}  # Loaded from DB per-pair overrides
+
+            # v2.46.0: Rolling performance gate toggle (read from DB config)
+            self._rolling_perf_enabled = getattr(config, 'rolling_perf_enabled', False)
 
             # Store config for helper functions
             self._db_config = config
@@ -2963,7 +2973,7 @@ class SMCSimpleStrategy:
                 if fixed_sl_pips is not None and fixed_sl_pips > 0:
                     # v4.0.0: Apply regime-gated multipliers to base SL/TP
                     if _regime_sl_tp_enabled and _pre_market_regime != 'unknown' and fixed_tp_pips:
-                        sl_mult, tp_mult = self._get_regime_sl_tp_multipliers(_pre_market_regime)
+                        sl_mult, tp_mult = self._get_regime_sl_tp_multipliers(_pre_market_regime, epic)
                         adj_sl = round(fixed_sl_pips * sl_mult, 1)
                         adj_tp = round(fixed_tp_pips * tp_mult, 1)
                         # Enforce minimum R:R after adjustment
@@ -2977,6 +2987,39 @@ class SMCSimpleStrategy:
                         )
                         fixed_sl_pips = adj_sl
                         fixed_tp_pips = adj_tp
+
+                    # v2.46.0: ATR-normalized SL/TP — scale by current vs reference ATR
+                    # Runs AFTER regime multipliers, adding a continuous volatility layer.
+                    # When market is more/less volatile than the base calibration period,
+                    # SL/TP scale proportionally (clamped to prevent extreme adjustments).
+                    _atr_norm_enabled = (
+                        self._using_database_config
+                        and self._db_config
+                        and getattr(self._db_config, 'atr_normalized_sl_tp_enabled', False)
+                    )
+                    if _atr_norm_enabled and fixed_sl_pips and fixed_tp_pips and pip_value > 0:
+                        try:
+                            # Get current ATR in pips from entry_df (1m data) or df_trigger (5m)
+                            _atr_df = entry_df if (entry_df is not None and 'atr' in entry_df.columns and len(entry_df) > 0) else df_trigger
+                            if 'atr' in _atr_df.columns and len(_atr_df) > 0:
+                                _current_atr_pips = float(_atr_df['atr'].iloc[-1]) / pip_value
+                                _ref_atr = self._get_pair_param(epic, 'atr_reference_pips',
+                                    getattr(self._db_config, 'atr_reference_pips', 8.0))
+                                _scale_min = getattr(self._db_config, 'atr_scale_min', 0.7)
+                                _scale_max = getattr(self._db_config, 'atr_scale_max', 1.5)
+                                if _ref_atr > 0 and _current_atr_pips > 0:
+                                    _atr_ratio = max(_scale_min, min(_scale_max, _current_atr_pips / _ref_atr))
+                                    _atr_sl = round(fixed_sl_pips * _atr_ratio, 1)
+                                    _atr_tp = round(fixed_tp_pips * _atr_ratio, 1)
+                                    self.logger.info(
+                                        f"   📐 ATR normalization: ATR={_current_atr_pips:.1f}p "
+                                        f"(ref={_ref_atr:.1f}p, ratio={_atr_ratio:.2f}x) "
+                                        f"SL {fixed_sl_pips}→{_atr_sl}, TP {fixed_tp_pips}→{_atr_tp}"
+                                    )
+                                    fixed_sl_pips = _atr_sl
+                                    fixed_tp_pips = _atr_tp
+                        except Exception as _atr_e:
+                            self.logger.debug(f"ATR normalization skipped: {_atr_e}")
 
                     using_fixed_sl_tp = True
                     self.logger.info(f"   📌 Using FIXED SL/TP: SL={fixed_sl_pips} pips, TP={fixed_tp_pips} pips")
@@ -3354,6 +3397,18 @@ class SMCSimpleStrategy:
                     pair_min_confidence = high_vol_confidence
                     adjustment_type = "high-volume"
                     self.logger.info(f"   📊 Volume-adjusted threshold: {high_vol_confidence*100:.0f}% (vol={volume_ratio:.2f} >= {self.high_volume_threshold})")
+
+            # v2.46.0: Rolling performance adaptive gate
+            # Adjusts pair_min_confidence based on recent trade outcomes.
+            # Raises the gate when on a losing streak, lowers slightly on a winning streak.
+            _rolling_delta, _rolling_reason = self._get_rolling_confidence_adjustment(epic)
+            if _rolling_delta != 0.0:
+                _old_conf = float(pair_min_confidence)
+                pair_min_confidence = round(_old_conf + _rolling_delta, 3)
+                self.logger.info(
+                    f"   🎯 [RollingPerf LIVE] {_rolling_reason} "
+                    f"(min_conf: {_old_conf*100:.0f}% → {pair_min_confidence*100:.0f}%)"
+                )
 
             # v2.9.0: Use round(2) for both values to avoid floating-point precision issues
             # (e.g., 0.4799 displaying as 48% but failing 48% threshold)
@@ -6373,6 +6428,150 @@ class SMCSimpleStrategy:
         if epic in self._trade_outcome_cache:
             del self._trade_outcome_cache[epic]
 
+    def record_backtest_outcome(self, epic: str, is_winner: bool) -> None:
+        """No-op stub kept for backtest_scanner.py compatibility (v2.46.0).
+
+        Rolling performance gate is LIVE TRADING ONLY — it reads outcomes from
+        trade_log DB rather than in-memory simulation. In backtest mode, adaptation
+        is handled by Mechanisms 1+2 (regime SL/TP + ATR normalisation).
+        """
+        self.logger.debug(
+            f"[RollingPerf] record_backtest_outcome ignored — "
+            f"live mode reads from trade_log DB, backtest mode gate is disabled"
+        )
+
+    def _query_live_rolling_outcomes(self, epic: str) -> list:
+        """Query trade_log for the last N closed outcomes for this epic (v2.46.0).
+
+        Returns list of booleans ordered newest-first: True=win, False=loss.
+        Results are cached for rolling_perf_cache_ttl_seconds (default 300 s / 5 min)
+        so the DB is not hit on every scan cycle.
+
+        Handles NULL profit_loss gracefully — only rows with a confirmed P&L are used.
+        """
+        from datetime import datetime
+        import os
+        now = datetime.now()
+
+        # --- cache check ---
+        cached = self._rolling_live_cache.get(epic)
+        if cached:
+            cached_at, outcomes = cached
+            cfg = self._db_config
+            ttl = int(getattr(cfg, 'rolling_perf_cache_ttl_seconds', 300)) if cfg else 300
+            age = (now - cached_at).total_seconds()
+            if age < ttl:
+                self.logger.debug(
+                    f"[RollingPerf] {epic}: using cached outcomes "
+                    f"({len(outcomes)} trades, {age:.0f}s old / {ttl}s TTL)"
+                )
+                return outcomes
+
+        # --- DB query ---
+        try:
+            import psycopg2
+            cfg = self._db_config
+            window_size = int(getattr(cfg, 'rolling_perf_window', 10)) if cfg else 10
+            db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/forex")
+
+            conn = psycopg2.connect(db_url)
+            try:
+                with conn.cursor() as cur:
+                    cur.execute("""
+                        SELECT profit_loss FROM trade_log
+                        WHERE symbol = %s
+                          AND status = 'closed'
+                          AND closed_at IS NOT NULL
+                          AND profit_loss IS NOT NULL
+                        ORDER BY closed_at DESC
+                        LIMIT %s
+                    """, (epic, window_size))
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+
+            outcomes = [bool(row[0] > 0) for row in rows]
+            self._rolling_live_cache[epic] = (now, outcomes)
+
+            if outcomes:
+                wr = sum(outcomes) / len(outcomes)
+                self.logger.debug(
+                    f"[RollingPerf] {epic}: fetched {len(outcomes)} closed trades from trade_log "
+                    f"(WR={wr*100:.0f}%, cached for {int(getattr(cfg, 'rolling_perf_cache_ttl_seconds', 300))}s)"
+                )
+            else:
+                self.logger.debug(f"[RollingPerf] {epic}: no closed trades found in trade_log")
+
+            return outcomes
+
+        except Exception as e:
+            self.logger.warning(f"[RollingPerf] {epic}: trade_log query failed — {e}")
+            return []
+
+    def _get_rolling_confidence_adjustment(self, epic: str) -> tuple:
+        """Return (confidence_delta, reason) for rolling performance gate (v2.46.0).
+
+        LIVE TRADING ONLY — reads closed trade outcomes from trade_log DB.
+        Disabled in backtest mode (Mechanisms 1+2 handle adaptation there).
+
+        Returns:
+            (delta: float, reason: str) — delta is added to pair_min_confidence.
+            Positive delta = tighter gate (losing streak).
+            Negative delta = looser gate (winning streak reward).
+        """
+        if not self._rolling_perf_enabled:
+            return 0.0, ''
+
+        if self._backtest_mode:
+            if not self._rolling_backtest_skip_logged:
+                self.logger.info(
+                    "📊 [RollingPerf] Gate disabled in backtest mode — "
+                    "live trading reads from trade_log DB"
+                )
+                self._rolling_backtest_skip_logged = True
+            return 0.0, ''
+
+        outcomes = self._query_live_rolling_outcomes(epic)
+        n = len(outcomes)
+
+        if n < 3:
+            self.logger.debug(
+                f"[RollingPerf] {epic}: {n} closed trade(s) in window (need 3+) — no adjustment"
+            )
+            return 0.0, ''
+
+        cfg = self._db_config
+        recent_wr = sum(outcomes) / n
+        low_thresh      = float(getattr(cfg, 'rolling_perf_low_wr_threshold',      0.40)) if cfg else 0.40
+        very_low_thresh = float(getattr(cfg, 'rolling_perf_very_low_wr_threshold', 0.30)) if cfg else 0.30
+        high_thresh     = float(getattr(cfg, 'rolling_perf_high_wr_threshold',     0.65)) if cfg else 0.65
+        low_penalty     = float(getattr(cfg, 'rolling_perf_low_wr_penalty',        0.05)) if cfg else 0.05
+        very_low_penalty= float(getattr(cfg, 'rolling_perf_very_low_wr_penalty',   0.10)) if cfg else 0.10
+        high_bonus      = float(getattr(cfg, 'rolling_perf_high_wr_bonus',         0.02)) if cfg else 0.02
+
+        self.logger.debug(
+            f"[RollingPerf] {epic}: WR={recent_wr*100:.0f}% on last {n} live closed trades "
+            f"(thresholds: very_low={very_low_thresh*100:.0f}% low={low_thresh*100:.0f}% high={high_thresh*100:.0f}%)"
+        )
+
+        if recent_wr < very_low_thresh:
+            return (very_low_penalty,
+                    f"RollingPerf [{n} live trades]: WR={recent_wr*100:.0f}% < {very_low_thresh*100:.0f}% "
+                    f"→ raising gate +{very_low_penalty*100:.0f}%")
+        elif recent_wr < low_thresh:
+            return (low_penalty,
+                    f"RollingPerf [{n} live trades]: WR={recent_wr*100:.0f}% < {low_thresh*100:.0f}% "
+                    f"→ raising gate +{low_penalty*100:.0f}%")
+        elif recent_wr > high_thresh:
+            return (-high_bonus,
+                    f"RollingPerf [{n} live trades]: WR={recent_wr*100:.0f}% > {high_thresh*100:.0f}% "
+                    f"→ lowering gate -{high_bonus*100:.0f}%")
+
+        self.logger.debug(
+            f"[RollingPerf] {epic}: WR={recent_wr*100:.0f}% in neutral zone — no adjustment"
+        )
+        return 0.0, ''
+
     def reset_cooldowns(self):
         """Reset all cooldowns - call this at the start of each backtest to ensure fresh state.
 
@@ -6383,6 +6582,7 @@ class SMCSimpleStrategy:
         self.pair_consecutive_losses = {}
         self.pair_last_session = {}
         self._trade_outcome_cache = {}
+        self._rolling_live_cache = {}  # v2.46.0: clear live trade_log cache on backtest reset
         if self.logger:
             self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest (v3.2.0 in-memory state cleared)")
 
@@ -6646,17 +6846,36 @@ class SMCSimpleStrategy:
 
         return context
 
-    def _get_regime_sl_tp_multipliers(self, regime: str):
-        """Return (sl_mult, tp_mult) for the given market regime (v4.0.0)."""
+    def _get_regime_sl_tp_multipliers(self, regime: str, epic: str = '') -> tuple:
+        """Return (sl_mult, tp_mult) for the given market regime (v2.46.0).
+
+        Checks per-pair parameter_overrides JSONB first, then falls back to
+        global config values. Allows per-pair regime multiplier tuning without
+        code changes.
+        """
         cfg = self._db_config
+
+        def _mult(key: str, default: float) -> float:
+            """Get multiplier: per-pair JSONB override → global config → hardcoded default."""
+            if epic and cfg:
+                po = getattr(cfg, '_pair_overrides', {}).get(epic, {}).get('parameter_overrides', {})
+                if key in po:
+                    try:
+                        return float(po[key])
+                    except (TypeError, ValueError):
+                        pass
+            return float(getattr(cfg, key, default)) if cfg else default
+
         if regime == 'trending':
-            return (getattr(cfg, 'trending_sl_mult', 1.0), getattr(cfg, 'trending_tp_mult', 1.2))
+            return (_mult('trending_sl_mult', 1.0), _mult('trending_tp_mult', 1.2))
         elif regime == 'ranging':
-            return (getattr(cfg, 'ranging_sl_mult', 0.85), getattr(cfg, 'ranging_tp_mult', 0.70))
+            return (_mult('ranging_sl_mult', 0.85), _mult('ranging_tp_mult', 0.70))
+        elif regime == 'breakout':
+            return (_mult('breakout_sl_mult', 1.1), _mult('breakout_tp_mult', 1.4))
         elif regime == 'high_volatility':
-            return (getattr(cfg, 'high_vol_sl_mult', 1.3), getattr(cfg, 'high_vol_tp_mult', 1.3))
+            return (_mult('high_vol_sl_mult', 1.3), _mult('high_vol_tp_mult', 1.3))
         elif regime == 'low_volatility':
-            return (getattr(cfg, 'low_vol_sl_mult', 0.85), getattr(cfg, 'low_vol_tp_mult', 0.80))
+            return (_mult('low_vol_sl_mult', 0.85), _mult('low_vol_tp_mult', 0.80))
         return (1.0, 1.0)
 
     def _add_performance_metrics(

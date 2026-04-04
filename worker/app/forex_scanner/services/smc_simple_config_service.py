@@ -147,6 +147,29 @@ class SMCSimpleConfig:
     high_vol_tp_mult: float = 1.3
     low_vol_sl_mult: float = 0.85
     low_vol_tp_mult: float = 0.80
+    breakout_sl_mult: float = 1.1      # Widen SL slightly for breakout momentum
+    breakout_tp_mult: float = 1.4      # Extended TP for breakout continuation potential
+
+    # ATR-NORMALIZED SL/TP (v2.46.0)
+    # Scales fixed SL/TP proportionally to current ATR vs a reference ATR.
+    # When volatility is above/below the reference, SL/TP adjust accordingly.
+    # This runs AFTER regime multipliers, adding a continuous volatility layer.
+    atr_normalized_sl_tp_enabled: bool = False  # Master toggle (off by default)
+    atr_reference_pips: float = 8.0             # ATR value (pips) the base SL/TP were optimised for
+    atr_scale_min: float = 0.7                  # Minimum scaling (prevents over-compression)
+    atr_scale_max: float = 1.5                  # Maximum scaling (prevents runaway stops)
+
+    # ROLLING PERFORMANCE ADAPTIVE GATE (v2.46.0)
+    # Uses a rolling window of recent backtest (or live) outcomes to dynamically
+    # adjust the min_confidence threshold. Works in BOTH backtest and live modes.
+    rolling_perf_enabled: bool = False          # Master toggle
+    rolling_perf_window: int = 10               # Number of recent trades to track
+    rolling_perf_low_wr_threshold: float = 0.40 # WR below this → raise confidence gate
+    rolling_perf_very_low_wr_threshold: float = 0.30  # WR below this → raise gate more
+    rolling_perf_high_wr_threshold: float = 0.65 # WR above this → slightly lower gate
+    rolling_perf_low_wr_penalty: float = 0.05   # Add to min_confidence when WR is low
+    rolling_perf_very_low_wr_penalty: float = 0.10  # Add when WR is very low
+    rolling_perf_high_wr_bonus: float = 0.02    # Subtract from min_confidence when WR is high
 
     # SESSION FILTER
     session_filter_enabled: bool = True
@@ -1770,6 +1793,16 @@ class SMCSimpleConfigService:
             'ranging_sl_mult', 'ranging_tp_mult',
             'high_vol_sl_mult', 'high_vol_tp_mult',
             'low_vol_sl_mult', 'low_vol_tp_mult',
+            'breakout_sl_mult', 'breakout_tp_mult',
+            # ATR-NORMALIZED SL/TP (v2.46.0)
+            'atr_normalized_sl_tp_enabled',
+            'atr_reference_pips', 'atr_scale_min', 'atr_scale_max',
+            # ROLLING PERFORMANCE ADAPTIVE GATE (v2.46.0)
+            'rolling_perf_enabled', 'rolling_perf_window',
+            'rolling_perf_low_wr_threshold', 'rolling_perf_very_low_wr_threshold',
+            'rolling_perf_high_wr_threshold',
+            'rolling_perf_low_wr_penalty', 'rolling_perf_very_low_wr_penalty',
+            'rolling_perf_high_wr_bonus',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
