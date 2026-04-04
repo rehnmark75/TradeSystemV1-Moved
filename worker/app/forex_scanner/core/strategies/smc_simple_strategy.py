@@ -2878,6 +2878,37 @@ class SMCSimpleStrategy:
             self.logger.info(f"   📋 Preliminary Order Type: {order_type.upper()} (offset={limit_offset_pips:.1f} pips)")
 
             # ================================================================
+            # PRE-STEP 4: Early performance metrics for regime-gated SL/TP (v4.0.0)
+            # When regime_sl_tp_enabled=True, compute market regime before SL/TP
+            # so multipliers can adjust base levels. Result is cached and reused
+            # later at line ~3976 to avoid double-computation.
+            # ================================================================
+            _pre_metrics = None
+            _pre_market_regime = 'unknown'
+            _regime_sl_tp_enabled = (
+                self._using_database_config
+                and self._db_config
+                and getattr(self._db_config, 'regime_sl_tp_enabled', False)
+            )
+            if _regime_sl_tp_enabled:
+                try:
+                    from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                        get_performance_metrics_calculator
+                    )
+                    _calc = get_performance_metrics_calculator(self.logger)
+                    _pre_metrics = _calc.calculate_metrics(
+                        df_5m=entry_df,
+                        df_15m=df_trigger,
+                        df_4h=df_4h,
+                        signal_data={'signal_type': direction},
+                        epic=epic
+                    )
+                    _pre_market_regime = _pre_metrics.market_regime
+                    self.logger.info(f"   📊 Pre-metrics regime: {_pre_market_regime}")
+                except Exception as _e:
+                    self.logger.debug(f"Pre-metrics regime detection failed: {_e}")
+
+            # ================================================================
             # STEP 4: Calculate Stop Loss and Take Profit
             # ================================================================
             self.logger.info(f"\n🛑 STEP 4: Calculating SL/TP")
@@ -2930,6 +2961,23 @@ class SMCSimpleStrategy:
                     fixed_tp_pips = self.fixed_take_profit_pips
 
                 if fixed_sl_pips is not None and fixed_sl_pips > 0:
+                    # v4.0.0: Apply regime-gated multipliers to base SL/TP
+                    if _regime_sl_tp_enabled and _pre_market_regime != 'unknown' and fixed_tp_pips:
+                        sl_mult, tp_mult = self._get_regime_sl_tp_multipliers(_pre_market_regime)
+                        adj_sl = round(fixed_sl_pips * sl_mult, 1)
+                        adj_tp = round(fixed_tp_pips * tp_mult, 1)
+                        # Enforce minimum R:R after adjustment
+                        min_rr = getattr(self, 'min_rr_ratio', 1.3)
+                        if adj_sl > 0 and adj_tp / adj_sl < min_rr:
+                            adj_tp = round(adj_sl * min_rr, 1)
+                        self.logger.info(
+                            f"   🌐 Regime '{_pre_market_regime}' SL/TP adjustment: "
+                            f"SL {fixed_sl_pips}→{adj_sl}, TP {fixed_tp_pips}→{adj_tp} "
+                            f"(x{sl_mult}/{tp_mult})"
+                        )
+                        fixed_sl_pips = adj_sl
+                        fixed_tp_pips = adj_tp
+
                     using_fixed_sl_tp = True
                     self.logger.info(f"   📌 Using FIXED SL/TP: SL={fixed_sl_pips} pips, TP={fixed_tp_pips} pips")
 
@@ -3978,7 +4026,8 @@ class SMCSimpleStrategy:
                     df_entry=entry_df,
                     df_trigger=df_trigger,
                     df_4h=df_4h,
-                    epic=epic
+                    epic=epic,
+                    pre_computed_metrics=_pre_metrics  # Reuse regime-gated pre-computation if available
                 )
             except Exception as metrics_error:
                 # Don't fail the signal if metrics calculation fails
@@ -6597,13 +6646,27 @@ class SMCSimpleStrategy:
 
         return context
 
+    def _get_regime_sl_tp_multipliers(self, regime: str):
+        """Return (sl_mult, tp_mult) for the given market regime (v4.0.0)."""
+        cfg = self._db_config
+        if regime == 'trending':
+            return (getattr(cfg, 'trending_sl_mult', 1.0), getattr(cfg, 'trending_tp_mult', 1.2))
+        elif regime == 'ranging':
+            return (getattr(cfg, 'ranging_sl_mult', 0.85), getattr(cfg, 'ranging_tp_mult', 0.70))
+        elif regime == 'high_volatility':
+            return (getattr(cfg, 'high_vol_sl_mult', 1.3), getattr(cfg, 'high_vol_tp_mult', 1.3))
+        elif regime == 'low_volatility':
+            return (getattr(cfg, 'low_vol_sl_mult', 0.85), getattr(cfg, 'low_vol_tp_mult', 0.80))
+        return (1.0, 1.0)
+
     def _add_performance_metrics(
         self,
         signal: Dict,
         df_entry: Optional[pd.DataFrame],
         df_trigger: pd.DataFrame,
         df_4h: pd.DataFrame,
-        epic: str
+        epic: str,
+        pre_computed_metrics=None
     ) -> Dict:
         """
         Add enhanced performance metrics to signal for analysis.
@@ -6618,26 +6681,32 @@ class SMCSimpleStrategy:
             df_trigger: Trigger timeframe data (15m)
             df_4h: 4H timeframe data
             epic: Trading pair epic code
+            pre_computed_metrics: Optional already-computed metrics object (avoids re-computation
+                when regime-gated SL/TP ran calculate_metrics before STEP 4).
 
         Returns:
             Enhanced signal dict with performance_metrics added
         """
         try:
-            # Lazy import to avoid circular dependencies
-            from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
-                get_performance_metrics_calculator
-            )
+            if pre_computed_metrics is not None:
+                # Reuse pre-computed metrics from regime-gated SL/TP calculation
+                metrics = pre_computed_metrics
+            else:
+                # Lazy import to avoid circular dependencies
+                from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                    get_performance_metrics_calculator
+                )
 
-            calculator = get_performance_metrics_calculator(self.logger)
+                calculator = get_performance_metrics_calculator(self.logger)
 
-            # Calculate full metrics
-            metrics = calculator.calculate_metrics(
-                df_5m=df_entry,
-                df_15m=df_trigger,
-                df_4h=df_4h,
-                signal_data=signal,
-                epic=epic
-            )
+                # Calculate full metrics
+                metrics = calculator.calculate_metrics(
+                    df_5m=df_entry,
+                    df_15m=df_trigger,
+                    df_4h=df_4h,
+                    signal_data=signal,
+                    epic=epic
+                )
 
             # Add metrics to signal as nested dict
             metrics_dict = metrics.to_json_safe()

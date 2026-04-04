@@ -135,6 +135,19 @@ class SMCSimpleConfig:
     fixed_stop_loss_pips: float = 9.0
     fixed_take_profit_pips: float = 15.0
 
+    # REGIME-GATED SL/TP MULTIPLIERS (v4.0.0)
+    # Apply multipliers to base SL/TP based on detected market regime.
+    # Performance metrics are calculated before SL/TP when this is enabled.
+    regime_sl_tp_enabled: bool = False  # Master toggle (off by default for safe rollout)
+    trending_sl_mult: float = 1.0
+    trending_tp_mult: float = 1.2       # Let TP stretch in trends
+    ranging_sl_mult: float = 0.85       # Tighter SL in ranging (median MAE 7.4 vs 1.6 in trending)
+    ranging_tp_mult: float = 0.70       # Much tighter TP (median MFE only 4.8 pips in ranging)
+    high_vol_sl_mult: float = 1.3       # Widen for volatility
+    high_vol_tp_mult: float = 1.3
+    low_vol_sl_mult: float = 0.85
+    low_vol_tp_mult: float = 0.80
+
     # SESSION FILTER
     session_filter_enabled: bool = True
     london_session_start: dt_time = field(default_factory=lambda: dt_time(7, 0))
@@ -1751,6 +1764,12 @@ class SMCSimpleConfigService:
             # MACD ALIGNMENT ENHANCEMENT (v2.23.0)
             'macd_alignment_enabled', 'macd_alignment_required',
             'macd_alignment_confidence_boost',
+            # REGIME-GATED SL/TP MULTIPLIERS (v4.0.0)
+            'regime_sl_tp_enabled',
+            'trending_sl_mult', 'trending_tp_mult',
+            'ranging_sl_mult', 'ranging_tp_mult',
+            'high_vol_sl_mult', 'high_vol_tp_mult',
+            'low_vol_sl_mult', 'low_vol_tp_mult',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
