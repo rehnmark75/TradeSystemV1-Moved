@@ -148,16 +148,6 @@ class SMCSimpleConfig:
     low_vol_sl_mult: float = 0.85
     low_vol_tp_mult: float = 0.80
 
-    # SIGNAL QUALITY FILTERS (v2.45.0) — runs in backtest and live
-    # Based on EURUSD analysis of 105 trades: 62% WR but net loss due to W/L asymmetry.
-    # 60% of losers had MFE=0 (directionally wrong from entry). Fix is at signal level.
-    block_htf_start_position: bool = False      # Block signals where HTF candle pos='start' (46% WR)
-    rsi_direction_filter_enabled: bool = False  # Require RSI aligned with direction
-    rsi_sell_min: float = 55.0                  # SELL requires RSI >= this (overbought zone)
-    rsi_buy_max: float = 55.0                   # BUY requires RSI <= this (oversold zone)
-    min_adx_threshold: float = 0.0             # ADX minimum (0=disabled). ADX<15 = 0% WR
-    blocked_hours_utc: str = ''                 # Comma-separated hours to block, e.g. "8,10,14"
-
     # SESSION FILTER
     session_filter_enabled: bool = True
     london_session_start: dt_time = field(default_factory=lambda: dt_time(7, 0))
@@ -1780,9 +1770,6 @@ class SMCSimpleConfigService:
             'ranging_sl_mult', 'ranging_tp_mult',
             'high_vol_sl_mult', 'high_vol_tp_mult',
             'low_vol_sl_mult', 'low_vol_tp_mult',
-            # SIGNAL QUALITY FILTERS (v2.45.0)
-            'block_htf_start_position', 'rsi_direction_filter_enabled',
-            'rsi_sell_min', 'rsi_buy_max', 'min_adx_threshold', 'blocked_hours_utc',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
