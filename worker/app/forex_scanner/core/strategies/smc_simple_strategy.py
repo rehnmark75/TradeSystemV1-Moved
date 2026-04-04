@@ -4034,6 +4034,25 @@ class SMCSimpleStrategy:
                 self.logger.warning(f"⚠️ Performance metrics calculation failed: {metrics_error}")
 
             # ================================================================
+            # SIGNAL QUALITY FILTERS (v2.45.0)
+            # Post-metrics gate: runs in both backtest and live modes.
+            # Filters based on patterns found in 105-trade EURUSD analysis.
+            # Each filter is individually toggled via database config.
+            # ================================================================
+            sqf_rejection = self._apply_signal_quality_filters(signal, epic, direction, rsi_value)
+            if sqf_rejection:
+                self.logger.info(f"🚫 [SQF] Signal rejected: {sqf_rejection}")
+                self._track_rejection(
+                    stage='SIGNAL_QUALITY_FILTER',
+                    reason=sqf_rejection,
+                    epic=epic,
+                    pair=pair,
+                    candle_timestamp=signal.get('timestamp'),
+                    context=self._collect_market_context(df_trigger, df_4h, entry_df, pip_value)
+                )
+                return None
+
+            # ================================================================
             # SMC DATA: Detect FVGs and Order Blocks for chart visualization
             # Skip in backtest mode to improve performance (unless chart_mode enabled)
             # ================================================================
@@ -6645,6 +6664,108 @@ class SMCSimpleStrategy:
         )
 
         return context
+
+    def _apply_signal_quality_filters(
+        self,
+        signal: Dict,
+        epic: str,
+        direction: str,
+        rsi_value: Optional[float]
+    ) -> Optional[str]:
+        """
+        Post-metrics signal quality gate (v2.45.0).
+
+        Runs in both backtest and live modes. Each filter is individually
+        toggleable via database config or per-pair parameter_overrides JSONB.
+
+        Returns:
+            Rejection reason string if signal should be blocked, None if allowed.
+
+        Filters (based on 105-trade EURUSD analysis):
+          1. htf_candle_position='start' — 46% WR, -£1,077 P&L
+          2. RSI directional misalignment — SELL needs RSI>=55, BUY needs RSI<=55
+          3. ADX minimum threshold — ADX<15 = 0% WR
+          4. Blocked hours UTC — hours 8,10,14 = 33% WR for EURUSD
+        """
+        if not (self._using_database_config and self._db_config):
+            return None
+
+        cfg = self._db_config
+
+        # Helper to get per-pair override or fall back to global config
+        def _pair_bool(key: str, default: bool) -> bool:
+            overrides = getattr(cfg, '_pair_overrides', {}).get(epic, {})
+            param_overrides = overrides.get('parameter_overrides', {}) if isinstance(overrides, dict) else {}
+            if key in param_overrides:
+                val = param_overrides[key]
+                return bool(val) if not isinstance(val, bool) else val
+            return getattr(cfg, key, default)
+
+        def _pair_float(key: str, default: float) -> float:
+            overrides = getattr(cfg, '_pair_overrides', {}).get(epic, {})
+            param_overrides = overrides.get('parameter_overrides', {}) if isinstance(overrides, dict) else {}
+            if key in param_overrides:
+                try:
+                    return float(param_overrides[key])
+                except (TypeError, ValueError):
+                    pass
+            return float(getattr(cfg, key, default))
+
+        def _pair_str(key: str, default: str) -> str:
+            overrides = getattr(cfg, '_pair_overrides', {}).get(epic, {})
+            param_overrides = overrides.get('parameter_overrides', {}) if isinstance(overrides, dict) else {}
+            if key in param_overrides:
+                return str(param_overrides[key])
+            return str(getattr(cfg, key, default))
+
+        # Filter 1: Block htf_candle_position = 'start'
+        # 35 EURUSD trades at 'start': 46% WR, -£1,077 vs 'end'/'middle': 67% WR
+        if _pair_bool('block_htf_start_position', False):
+            htf_pos = signal.get('htf_candle_position')
+            if htf_pos == 'start':
+                return f"SQF: htf_candle_position='start' blocked (46% WR historically)"
+
+        # Filter 2: RSI directional alignment
+        # SELL with RSI>=60: 100% WR. SELL with RSI<55: drain. Same logic for BUY.
+        if _pair_bool('rsi_direction_filter_enabled', False) and rsi_value is not None:
+            rsi_sell_min = _pair_float('rsi_sell_min', 55.0)
+            rsi_buy_max = _pair_float('rsi_buy_max', 55.0)
+            if direction == 'BEAR' and rsi_value < rsi_sell_min:
+                return f"SQF: SELL RSI {rsi_value:.1f} < {rsi_sell_min:.0f} (misaligned, not in overbought zone)"
+            if direction == 'BULL' and rsi_value > rsi_buy_max:
+                return f"SQF: BUY RSI {rsi_value:.1f} > {rsi_buy_max:.0f} (misaligned, not in oversold zone)"
+
+        # Filter 3: ADX minimum (no trend = no edge)
+        # ADX < 15: 0% WR on 4 EURUSD trades
+        min_adx = _pair_float('min_adx_threshold', 0.0)
+        if min_adx > 0:
+            adx_val = signal.get('adx_value')
+            if adx_val is not None:
+                try:
+                    if float(adx_val) < min_adx:
+                        return f"SQF: ADX {float(adx_val):.1f} < {min_adx:.0f} (insufficient trend strength)"
+                except (TypeError, ValueError):
+                    pass
+
+        # Filter 4: Blocked hours UTC
+        # EURUSD hours 8, 10, 14 UTC: 33% WR combined, -£988 on 27 trades
+        blocked_hours_str = _pair_str('blocked_hours_utc', '')
+        if blocked_hours_str:
+            try:
+                blocked_hours = [int(h.strip()) for h in blocked_hours_str.split(',') if h.strip()]
+                if blocked_hours:
+                    # Try to get hour from signal timestamp
+                    signal_hour = signal.get('hour_utc')
+                    if signal_hour is None:
+                        ts = signal.get('timestamp') or signal.get('candle_time')
+                        if ts and hasattr(ts, 'hour'):
+                            signal_hour = ts.hour
+                    if signal_hour is not None and int(signal_hour) in blocked_hours:
+                        return f"SQF: Hour {signal_hour} UTC is in blocked hours {blocked_hours}"
+            except (ValueError, TypeError):
+                pass
+
+        return None
 
     def _get_regime_sl_tp_multipliers(self, regime: str):
         """Return (sl_mult, tp_mult) for the given market regime (v4.0.0)."""
