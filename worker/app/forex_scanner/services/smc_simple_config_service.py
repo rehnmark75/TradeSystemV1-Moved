@@ -598,6 +598,26 @@ class SMCSimpleConfig:
                 return float(po['min_swing_significance'])
         return self.min_swing_significance
 
+    def get_pair_exhaustion_filter_mode(self, epic: str) -> str:
+        """DEPRECATED: Use get_pair_impulse_quality_filter_mode instead."""
+        return self.get_pair_impulse_quality_filter_mode(epic)
+
+    def get_pair_impulse_quality_filter_mode(self, epic: str) -> str:
+        """Get impulse quality filter mode for a specific pair (MONITORING or ACTIVE)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('impulse_quality_filter_mode') is not None:
+                return str(po['impulse_quality_filter_mode'])
+        return getattr(self, 'impulse_quality_filter_mode', 'MONITORING')
+
+    def get_pair_min_impulse_score(self, epic: str) -> float:
+        """Get minimum impulse quality score for a specific pair (0.0-1.0)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('min_impulse_score') is not None:
+                return float(po['min_impulse_score'])
+        return getattr(self, 'min_impulse_score', 0.35)
+
     def get_pair_swing_proximity_min_distance(self, epic: str) -> int:
         """Get swing proximity minimum distance in pips for a specific pair.
 
@@ -2098,6 +2118,18 @@ class SMCSimpleConfigService:
     def get_pair_min_swing_significance(self, epic: str) -> float:
         """Get minimum swing significance threshold for a specific pair"""
         return self.get_config().get_pair_min_swing_significance(epic)
+
+    def get_pair_exhaustion_filter_mode(self, epic: str) -> str:
+        """DEPRECATED: Use get_pair_impulse_quality_filter_mode"""
+        return self.get_config().get_pair_impulse_quality_filter_mode(epic)
+
+    def get_pair_impulse_quality_filter_mode(self, epic: str) -> str:
+        """Get impulse quality filter mode for a specific pair"""
+        return self.get_config().get_pair_impulse_quality_filter_mode(epic)
+
+    def get_pair_min_impulse_score(self, epic: str) -> float:
+        """Get minimum impulse quality score for a specific pair"""
+        return self.get_config().get_pair_min_impulse_score(epic)
 
     def get_pair_require_body_close_break(self, epic: str) -> bool:
         """Check if body-close break requirement is enabled for a specific pair"""

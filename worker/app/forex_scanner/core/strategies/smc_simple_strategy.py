@@ -3623,6 +3623,75 @@ class SMCSimpleStrategy:
                 self.logger.debug(f"   MFI filter error (skipping): {e}")
 
             # ================================================================
+            # v2.43.0: IMPULSE QUALITY FILTER (replaces v2.42.0 exhaustion filter)
+            # Measures structural quality of the swing break using regime-agnostic
+            # geometry: swing range vs ATR, break conviction, candle body quality.
+            # Weak impulses (small swing, barely-cleared level, wick-heavy candle)
+            # predict immediate reversals regardless of trending/ranging regime.
+            # ================================================================
+            try:
+                # Swing range in ATR units (40% weight)
+                swing_range_pips = pullback_result.get('swing_range_pips', 0)
+                swing_range_price = swing_range_pips * pip_value if swing_range_pips else 0
+                swing_range_atr = swing_range_price / atr if atr and atr > 0 else 0
+
+                # Break conviction: how far past swing the close was, as % of swing range (35% weight)
+                if direction == 'BULL':
+                    break_beyond = break_candle.get('close', 0) - swing_level
+                else:
+                    break_beyond = swing_level - break_candle.get('close', 0)
+                break_conviction = break_beyond / swing_range_price if swing_range_price > 0 else 0
+
+                # Break candle body quality (25% weight)
+                brk_range = break_candle.get('high', 0) - break_candle.get('low', 0)
+                brk_body = abs(break_candle.get('close', 0) - break_candle.get('open', 0))
+                body_pct = brk_body / brk_range if brk_range > 0 else 0
+
+                # Composite impulse quality score (0.0 - 1.0)
+                impulse_score = (
+                    0.40 * min(swing_range_atr / 1.5, 1.0) +
+                    0.35 * min(max(break_conviction, 0) / 0.15, 1.0) +
+                    0.25 * min(body_pct / 0.70, 1.0)
+                )
+
+                # Load per-pair config
+                impulse_mode = 'MONITORING'
+                min_impulse = 0.35
+                if self._config_service and epic:
+                    try:
+                        impulse_mode = self._config_service.get_pair_impulse_quality_filter_mode(epic)
+                        min_impulse = self._config_service.get_pair_min_impulse_score(epic)
+                    except Exception:
+                        pass
+
+                if impulse_score < min_impulse:
+                    detail = f"score={impulse_score:.2f} (range={swing_range_atr:.2f}ATR, conviction={break_conviction*100:.1f}%, body={body_pct*100:.0f}%)"
+                    if impulse_mode == 'ACTIVE':
+                        self.logger.info(f"\n❌ Impulse quality too low: {detail}")
+                        self._track_rejection(
+                            stage='IMPULSE_QUALITY',
+                            reason=f"Weak impulse: {detail}",
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context={'impulse_score': impulse_score,
+                                     'swing_range_atr': swing_range_atr,
+                                     'break_conviction': break_conviction,
+                                     'body_pct': body_pct,
+                                     'confidence_score': confidence}
+                        )
+                        return None
+                    else:
+                        penalty = 0.10 if impulse_score < 0.25 else 0.05
+                        confidence -= penalty
+                        self.logger.info(f"   ⚠️ [IMPULSE MONITOR] {detail} — -{penalty*100:.0f}% confidence")
+                else:
+                    self.logger.info(f"   ✅ Impulse quality: {impulse_score:.2f} (range={swing_range_atr:.2f}ATR, conviction={break_conviction*100:.1f}%, body={body_pct*100:.0f}%)")
+            except Exception as e:
+                self.logger.debug(f"   Impulse quality filter error (skipping): {e}")
+
+            # ================================================================
             # v2.17.0: FINALIZE ORDER TYPE BASED ON CONFIDENCE
             # Now that confidence is calculated, finalize the order routing decision
             # High confidence + strong trend = market order (immediate entry)
@@ -5236,14 +5305,17 @@ class SMCSimpleStrategy:
         # 3. VOLUME STRENGTH (20% weight) - Gradient scoring
         # ================================================================
         # v2.2.0: Scale based on volume spike magnitude, not binary
+        # v2.42.0: Reduced ceiling from 100% to 70% to dampen exhaustion
+        #          double-boost (volume also feeds swing significance score).
+        #          Unconfirmed floor raised 20%→30% so signal still has value.
         if volume_confirmed and volume_ratio > 1.0:
-            # Scale from 1.0x to 2.0x spike (beyond 2x = max score)
+            # Scale from 1.0x to 2.0x spike — cap at 70% (was 100%)
             volume_magnitude = min((volume_ratio - 1.0) / 1.0, 1.0)  # 2.0x = 100%
-            volume_score = (0.5 + volume_magnitude * 0.5) * 0.20  # 50-100% of weight
+            volume_score = (0.40 + volume_magnitude * 0.30) * 0.20  # 40-70% of weight
         elif volume_confirmed:
-            volume_score = 0.10  # 50% of weight (confirmed but no ratio data)
+            volume_score = 0.08  # 40% of weight (confirmed but no ratio data)
         else:
-            volume_score = 0.04  # 20% of weight (no confirmation)
+            volume_score = 0.06  # 30% of weight (no confirmation)
 
         # ================================================================
         # 4. PULLBACK QUALITY (20% weight) - Combined zone + Fib accuracy
