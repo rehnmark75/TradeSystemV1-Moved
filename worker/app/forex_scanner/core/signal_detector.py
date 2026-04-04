@@ -1131,60 +1131,52 @@ class SignalDetector:
     def _check_weekly_directional_consistency(self, epic: str, pair: str) -> dict:
         """Check if recent weeks show alternating direction (oscillation vs trend).
 
-        Fetches 1h data with 720h lookback, resamples to weekly OHLC,
-        and checks if weekly candle directions alternate (bull/bear/bull/bear).
+        Queries pre-synthesized 1h candles from ig_candles_backtest, aggregates
+        to weekly OHLC in SQL. Avoids data_batch_size limits.
 
         Returns:
             dict with 'is_oscillating' (bool), 'pattern' (str), 'alternations' (int)
         """
         default = {'is_oscillating': False, 'pattern': '', 'alternations': 0}
         try:
-            df_weekly = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='1h',
-                lookback_hours=720
-            )
+            from sqlalchemy import text
+            query = text("""
+                SELECT
+                    date_trunc('week', start_time) as week,
+                    (array_agg(open ORDER BY start_time ASC))[1] as week_open,
+                    (array_agg(close ORDER BY start_time DESC))[1] as week_close
+                FROM ig_candles_backtest
+                WHERE epic = :epic AND timeframe = 60
+                  AND start_time >= NOW() - INTERVAL '5 weeks'
+                GROUP BY 1
+                HAVING COUNT(*) > 20
+                ORDER BY 1
+            """)
 
-            if df_weekly is None or df_weekly.empty or len(df_weekly) < 100:
+            with self.data_fetcher.db_manager.engine.connect() as conn:
+                result = conn.execute(query, {'epic': epic}).fetchall()
+
+            if len(result) < 3:
                 return default
 
-            # Ensure DatetimeIndex for resample
-            if not isinstance(df_weekly.index, pd.DatetimeIndex):
-                for ts_col in ('start_time', 'market_timestamp', 'timestamp'):
-                    if ts_col in df_weekly.columns:
-                        df_weekly = df_weekly.set_index(ts_col)
-                        break
-                else:
-                    return default
-
-            # Resample 1h to weekly OHLC
-            ohlc = df_weekly.resample('W').agg({
-                'open': 'first',
-                'close': 'last'
-            }).dropna()
-
-            if len(ohlc) < 3:
+            # Exclude current partial week (last row)
+            weeks = result[:-1] if len(result) > 3 else result
+            if len(weeks) < 3:
                 return default
 
-            # Take last 4 complete weeks (exclude current partial week)
-            recent = ohlc.iloc[-5:-1] if len(ohlc) > 4 else ohlc.iloc[:-1]
-            if len(recent) < 3:
-                return default
+            # Take last 4 complete weeks
+            weeks = weeks[-4:]
 
-            # Determine direction: bullish (1) or bearish (-1)
             directions = []
-            for _, row in recent.iterrows():
-                directions.append(1 if row['close'] > row['open'] else -1)
+            for row in weeks:
+                directions.append(1 if float(row[2]) > float(row[1]) else -1)
 
-            # Count direction alternations
             alternations = 0
             for i in range(1, len(directions)):
                 if directions[i] != directions[i - 1]:
                     alternations += 1
 
             pattern = '→'.join(['B' if d == 1 else 'S' for d in directions])
-            # Oscillating = all consecutive weeks alternate (e.g., B→S→B→S)
             is_oscillating = alternations >= min(len(directions) - 1, 3)
 
             return {

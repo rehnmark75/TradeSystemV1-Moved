@@ -1242,7 +1242,7 @@ class BacktestScanner(IntelligentForexScanner):
                 epic=epic,
                 pair=pair,
                 timeframe='1h',
-                lookback_hours=720  # Extended for weekly consistency check (4+ weeks of 1h data)
+                lookback_hours=72
             )
 
             if df is None or df.empty or len(df) < 20:
@@ -1317,7 +1317,7 @@ class BacktestScanner(IntelligentForexScanner):
                     regime = 'ranging'
                 else:
                     # Check 2: Weekly directional consistency
-                    weekly_result = self._check_weekly_consistency_from_df(df_ts)
+                    weekly_result = self._check_weekly_consistency_from_db(epic, timestamp)
                     if weekly_result.get('is_oscillating', False):
                         self.logger.debug(
                             f"📉 [BT] [{epic}] Regime downgraded trending→ranging: "
@@ -1331,40 +1331,47 @@ class BacktestScanner(IntelligentForexScanner):
             self.logger.debug(f"⚠️ Error calculating regime from data for {epic}: {e}")
             return ('trending', None, 'normal')
 
-    def _check_weekly_consistency_from_df(self, df) -> dict:
-        """Check weekly directional consistency from an hourly DataFrame.
+    def _check_weekly_consistency_from_db(self, epic: str, as_of: datetime) -> dict:
+        """Check weekly directional consistency using pre-synthesized 1h candles.
+
+        Queries ig_candles_backtest (timeframe=60) up to backtest timestamp,
+        aggregates to weekly OHLC in SQL.
 
         Returns dict with 'is_oscillating', 'pattern', 'alternations'.
         """
         default = {'is_oscillating': False, 'pattern': '', 'alternations': 0}
         try:
-            if df is None or df.empty or len(df) < 100:
+            from sqlalchemy import text
+            query = text("""
+                SELECT
+                    date_trunc('week', start_time) as week,
+                    (array_agg(open ORDER BY start_time ASC))[1] as week_open,
+                    (array_agg(close ORDER BY start_time DESC))[1] as week_close
+                FROM ig_candles_backtest
+                WHERE epic = :epic AND timeframe = 60
+                  AND start_time >= :since AND start_time < :as_of
+                GROUP BY 1
+                HAVING COUNT(*) > 20
+                ORDER BY 1
+            """)
+
+            since = as_of - pd.Timedelta(weeks=5)
+            with self.signal_detector.data_fetcher.db_manager.engine.connect() as conn:
+                result = conn.execute(query, {'epic': epic, 'since': since, 'as_of': as_of}).fetchall()
+
+            if len(result) < 3:
                 return default
 
-            # Ensure DatetimeIndex for resample
-            if not isinstance(df.index, pd.DatetimeIndex):
-                for ts_col in ('start_time', 'market_timestamp', 'timestamp'):
-                    if ts_col in df.columns:
-                        df = df.set_index(ts_col)
-                        break
-                else:
-                    return default
-
-            ohlc = df.resample('W').agg({
-                'open': 'first',
-                'close': 'last'
-            }).dropna()
-
-            if len(ohlc) < 3:
+            # Exclude current partial week
+            weeks = result[:-1] if len(result) > 3 else result
+            if len(weeks) < 3:
                 return default
 
-            recent = ohlc.iloc[-5:-1] if len(ohlc) > 4 else ohlc.iloc[:-1]
-            if len(recent) < 3:
-                return default
+            weeks = weeks[-4:]
 
             directions = []
-            for _, row in recent.iterrows():
-                directions.append(1 if row['close'] > row['open'] else -1)
+            for row in weeks:
+                directions.append(1 if float(row[2]) > float(row[1]) else -1)
 
             alternations = 0
             for i in range(1, len(directions)):
