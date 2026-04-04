@@ -294,6 +294,13 @@ class SMCSimpleStrategy:
         self.pair_last_session = {}  # {pair: session_name} - track session changes
         self._trade_outcome_cache = {}  # {pair: {'outcome': dict, 'cached_at': datetime}}
 
+        # v2.46.0: Rolling performance adaptive gate
+        # Stores recent trade outcomes per epic as a deque of booleans (True=win, False=loss)
+        # Updated by record_backtest_outcome() (backtest) or record_live_outcome() (live)
+        from collections import deque
+        self._rolling_outcomes: dict = {}  # {epic: deque([True, False, ...])}
+        self._rolling_perf_enabled: bool = False  # Set from DB config after load
+
         # v3.2.0: Cooldowns now read directly from alert_history database (single source of truth)
         # No startup load needed - each cooldown check queries the database directly
         # This eliminates state sync issues and simplifies the code
@@ -587,6 +594,9 @@ class SMCSimpleStrategy:
 
             # v2.6.0: Pair-specific parameter overrides (now from DB)
             self.pair_parameter_overrides = {}  # Loaded from DB per-pair overrides
+
+            # v2.46.0: Rolling performance gate toggle (read from DB config)
+            self._rolling_perf_enabled = getattr(config, 'rolling_perf_enabled', False)
 
             # Store config for helper functions
             self._db_config = config
@@ -3387,6 +3397,14 @@ class SMCSimpleStrategy:
                     pair_min_confidence = high_vol_confidence
                     adjustment_type = "high-volume"
                     self.logger.info(f"   📊 Volume-adjusted threshold: {high_vol_confidence*100:.0f}% (vol={volume_ratio:.2f} >= {self.high_volume_threshold})")
+
+            # v2.46.0: Rolling performance adaptive gate
+            # Adjusts pair_min_confidence based on recent trade outcomes.
+            # Raises the gate when on a losing streak, lowers slightly on a winning streak.
+            _rolling_delta, _rolling_reason = self._get_rolling_confidence_adjustment(epic)
+            if _rolling_delta != 0.0:
+                pair_min_confidence = round(pair_min_confidence + _rolling_delta, 3)
+                self.logger.info(f"   📈 {_rolling_reason} → min_conf now {pair_min_confidence*100:.0f}%")
 
             # v2.9.0: Use round(2) for both values to avoid floating-point precision issues
             # (e.g., 0.4799 displaying as 48% but failing 48% threshold)
@@ -6406,6 +6424,70 @@ class SMCSimpleStrategy:
         if epic in self._trade_outcome_cache:
             del self._trade_outcome_cache[epic]
 
+    def record_backtest_outcome(self, epic: str, is_winner: bool) -> None:
+        """Record a trade outcome into the in-memory rolling window (v2.46.0).
+
+        Called by the backtest engine after each trade simulation to feed outcomes
+        back into the strategy's confidence gate. Also works in live mode via
+        the consecutive-loss update path.
+
+        Args:
+            epic: Full epic identifier (e.g. 'CS.D.EURUSD.CEEM.IP')
+            is_winner: True if trade was profitable, False if a loss
+        """
+        if not self._rolling_perf_enabled:
+            return
+        from collections import deque
+        cfg = self._db_config
+        window_size = int(getattr(cfg, 'rolling_perf_window', 10)) if cfg else 10
+        if epic not in self._rolling_outcomes:
+            self._rolling_outcomes[epic] = deque(maxlen=window_size)
+        else:
+            # Resize if window config changed
+            existing = self._rolling_outcomes[epic]
+            if existing.maxlen != window_size:
+                self._rolling_outcomes[epic] = deque(list(existing)[-window_size:], maxlen=window_size)
+        self._rolling_outcomes[epic].append(is_winner)
+        recent_wr = sum(self._rolling_outcomes[epic]) / len(self._rolling_outcomes[epic])
+        self.logger.debug(
+            f"[RollingPerf] {epic}: {'WIN' if is_winner else 'LOSS'} recorded — "
+            f"rolling WR={recent_wr*100:.0f}% ({len(self._rolling_outcomes[epic])} trades)"
+        )
+
+    def _get_rolling_confidence_adjustment(self, epic: str) -> tuple:
+        """Return (confidence_delta, reason) for rolling performance gate (v2.46.0).
+
+        Compares recent rolling win rate against thresholds and returns an adjustment
+        to add to the pair's min_confidence threshold.
+
+        Returns:
+            (delta: float, reason: str) — delta is added to pair_min_confidence.
+            Positive delta = raise threshold (tighter gate).
+            Negative delta = lower threshold (looser gate, reward good streak).
+        """
+        if not self._rolling_perf_enabled:
+            return 0.0, ''
+        outcomes = self._rolling_outcomes.get(epic)
+        if not outcomes or len(outcomes) < 3:  # Need at least 3 trades for signal
+            return 0.0, ''
+        cfg = self._db_config
+        recent_wr = sum(outcomes) / len(outcomes)
+        low_thresh = float(getattr(cfg, 'rolling_perf_low_wr_threshold', 0.40)) if cfg else 0.40
+        very_low_thresh = float(getattr(cfg, 'rolling_perf_very_low_wr_threshold', 0.30)) if cfg else 0.30
+        high_thresh = float(getattr(cfg, 'rolling_perf_high_wr_threshold', 0.65)) if cfg else 0.65
+        low_penalty = float(getattr(cfg, 'rolling_perf_low_wr_penalty', 0.05)) if cfg else 0.05
+        very_low_penalty = float(getattr(cfg, 'rolling_perf_very_low_wr_penalty', 0.10)) if cfg else 0.10
+        high_bonus = float(getattr(cfg, 'rolling_perf_high_wr_bonus', 0.02)) if cfg else 0.02
+
+        n = len(outcomes)
+        if recent_wr < very_low_thresh:
+            return very_low_penalty, f"RollingPerf: WR={recent_wr*100:.0f}% < {very_low_thresh*100:.0f}% on {n} trades → +{very_low_penalty*100:.0f}% gate"
+        elif recent_wr < low_thresh:
+            return low_penalty, f"RollingPerf: WR={recent_wr*100:.0f}% < {low_thresh*100:.0f}% on {n} trades → +{low_penalty*100:.0f}% gate"
+        elif recent_wr > high_thresh:
+            return -high_bonus, f"RollingPerf: WR={recent_wr*100:.0f}% > {high_thresh*100:.0f}% on {n} trades → -{high_bonus*100:.0f}% gate"
+        return 0.0, ''
+
     def reset_cooldowns(self):
         """Reset all cooldowns - call this at the start of each backtest to ensure fresh state.
 
@@ -6416,6 +6498,7 @@ class SMCSimpleStrategy:
         self.pair_consecutive_losses = {}
         self.pair_last_session = {}
         self._trade_outcome_cache = {}
+        self._rolling_outcomes = {}  # v2.46.0: reset rolling performance window
         if self.logger:
             self.logger.info("🔄 SMC Simple strategy cooldowns reset for new backtest (v3.2.0 in-memory state cleared)")
 

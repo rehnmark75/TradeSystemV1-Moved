@@ -1630,6 +1630,13 @@ class BacktestScanner(IntelligentForexScanner):
                     self.signal_detector.smc_simple_strategy.adjust_cooldown_for_unfilled_order(pair, signal_timestamp)
                     self.logger.debug(f"🔄 Cooldown adjusted for unfilled limit order on {pair}")
 
+            # v2.46.0: Feed trade outcome back to strategy's rolling performance window
+            # Enables the confidence gate to adapt based on recent backtest outcomes
+            is_winner = enhanced_signal.get('is_winner', False)
+            is_loser = enhanced_signal.get('is_loser', False)
+            if (is_winner or is_loser) and hasattr(self.signal_detector, 'smc_simple_strategy') and self.signal_detector.smc_simple_strategy:
+                self.signal_detector.smc_simple_strategy.record_backtest_outcome(epic, bool(is_winner))
+
             return enhanced_signal
 
         except Exception as e:
