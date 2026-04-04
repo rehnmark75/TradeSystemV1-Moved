@@ -2963,7 +2963,7 @@ class SMCSimpleStrategy:
                 if fixed_sl_pips is not None and fixed_sl_pips > 0:
                     # v4.0.0: Apply regime-gated multipliers to base SL/TP
                     if _regime_sl_tp_enabled and _pre_market_regime != 'unknown' and fixed_tp_pips:
-                        sl_mult, tp_mult = self._get_regime_sl_tp_multipliers(_pre_market_regime)
+                        sl_mult, tp_mult = self._get_regime_sl_tp_multipliers(_pre_market_regime, epic)
                         adj_sl = round(fixed_sl_pips * sl_mult, 1)
                         adj_tp = round(fixed_tp_pips * tp_mult, 1)
                         # Enforce minimum R:R after adjustment
@@ -2977,6 +2977,39 @@ class SMCSimpleStrategy:
                         )
                         fixed_sl_pips = adj_sl
                         fixed_tp_pips = adj_tp
+
+                    # v2.46.0: ATR-normalized SL/TP — scale by current vs reference ATR
+                    # Runs AFTER regime multipliers, adding a continuous volatility layer.
+                    # When market is more/less volatile than the base calibration period,
+                    # SL/TP scale proportionally (clamped to prevent extreme adjustments).
+                    _atr_norm_enabled = (
+                        self._using_database_config
+                        and self._db_config
+                        and getattr(self._db_config, 'atr_normalized_sl_tp_enabled', False)
+                    )
+                    if _atr_norm_enabled and fixed_sl_pips and fixed_tp_pips and pip_value > 0:
+                        try:
+                            # Get current ATR in pips from entry_df (1m data) or df_trigger (5m)
+                            _atr_df = entry_df if (entry_df is not None and 'atr' in entry_df.columns and len(entry_df) > 0) else df_trigger
+                            if 'atr' in _atr_df.columns and len(_atr_df) > 0:
+                                _current_atr_pips = float(_atr_df['atr'].iloc[-1]) / pip_value
+                                _ref_atr = self._get_pair_param(epic, 'atr_reference_pips',
+                                    getattr(self._db_config, 'atr_reference_pips', 8.0))
+                                _scale_min = getattr(self._db_config, 'atr_scale_min', 0.7)
+                                _scale_max = getattr(self._db_config, 'atr_scale_max', 1.5)
+                                if _ref_atr > 0 and _current_atr_pips > 0:
+                                    _atr_ratio = max(_scale_min, min(_scale_max, _current_atr_pips / _ref_atr))
+                                    _atr_sl = round(fixed_sl_pips * _atr_ratio, 1)
+                                    _atr_tp = round(fixed_tp_pips * _atr_ratio, 1)
+                                    self.logger.info(
+                                        f"   📐 ATR normalization: ATR={_current_atr_pips:.1f}p "
+                                        f"(ref={_ref_atr:.1f}p, ratio={_atr_ratio:.2f}x) "
+                                        f"SL {fixed_sl_pips}→{_atr_sl}, TP {fixed_tp_pips}→{_atr_tp}"
+                                    )
+                                    fixed_sl_pips = _atr_sl
+                                    fixed_tp_pips = _atr_tp
+                        except Exception as _atr_e:
+                            self.logger.debug(f"ATR normalization skipped: {_atr_e}")
 
                     using_fixed_sl_tp = True
                     self.logger.info(f"   📌 Using FIXED SL/TP: SL={fixed_sl_pips} pips, TP={fixed_tp_pips} pips")
@@ -6646,17 +6679,36 @@ class SMCSimpleStrategy:
 
         return context
 
-    def _get_regime_sl_tp_multipliers(self, regime: str):
-        """Return (sl_mult, tp_mult) for the given market regime (v4.0.0)."""
+    def _get_regime_sl_tp_multipliers(self, regime: str, epic: str = '') -> tuple:
+        """Return (sl_mult, tp_mult) for the given market regime (v2.46.0).
+
+        Checks per-pair parameter_overrides JSONB first, then falls back to
+        global config values. Allows per-pair regime multiplier tuning without
+        code changes.
+        """
         cfg = self._db_config
+
+        def _mult(key: str, default: float) -> float:
+            """Get multiplier: per-pair JSONB override → global config → hardcoded default."""
+            if epic and cfg:
+                po = getattr(cfg, '_pair_overrides', {}).get(epic, {}).get('parameter_overrides', {})
+                if key in po:
+                    try:
+                        return float(po[key])
+                    except (TypeError, ValueError):
+                        pass
+            return float(getattr(cfg, key, default)) if cfg else default
+
         if regime == 'trending':
-            return (getattr(cfg, 'trending_sl_mult', 1.0), getattr(cfg, 'trending_tp_mult', 1.2))
+            return (_mult('trending_sl_mult', 1.0), _mult('trending_tp_mult', 1.2))
         elif regime == 'ranging':
-            return (getattr(cfg, 'ranging_sl_mult', 0.85), getattr(cfg, 'ranging_tp_mult', 0.70))
+            return (_mult('ranging_sl_mult', 0.85), _mult('ranging_tp_mult', 0.70))
+        elif regime == 'breakout':
+            return (_mult('breakout_sl_mult', 1.1), _mult('breakout_tp_mult', 1.4))
         elif regime == 'high_volatility':
-            return (getattr(cfg, 'high_vol_sl_mult', 1.3), getattr(cfg, 'high_vol_tp_mult', 1.3))
+            return (_mult('high_vol_sl_mult', 1.3), _mult('high_vol_tp_mult', 1.3))
         elif regime == 'low_volatility':
-            return (getattr(cfg, 'low_vol_sl_mult', 0.85), getattr(cfg, 'low_vol_tp_mult', 0.80))
+            return (_mult('low_vol_sl_mult', 0.85), _mult('low_vol_tp_mult', 0.80))
         return (1.0, 1.0)
 
     def _add_performance_metrics(
