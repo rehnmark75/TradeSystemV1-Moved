@@ -1298,11 +1298,96 @@ class BacktestScanner(IntelligentForexScanner):
                     if regime == 'trending' and adx_value and adx_value < 25:
                         regime = 'low_volatility'
 
+            # --- Enhanced regime validation: efficiency ratio + weekly consistency ---
+            if regime == 'trending':
+                # Check 1: Efficiency ratio from KAMA
+                er_value = None
+                for col in ('efficiency_ratio', 'kama_er', 'kama_10_er', 'kama_14_er'):
+                    if col in df_ts.columns:
+                        val = df_ts[col].iloc[-1]
+                        if val is not None and not pd.isna(val):
+                            er_value = float(val)
+                            break
+
+                if er_value is not None and er_value < 0.25:
+                    self.logger.debug(
+                        f"📉 [BT] [{epic}] Regime downgraded trending→ranging: "
+                        f"efficiency_ratio={er_value:.3f} < 0.25"
+                    )
+                    regime = 'ranging'
+                else:
+                    # Check 2: Weekly directional consistency
+                    weekly_result = self._check_weekly_consistency_from_db(epic, timestamp)
+                    if weekly_result.get('is_oscillating', False):
+                        self.logger.debug(
+                            f"📉 [BT] [{epic}] Regime downgraded trending→ranging: "
+                            f"weekly oscillation ({weekly_result.get('pattern', '')})"
+                        )
+                        regime = 'ranging'
+
             return (regime, adx_value, volatility_state)
 
         except Exception as e:
             self.logger.debug(f"⚠️ Error calculating regime from data for {epic}: {e}")
             return ('trending', None, 'normal')
+
+    def _check_weekly_consistency_from_db(self, epic: str, as_of: datetime) -> dict:
+        """Check weekly directional consistency using pre-synthesized 1h candles.
+
+        Queries ig_candles_backtest (timeframe=60) up to backtest timestamp,
+        aggregates to weekly OHLC in SQL.
+
+        Returns dict with 'is_oscillating', 'pattern', 'alternations'.
+        """
+        default = {'is_oscillating': False, 'pattern': '', 'alternations': 0}
+        try:
+            from sqlalchemy import text
+            query = text("""
+                SELECT
+                    date_trunc('week', start_time) as week,
+                    (array_agg(open ORDER BY start_time ASC))[1] as week_open,
+                    (array_agg(close ORDER BY start_time DESC))[1] as week_close
+                FROM ig_candles_backtest
+                WHERE epic = :epic AND timeframe = 60
+                  AND start_time >= :since AND start_time < :as_of
+                GROUP BY 1
+                HAVING COUNT(*) > 20
+                ORDER BY 1
+            """)
+
+            since = as_of - pd.Timedelta(weeks=5)
+            with self.signal_detector.data_fetcher.db_manager.engine.connect() as conn:
+                result = conn.execute(query, {'epic': epic, 'since': since, 'as_of': as_of}).fetchall()
+
+            if len(result) < 3:
+                return default
+
+            # Exclude current partial week
+            weeks = result[:-1] if len(result) > 3 else result
+            if len(weeks) < 3:
+                return default
+
+            weeks = weeks[-4:]
+
+            directions = []
+            for row in weeks:
+                directions.append(1 if float(row[2]) > float(row[1]) else -1)
+
+            alternations = 0
+            for i in range(1, len(directions)):
+                if directions[i] != directions[i - 1]:
+                    alternations += 1
+
+            pattern = '→'.join(['B' if d == 1 else 'S' for d in directions])
+            is_oscillating = alternations >= min(len(directions) - 1, 3)
+
+            return {
+                'is_oscillating': is_oscillating,
+                'pattern': pattern,
+                'alternations': alternations
+            }
+        except Exception:
+            return default
 
     def _get_session_from_timestamp(self, timestamp: datetime) -> str:
         """

@@ -1023,6 +1023,30 @@ class SignalDetector:
                     if regime == 'trending' and adx_value and adx_value < 25:
                         regime = 'low_volatility'
 
+            # --- Enhanced regime validation: efficiency ratio + weekly consistency ---
+            regime_downgraded = False
+            if regime == 'trending':
+                # Check 1: Efficiency ratio — is price actually going somewhere?
+                er_value = self._get_efficiency_ratio_from_df(df)
+                if er_value is not None and er_value < 0.25:
+                    self.logger.info(
+                        f"📉 [{epic}] Regime downgraded trending→ranging: "
+                        f"efficiency_ratio={er_value:.3f} < 0.25 (price going nowhere)"
+                    )
+                    regime = 'ranging'
+                    regime_downgraded = True
+
+                # Check 2: Weekly directional consistency — are weeks alternating?
+                if not regime_downgraded:
+                    weekly_result = self._check_weekly_directional_consistency(epic, pair)
+                    if weekly_result.get('is_oscillating', False):
+                        self.logger.info(
+                            f"📉 [{epic}] Regime downgraded trending→ranging: "
+                            f"weekly oscillation detected ({weekly_result.get('pattern', '')})"
+                        )
+                        regime = 'ranging'
+                        regime_downgraded = True
+
             # Determine session
             session = self._get_current_session()
 
@@ -1039,11 +1063,13 @@ class SignalDetector:
                 self.logger.info(
                     f"🎯 [{epic}] Regime={regime} ADX={f'{adx_value:.1f}' if adx_value else 'N/A'} "
                     f"→ {strategy_name} (conf={confidence_modifier:.2f})"
+                    f"{' [downgraded]' if regime_downgraded else ''}"
                 )
             else:
                 strategy_name = 'SMC_SIMPLE'
                 self.logger.debug(
                     f"🎯 [{epic}] Regime={regime} ADX={f'{adx_value:.1f}' if adx_value else 'N/A'} → SMC_SIMPLE"
+                    f"{' [downgraded]' if regime_downgraded else ''}"
                 )
 
             # Determine regime confidence based on classification
@@ -1089,6 +1115,79 @@ class SignalDetector:
             return 'new_york'
         else:
             return 'asian'
+
+    def _get_efficiency_ratio_from_df(self, df) -> float:
+        """Extract efficiency ratio from DataFrame (KAMA-computed column)."""
+        try:
+            for col in ('efficiency_ratio', 'kama_er', 'kama_10_er', 'kama_14_er'):
+                if col in df.columns:
+                    val = df[col].iloc[-1]
+                    if val is not None and not pd.isna(val):
+                        return float(val)
+            return None
+        except Exception:
+            return None
+
+    def _check_weekly_directional_consistency(self, epic: str, pair: str) -> dict:
+        """Check if recent weeks show alternating direction (oscillation vs trend).
+
+        Queries pre-synthesized 1h candles from ig_candles_backtest, aggregates
+        to weekly OHLC in SQL. Avoids data_batch_size limits.
+
+        Returns:
+            dict with 'is_oscillating' (bool), 'pattern' (str), 'alternations' (int)
+        """
+        default = {'is_oscillating': False, 'pattern': '', 'alternations': 0}
+        try:
+            from sqlalchemy import text
+            query = text("""
+                SELECT
+                    date_trunc('week', start_time) as week,
+                    (array_agg(open ORDER BY start_time ASC))[1] as week_open,
+                    (array_agg(close ORDER BY start_time DESC))[1] as week_close
+                FROM ig_candles_backtest
+                WHERE epic = :epic AND timeframe = 60
+                  AND start_time >= NOW() - INTERVAL '5 weeks'
+                GROUP BY 1
+                HAVING COUNT(*) > 20
+                ORDER BY 1
+            """)
+
+            with self.data_fetcher.db_manager.engine.connect() as conn:
+                result = conn.execute(query, {'epic': epic}).fetchall()
+
+            if len(result) < 3:
+                return default
+
+            # Exclude current partial week (last row)
+            weeks = result[:-1] if len(result) > 3 else result
+            if len(weeks) < 3:
+                return default
+
+            # Take last 4 complete weeks
+            weeks = weeks[-4:]
+
+            directions = []
+            for row in weeks:
+                directions.append(1 if float(row[2]) > float(row[1]) else -1)
+
+            alternations = 0
+            for i in range(1, len(directions)):
+                if directions[i] != directions[i - 1]:
+                    alternations += 1
+
+            pattern = '→'.join(['B' if d == 1 else 'S' for d in directions])
+            is_oscillating = alternations >= min(len(directions) - 1, 3)
+
+            return {
+                'is_oscillating': is_oscillating,
+                'pattern': pattern,
+                'alternations': alternations
+            }
+
+        except Exception as e:
+            self.logger.debug(f"⚠️ Weekly consistency check error for {epic}: {e}")
+            return default
 
     # =========================================================================
     # FVG RETEST STRATEGY DETECTION (v4.0.0)
