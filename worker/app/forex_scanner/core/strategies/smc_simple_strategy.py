@@ -2898,7 +2898,7 @@ class SMCSimpleStrategy:
             _regime_sl_tp_enabled = (
                 self._using_database_config
                 and self._db_config
-                and getattr(self._db_config, 'regime_sl_tp_enabled', False)
+                and self._get_pair_param(epic, 'regime_sl_tp_enabled', False)
             )
             if _regime_sl_tp_enabled:
                 try:
@@ -2995,7 +2995,7 @@ class SMCSimpleStrategy:
                     _atr_norm_enabled = (
                         self._using_database_config
                         and self._db_config
-                        and getattr(self._db_config, 'atr_normalized_sl_tp_enabled', False)
+                        and self._get_pair_param(epic, 'atr_normalized_sl_tp_enabled', False)
                     )
                     if _atr_norm_enabled and fixed_sl_pips and fixed_tp_pips and pip_value > 0:
                         try:
@@ -3005,8 +3005,10 @@ class SMCSimpleStrategy:
                                 _current_atr_pips = float(_atr_df['atr'].iloc[-1]) / pip_value
                                 _ref_atr = self._get_pair_param(epic, 'atr_reference_pips',
                                     getattr(self._db_config, 'atr_reference_pips', 8.0))
-                                _scale_min = getattr(self._db_config, 'atr_scale_min', 0.7)
-                                _scale_max = getattr(self._db_config, 'atr_scale_max', 1.5)
+                                _scale_min = self._get_pair_param(epic, 'atr_scale_min',
+                                    getattr(self._db_config, 'atr_scale_min', 0.7))
+                                _scale_max = self._get_pair_param(epic, 'atr_scale_max',
+                                    getattr(self._db_config, 'atr_scale_max', 1.5))
                                 if _ref_atr > 0 and _current_atr_pips > 0:
                                     _atr_ratio = max(_scale_min, min(_scale_max, _current_atr_pips / _ref_atr))
                                     _atr_sl = round(fixed_sl_pips * _atr_ratio, 1)
