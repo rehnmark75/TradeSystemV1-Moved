@@ -1209,6 +1209,64 @@ class SMCSimpleConfig:
                 return int(po['sweep_min_conditions'])
         return None
 
+    # --- Per-Pair SMC Conflict Filter Settings (v2.43.0) ---
+
+    def get_pair_smc_conflict_filter_enabled(self, epic: str) -> Optional[bool]:
+        """Get per-pair SMC conflict filter override (None = use global setting)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('smc_conflict_filter_enabled') is not None:
+                return bool(po['smc_conflict_filter_enabled'])
+        return None
+
+    def get_pair_smc_reject_ranging_structure(self, epic: str) -> Optional[bool]:
+        """Get per-pair ranging structure rejection override (None = use global setting)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('smc_reject_ranging_structure') is not None:
+                return bool(po['smc_reject_ranging_structure'])
+        return None
+
+    def get_pair_smc_reject_order_flow_conflict(self, epic: str) -> Optional[bool]:
+        """Get per-pair order flow conflict rejection override (None = use global setting)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('smc_reject_order_flow_conflict') is not None:
+                return bool(po['smc_reject_order_flow_conflict'])
+        return None
+
+    def get_pair_smc_conflict_tolerance(self, epic: str) -> Optional[int]:
+        """Get per-pair SMC conflict tolerance override (None = use global setting)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('smc_conflict_tolerance') is not None:
+                return int(po['smc_conflict_tolerance'])
+            # Also check direct column (already exists)
+            override = self._pair_overrides[epic]
+            if override.get('smc_conflict_tolerance') is not None:
+                return int(override['smc_conflict_tolerance'])
+        return None
+
+    def get_pair_smc_conflict_settings(self, epic: str) -> Dict[str, Any]:
+        """
+        Get all SMC conflict filter settings for a pair, with global fallback.
+        Returns resolved values (per-pair if set, otherwise global scanner config).
+        """
+        from forex_scanner.services.scanner_config_service import get_scanner_config
+        scanner_cfg = get_scanner_config()
+
+        pair_enabled = self.get_pair_smc_conflict_filter_enabled(epic)
+        pair_ranging = self.get_pair_smc_reject_ranging_structure(epic)
+        pair_order_flow = self.get_pair_smc_reject_order_flow_conflict(epic)
+        pair_tolerance = self.get_pair_smc_conflict_tolerance(epic)
+
+        return {
+            'smc_conflict_filter_enabled': pair_enabled if pair_enabled is not None else scanner_cfg.smc_conflict_filter_enabled,
+            'smc_reject_ranging_structure': pair_ranging if pair_ranging is not None else scanner_cfg.smc_reject_ranging_structure,
+            'smc_reject_order_flow_conflict': pair_order_flow if pair_order_flow is not None else scanner_cfg.smc_reject_order_flow_conflict,
+            'smc_conflict_tolerance': pair_tolerance if pair_tolerance is not None else scanner_cfg.smc_conflict_tolerance,
+        }
+
     def get_pair_scalp_reversal_enabled(self, epic: str) -> Optional[bool]:
         """
         Get per-pair scalp reversal override enabled flag.

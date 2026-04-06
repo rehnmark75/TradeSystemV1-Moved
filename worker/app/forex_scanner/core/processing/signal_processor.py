@@ -84,6 +84,14 @@ try:
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
 
+# Import SMC config service for per-pair SMC conflict settings
+try:
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    SMC_CONFIG_AVAILABLE = True
+except ImportError:
+    SMC_CONFIG_AVAILABLE = False
+    logging.getLogger(__name__).warning("SMC config service not available - per-pair SMC conflict settings disabled")
+
 class SignalProcessor:
     """
     Handles comprehensive signal processing including validation, enhancement,
@@ -221,7 +229,7 @@ class SignalProcessor:
         self.logger.info(f"   Alert history: {'✅' if alert_history else '❌'}")
         self.logger.info(f"   Database storage: {'✅' if self.save_to_database else '❌'}")
         self.logger.info(f"   Deduplication: {'✅' if self.deduplication_manager else '❌'}")
-        self.logger.info(f"   SMC Conflict Filter: {'✅' if self.enable_smc_conflict_filter else '❌'}")
+        self.logger.info(f"   SMC Conflict Filter: {'✅' if self.enable_smc_conflict_filter else '❌'} (global, per-pair overrides supported)")
         self.logger.info(f"   Claude timeout: {self.claude_timeout}s")
         self.logger.info(f"   Smart Money timeout: {self.smart_money_timeout}s")
         
@@ -483,8 +491,10 @@ class SignalProcessor:
                     self.logger.info(f"   Enhanced Confidence: {smart_money_result.get('enhanced_confidence_score', confidence):.3f}")
 
                     # SMC CONFLICT FILTER: Step 6b - Check for SMC conflicts and reject if needed
-                    if self.enable_smc_conflict_filter:
-                        smc_conflict = self._check_smc_conflict(enhanced_signal, smart_money_result)
+                    # v2.43.0: Per-pair override support - check pair-level setting first, fall back to global
+                    pair_smc_enabled = self._is_smc_conflict_filter_enabled(epic)
+                    if pair_smc_enabled:
+                        smc_conflict = self._check_smc_conflict(enhanced_signal, smart_money_result, epic)
                         if smc_conflict['should_reject']:
                             self.logger.warning(f"⛔ SMC CONFLICT REJECTION: {epic}")
                             self.logger.warning(f"   Reason: {smc_conflict['reason']}")
@@ -673,9 +683,53 @@ class SignalProcessor:
             self.logger.error(f"❌ Smart money analysis failed: {e}")
             return None
 
-    def _check_smc_conflict(self, signal: Dict, smart_money_result: Dict) -> Dict:
+    def _is_smc_conflict_filter_enabled(self, epic: str) -> bool:
+        """
+        Check if SMC conflict filter is enabled for a specific pair.
+        v2.43.0: Per-pair override takes precedence over global setting.
+        """
+        if SMC_CONFIG_AVAILABLE:
+            try:
+                smc_config = get_smc_simple_config()
+                pair_override = smc_config.get_pair_smc_conflict_filter_enabled(epic)
+                if pair_override is not None:
+                    return pair_override
+            except Exception:
+                pass
+        return self.enable_smc_conflict_filter
+
+    def _get_smc_conflict_settings(self, epic: str) -> Dict[str, Any]:
+        """
+        Get resolved SMC conflict settings for a pair (per-pair overrides with global fallback).
+        v2.43.0: Supports per-pair smc_reject_ranging_structure, smc_reject_order_flow_conflict, smc_conflict_tolerance.
+        """
+        settings = {
+            'reject_ranging_structure': self.smc_reject_on_ranging_structure,
+            'reject_order_flow_conflict': self.smc_reject_on_order_flow_conflict,
+            'conflict_tolerance': self.smc_conflict_tolerance,
+        }
+        if SMC_CONFIG_AVAILABLE:
+            try:
+                smc_config = get_smc_simple_config()
+                pair_ranging = smc_config.get_pair_smc_reject_ranging_structure(epic)
+                if pair_ranging is not None:
+                    settings['reject_ranging_structure'] = pair_ranging
+                pair_order_flow = smc_config.get_pair_smc_reject_order_flow_conflict(epic)
+                if pair_order_flow is not None:
+                    settings['reject_order_flow_conflict'] = pair_order_flow
+                pair_tolerance = smc_config.get_pair_smc_conflict_tolerance(epic)
+                if pair_tolerance is not None:
+                    settings['conflict_tolerance'] = pair_tolerance
+            except Exception as e:
+                self.logger.warning(f"⚠️ Failed to load per-pair SMC settings for {epic}: {e} - using global")
+        return settings
+
+    def _check_smc_conflict(self, signal: Dict, smart_money_result: Dict, epic: str = '') -> Dict:
         """
         Check if SMC data conflicts with signal direction.
+
+        v2.43.0: Per-pair settings support. Checks per-pair overrides for reject_ranging_structure,
+        reject_order_flow_conflict, and conflict_tolerance before falling back to global settings.
 
         Checks for:
         1. Order flow bias conflicting with signal direction
@@ -689,6 +743,12 @@ class SignalProcessor:
         try:
             signal_type = signal.get('signal_type', '').upper()
             signal_direction = 'BULLISH' if signal_type in ['BUY', 'BULL'] else 'BEARISH'
+
+            # v2.43.0: Resolve per-pair settings with global fallback
+            pair_settings = self._get_smc_conflict_settings(epic)
+            reject_order_flow = pair_settings['reject_order_flow_conflict']
+            reject_ranging = pair_settings['reject_ranging_structure']
+            conflict_tolerance = pair_settings['conflict_tolerance']
 
             # Extract SMC data from nested structure
             sm_analysis = smart_money_result.get('smart_money_analysis', smart_money_result)
@@ -720,7 +780,7 @@ class SignalProcessor:
             conflicts = []
 
             # Check 1: Order flow conflict
-            if self.smc_reject_on_order_flow_conflict:
+            if reject_order_flow:
                 order_flow_bias = order_flow.get('order_flow_bias', '').upper()
                 if order_flow_bias and order_flow_bias != 'NEUTRAL':
                     if (signal_direction == 'BULLISH' and order_flow_bias == 'BEARISH') or \
@@ -728,7 +788,7 @@ class SignalProcessor:
                         conflicts.append(f"Order flow {order_flow_bias} conflicts with {signal_direction} signal")
 
             # Check 2: Ranging structure
-            if self.smc_reject_on_ranging_structure:
+            if reject_ranging:
                 structure_bias = market_structure.get('current_bias', '').upper()
                 if structure_bias == 'RANGING':
                     structure_score = market_structure.get('structure_score', 0.5)
@@ -750,13 +810,14 @@ class SignalProcessor:
             # Use tolerance: reject only if conflicts exceed tolerance threshold
             # tolerance=0 means reject on ANY conflict (strict mode)
             # tolerance=1 means allow 1 conflict, reject on 2+
-            if len(conflicts) > self.smc_conflict_tolerance:
+            if len(conflicts) > conflict_tolerance:
+                self.logger.info(f"🔍 SMC conflict settings for {epic}: reject_ranging={reject_ranging}, reject_order_flow={reject_order_flow}, tolerance={conflict_tolerance}")
                 return {
                     'should_reject': True,
                     'reason': '; '.join(conflicts),
                     'conflicts': conflicts,
                     'conflict_count': len(conflicts),
-                    'tolerance': self.smc_conflict_tolerance,
+                    'tolerance': conflict_tolerance,
                     'order_flow_bias': order_flow.get('order_flow_bias'),
                     'structure_bias': market_structure.get('current_bias'),
                     'structure_score': structure_score,
@@ -766,7 +827,7 @@ class SignalProcessor:
             # Pass but log if there were minor conflicts within tolerance
             if conflicts:
                 self.logger.debug(
-                    f"⚠️ SMC conflicts within tolerance: {len(conflicts)}/{self.smc_conflict_tolerance} - {'; '.join(conflicts)}"
+                    f"⚠️ SMC conflicts within tolerance: {len(conflicts)}/{conflict_tolerance} - {'; '.join(conflicts)}"
                 )
 
             return {'should_reject': False, 'reason': None, 'conflicts_within_tolerance': conflicts}
