@@ -33,6 +33,7 @@ class LossPreventionFilter:
         self.backtest_mode = backtest_mode
         self._rules: List[Dict] = []
         self._config: Optional[Dict] = None
+        self._pair_configs: Dict[str, Dict] = {}
         self._loaded = False
         self._db_url = os.getenv(
             'STRATEGY_CONFIG_DATABASE_URL',
@@ -77,10 +78,35 @@ class LossPreventionFilter:
                     """)
                     self._rules = [dict(r) for r in cur.fetchall()]
 
+                    # Load per-pair LPF config (graceful if table doesn't exist yet)
+                    try:
+                        cur.execute("""
+                            SELECT epic, is_enabled, block_mode, penalty_threshold,
+                                   disabled_rules, rule_penalty_overrides
+                            FROM loss_prevention_pair_config
+                        """)
+                        for pair_row in cur.fetchall():
+                            self._pair_configs[pair_row['epic']] = dict(pair_row)
+                    except Exception:
+                        conn.rollback()
+                        logger.debug("🛡️ LPF: loss_prevention_pair_config table not found - using global config only")
+
             self._loaded = True
             mode = self._config.get('block_mode', 'monitor')
             threshold = self._config.get('penalty_threshold', 0.60)
-            logger.info(f"🛡️ LPF: Loaded {len(self._rules)} rules | mode={mode} | threshold={threshold}")
+            pair_count = len(self._pair_configs)
+            logger.info(f"🛡️ LPF: Loaded {len(self._rules)} rules | mode={mode} | threshold={threshold} | pair_configs={pair_count}")
+
+            # Warn about stale pair config references
+            if self._pair_configs:
+                rule_names = {r['rule_name'] for r in self._rules}
+                for epic, pc in self._pair_configs.items():
+                    for ref_name in (pc.get('disabled_rules') or []):
+                        if ref_name not in rule_names:
+                            logger.warning(f"🛡️ LPF: Pair config {epic} references unknown rule '{ref_name}' in disabled_rules")
+                    for ref_name in (pc.get('rule_penalty_overrides') or {}).keys():
+                        if ref_name not in rule_names:
+                            logger.warning(f"🛡️ LPF: Pair config {epic} references unknown rule '{ref_name}' in rule_penalty_overrides")
 
         except Exception as e:
             logger.error(f"🛡️ LPF: Failed to load config: {e}")
@@ -102,6 +128,27 @@ class LossPreventionFilter:
             return 0.60
         return float(self._config.get('penalty_threshold', 0.60))
 
+    def _get_pair_enabled(self, epic: str) -> bool:
+        """Check if LPF is enabled for a specific pair. NULL=use global."""
+        pc = self._pair_configs.get(epic)
+        if pc and pc.get('is_enabled') is not None:
+            return pc['is_enabled']
+        return self.is_enabled
+
+    def _get_pair_threshold(self, epic: str) -> float:
+        """Get penalty threshold for a specific pair. NULL=use global."""
+        pc = self._pair_configs.get(epic)
+        if pc and pc.get('penalty_threshold') is not None:
+            return float(pc['penalty_threshold'])
+        return self.penalty_threshold
+
+    def _get_pair_block_mode(self, epic: str) -> str:
+        """Get block mode for a specific pair. NULL=use global."""
+        pc = self._pair_configs.get(epic)
+        if pc and pc.get('block_mode') is not None:
+            return pc['block_mode']
+        return self.block_mode
+
     def evaluate(self, signal: Dict, signal_timestamp: Optional[datetime] = None) -> Dict:
         """
         Evaluate a signal against all rules.
@@ -115,17 +162,34 @@ class LossPreventionFilter:
         if not self.is_enabled:
             return {'allowed': True, 'total_penalty': 0.0, 'triggered_rules': [], 'decision': 'allowed'}
 
+        epic = signal.get('epic', '')
+
+        # Check per-pair LPF disable
+        if not self._get_pair_enabled(epic):
+            return {'allowed': True, 'total_penalty': 0.0, 'triggered_rules': [], 'decision': 'allowed'}
+
+        # Load per-pair rule overrides
+        pair_config = self._pair_configs.get(epic, {})
+        disabled_rules = set(pair_config.get('disabled_rules') or [])
+        penalty_overrides = pair_config.get('rule_penalty_overrides') or {}
+
         triggered = []
         for rule in self._rules:
             # Skip backtest-excluded rules
             if self.backtest_mode and not rule.get('apply_in_backtest', True):
                 continue
 
+            # Skip rules disabled for this pair
+            if rule['rule_name'] in disabled_rules:
+                continue
+
             if self._check_rule(rule, signal, signal_timestamp):
+                # Apply per-pair penalty override if exists
+                penalty = float(penalty_overrides.get(rule['rule_name'], rule['penalty']))
                 triggered.append({
                     'rule_name': rule['rule_name'],
                     'category': rule['category'],
-                    'penalty': float(rule['penalty'])
+                    'penalty': penalty
                 })
 
         # Aggregate: max penalty per category, sum across categories
@@ -144,8 +208,11 @@ class LossPreventionFilter:
 
         total_penalty = sum(category_penalties.values())
 
-        would_block = total_penalty >= self.penalty_threshold
-        if would_block and self.block_mode == 'block':
+        pair_threshold = self._get_pair_threshold(epic)
+        pair_block_mode = self._get_pair_block_mode(epic)
+
+        would_block = total_penalty >= pair_threshold
+        if would_block and pair_block_mode == 'block':
             decision = 'blocked'
             allowed = False
         elif would_block:
@@ -164,16 +231,16 @@ class LossPreventionFilter:
         }
 
         # Log decision
-        epic = signal.get('epic', 'Unknown')
         signal_type = signal.get('signal_type', '?')
         rule_names = [t['rule_name'] for t in triggered]
+        threshold_info = f"threshold={pair_threshold:.2f}" if epic in self._pair_configs else f"threshold={self.penalty_threshold:.2f}"
 
         if decision == 'blocked':
-            logger.warning(f"🛡️🚫 LPF BLOCKED: {epic} {signal_type} | penalty={total_penalty:.2f} | rules={rule_names}")
+            logger.warning(f"🛡️🚫 LPF BLOCKED: {epic} {signal_type} | penalty={total_penalty:.2f} | {threshold_info} | rules={rule_names}")
         elif decision == 'would_block':
-            logger.warning(f"🛡️👁️ LPF WOULD BLOCK: {epic} {signal_type} | penalty={total_penalty:.2f} | rules={rule_names}")
+            logger.warning(f"🛡️👁️ LPF WOULD BLOCK: {epic} {signal_type} | penalty={total_penalty:.2f} | {threshold_info} | rules={rule_names}")
         elif triggered:
-            logger.info(f"🛡️✅ LPF ALLOWED: {epic} {signal_type} | penalty={total_penalty:.2f} | rules={rule_names}")
+            logger.info(f"🛡️✅ LPF ALLOWED: {epic} {signal_type} | penalty={total_penalty:.2f} | {threshold_info} | rules={rule_names}")
 
         # Log decision to database
         if self._config and self._config.get('log_decisions', True):
