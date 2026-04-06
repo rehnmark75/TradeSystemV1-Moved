@@ -502,7 +502,7 @@ async def ig_place_order(
             "CS.D.USDCAD.MINI.IP": 8,       # Normal=4
             "CS.D.GBPUSD.MINI.IP": 8,       # Normal=4
         }
-        max_allowed = MAX_MIN_DISTANCE.get(epic, 8)
+        max_allowed = MAX_MIN_DISTANCE.get(symbol, 8)
         if min_distance and min_distance > max_allowed:
             logger.warning(
                 f"⚠️ ORDER REJECTED: {symbol} broker min_distance={min_distance}pt exceeds maximum allowed ({max_allowed}pt). "

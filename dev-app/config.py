@@ -829,6 +829,174 @@ def compute_atr_trailing_config(atr_pips: float, static_config: dict) -> dict:
     return result
 
 
+# ==========================================================================
+# SL/TP-PROPORTIONAL TRAILING RATIOS (v5.0.0)
+# ==========================================================================
+# Derive trailing stages from each trade's actual TP and SL distances.
+# Ratios extracted from v4.0.0 static configs across all pairs.
+# Trigger points = ratio × TP_distance_pips
+# Lock points = ratio × TP_distance_pips
+# Buffer points = fixed (covers spread, not proportional)
+# ==========================================================================
+
+SLTP_TRAILING_ENABLED = True
+
+DEFAULT_TRAILING_RATIOS = {
+    # Triggers as fraction of TP distance
+    'early_be_trigger_ratio': 0.56,
+    'stage1_trigger_ratio': 0.78,
+    'stage2_trigger_ratio': 1.39,
+    'stage3_trigger_ratio': 1.94,
+    'break_even_trigger_ratio': 0.67,
+    'partial_close_trigger_ratio': 1.00,
+
+    # Lock points as fraction of TP distance
+    'stage1_lock_ratio': 0.44,
+    'stage2_lock_ratio': 0.83,
+
+    # Fixed values (not proportional)
+    'early_be_buffer_points': 3,
+    'stage3_atr_multiplier': 2.0,
+    'stage3_min_distance_ratio': 0.44,
+    'min_trail_distance_ratio': 0.44,
+
+    # Minimum absolute floors (prevent too-tight stops on small TP trades)
+    'min_early_be_trigger': 5,
+    'min_stage1_trigger': 7,
+    'min_stage1_lock': 3,
+    'min_stage2_trigger': 12,
+    'min_stage2_lock': 8,
+    'min_stage3_trigger': 16,
+    'min_break_even_trigger': 5,
+    'min_trail_distance': 4,
+}
+
+DEFAULT_SCALP_TRAILING_RATIOS = {
+    'early_be_trigger_ratio': 0.50,
+    'stage1_trigger_ratio': 0.65,
+    'stage2_trigger_ratio': 1.00,
+    'stage3_trigger_ratio': 1.30,
+    'break_even_trigger_ratio': 0.50,
+    'partial_close_trigger_ratio': 0.80,
+
+    'stage1_lock_ratio': 0.33,
+    'stage2_lock_ratio': 0.65,
+
+    'early_be_buffer_points': 1,
+    'stage3_atr_multiplier': 1.5,
+    'stage3_min_distance_ratio': 0.33,
+    'min_trail_distance_ratio': 0.33,
+
+    'min_early_be_trigger': 4,
+    'min_stage1_trigger': 5,
+    'min_stage1_lock': 2,
+    'min_stage2_trigger': 8,
+    'min_stage2_lock': 5,
+    'min_stage3_trigger': 10,
+    'min_break_even_trigger': 4,
+    'min_trail_distance': 3,
+}
+
+# Per-pair ratio overrides (populate to tune individual pairs)
+PAIR_TRAILING_RATIO_OVERRIDES = {}
+PAIR_SCALP_TRAILING_RATIO_OVERRIDES = {}
+
+
+def compute_sltp_trailing_config(
+    tp_pips: float,
+    sl_pips: float,
+    static_config: dict,
+    is_scalp: bool = False,
+    epic: str = None,
+) -> dict:
+    """
+    Compute trailing config proportional to the trade's actual TP/SL distances.
+
+    Each stage trigger = round(TP_pips × ratio), floored at minimum.
+    Falls back to static_config values for any parameter not in the ratio table.
+
+    Args:
+        tp_pips: Take profit distance in pips (always positive)
+        sl_pips: Stop loss distance in pips (always positive)
+        static_config: Base static config dict (fallback for unmapped params)
+        is_scalp: Whether this is a scalp trade
+        epic: Optional epic for per-pair ratio overrides
+
+    Returns:
+        New config dict with SL/TP-proportional values
+    """
+    result = dict(static_config)
+
+    # Select ratio profile
+    if is_scalp:
+        ratios = dict(DEFAULT_SCALP_TRAILING_RATIOS)
+        if epic and epic in PAIR_SCALP_TRAILING_RATIO_OVERRIDES:
+            ratios.update(PAIR_SCALP_TRAILING_RATIO_OVERRIDES[epic])
+    else:
+        ratios = dict(DEFAULT_TRAILING_RATIOS)
+        if epic and epic in PAIR_TRAILING_RATIO_OVERRIDES:
+            ratios.update(PAIR_TRAILING_RATIO_OVERRIDES[epic])
+
+    # Compute trigger points from TP
+    result['early_breakeven_trigger_points'] = max(
+        ratios['min_early_be_trigger'],
+        round(tp_pips * ratios['early_be_trigger_ratio'])
+    )
+    result['stage1_trigger_points'] = max(
+        ratios['min_stage1_trigger'],
+        round(tp_pips * ratios['stage1_trigger_ratio'])
+    )
+    result['stage2_trigger_points'] = max(
+        ratios['min_stage2_trigger'],
+        round(tp_pips * ratios['stage2_trigger_ratio'])
+    )
+    result['stage3_trigger_points'] = max(
+        ratios['min_stage3_trigger'],
+        round(tp_pips * ratios['stage3_trigger_ratio'])
+    )
+    result['break_even_trigger_points'] = max(
+        ratios['min_break_even_trigger'],
+        round(tp_pips * ratios['break_even_trigger_ratio'])
+    )
+    result['partial_close_trigger_points'] = max(
+        ratios['min_stage1_trigger'],
+        round(tp_pips * ratios['partial_close_trigger_ratio'])
+    )
+
+    # Compute lock points from TP
+    result['stage1_lock_points'] = max(
+        ratios['min_stage1_lock'],
+        round(tp_pips * ratios['stage1_lock_ratio'])
+    )
+    result['stage2_lock_points'] = max(
+        ratios['min_stage2_lock'],
+        round(tp_pips * ratios['stage2_lock_ratio'])
+    )
+
+    # Fixed/ratio-based non-trigger values
+    result['early_breakeven_buffer_points'] = ratios['early_be_buffer_points']
+    result['stage3_atr_multiplier'] = ratios['stage3_atr_multiplier']
+    result['stage3_min_distance'] = max(
+        3, round(tp_pips * ratios['stage3_min_distance_ratio'])
+    )
+    result['min_trail_distance'] = max(
+        ratios['min_trail_distance'],
+        round(tp_pips * ratios['min_trail_distance_ratio'])
+    )
+
+    # Sanity: ensure stage ordering is preserved
+    if result['stage1_trigger_points'] >= result['stage2_trigger_points']:
+        result['stage2_trigger_points'] = result['stage1_trigger_points'] + 3
+    if result['stage2_trigger_points'] >= result['stage3_trigger_points']:
+        result['stage3_trigger_points'] = result['stage2_trigger_points'] + 3
+    if result['stage1_lock_points'] >= result['stage1_trigger_points']:
+        result['stage1_lock_points'] = result['stage1_trigger_points'] - 2
+    if result['stage2_lock_points'] >= result['stage2_trigger_points']:
+        result['stage2_lock_points'] = result['stage2_trigger_points'] - 2
+
+    return result
+
+
 def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dict:
     """
     Get trailing stop configuration for specific epic/pair.

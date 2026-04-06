@@ -244,6 +244,38 @@ class TrailingStopSimulator:
         except Exception as e:
             self.logger.warning(f"Could not update ATR config: {e}")
 
+    def _apply_sltp_trailing_ratios(self, tp_pips: float, sl_pips: float) -> None:
+        """
+        Update trailing stage thresholds proportionally to the signal's TP distance.
+
+        v5.0.0: Instead of disabling trailing when signal provides SL/TP,
+        derive stage triggers as ratios of TP (matching live system behavior).
+
+        Ratios derived from live v4.0.0 static configs across all pairs.
+        """
+        if tp_pips <= 2:
+            return  # Too small, keep defaults
+
+        # Trigger ratios (fraction of TP)
+        self.break_even_trigger = max(5, round(tp_pips * 0.56))
+        self.stage1_trigger = max(7, round(tp_pips * 0.78))
+        self.stage1_lock = max(3, round(tp_pips * 0.44))
+        self.stage2_trigger = max(12, round(tp_pips * 1.39))
+        self.stage2_lock = max(8, round(tp_pips * 0.83))
+        self.stage3_trigger = max(16, round(tp_pips * 1.94))
+        self.stage3_min_distance = max(3, round(tp_pips * 0.44))
+        self.breakeven_buffer_pips = 3.0
+
+        # Sanity: ensure stage ordering
+        if self.stage1_trigger >= self.stage2_trigger:
+            self.stage2_trigger = self.stage1_trigger + 3
+        if self.stage2_trigger >= self.stage3_trigger:
+            self.stage3_trigger = self.stage2_trigger + 3
+        if self.stage1_lock >= self.stage1_trigger:
+            self.stage1_lock = self.stage1_trigger - 2
+        if self.stage2_lock >= self.stage2_trigger:
+            self.stage2_lock = self.stage2_trigger - 2
+
     def simulate_trade(self,
                       signal: Dict[str, Any],
                       df: pd.DataFrame,
@@ -613,13 +645,19 @@ class TrailingStopSimulator:
         # 1. Signal's risk_pips/reward_pips (calculated from fixed or structural)
         # 2. ATR-based stops
         # 3. Simulator's default values
-        use_signal_sl_tp = False
+        #
+        # v5.0.0: When signal provides SL/TP, we now ENABLE trailing with
+        # proportional stage thresholds derived from the TP distance.
         if signal and signal.get('risk_pips') and signal.get('reward_pips'):
-            # Use signal's SL/TP (works for both fixed and structural)
             current_stop_pips = float(signal['risk_pips'])
             target_pips = float(signal['reward_pips'])
-            use_signal_sl_tp = True  # Disable trailing when using signal's SL/TP
-            self.logger.debug(f"Using signal SL/TP: SL={current_stop_pips}, TP={target_pips} (trailing disabled)")
+            # v5.0.0: Compute proportional trailing stages from TP instead of disabling trailing
+            self._apply_sltp_trailing_ratios(target_pips, current_stop_pips)
+            self.logger.info(
+                f"📊 [SL/TP TRAILING] SL={current_stop_pips:.1f} TP={target_pips:.1f} pips → "
+                f"BE={self.break_even_trigger}, S1={self.stage1_trigger}→{self.stage1_lock}, "
+                f"S2={self.stage2_trigger}→{self.stage2_lock}, S3={self.stage3_trigger}"
+            )
         elif atr_stops:
             current_stop_pips = atr_stops['initial_stop_pips']
             target_pips = atr_stops['target_pips']
@@ -719,7 +757,7 @@ class TrailingStopSimulator:
                     best_profit_pips = current_profit_pips
 
                 # 🎯 FIXED SL/TP MODE: Skip trailing when using signal's SL/TP or scalping mode
-                if not self.use_fixed_sl_tp and not use_signal_sl_tp:
+                if not self.use_fixed_sl_tp:
                     # Apply Progressive 3-Stage trailing stop logic with MFE Protection
                     # Called on every bar to check for MFE protection (profit decline from peak)
                     current_stop_pips, stage_info = self._update_progressive_trailing_stop(
@@ -769,7 +807,7 @@ class TrailingStopSimulator:
                     best_profit_pips = current_profit_pips
 
                 # 🎯 FIXED SL/TP MODE: Skip trailing when using signal's SL/TP or scalping mode
-                if not self.use_fixed_sl_tp and not use_signal_sl_tp:
+                if not self.use_fixed_sl_tp:
                     # Apply Progressive 3-Stage trailing stop logic with MFE Protection
                     # Called on every bar to check for MFE protection (profit decline from peak)
                     current_stop_pips, stage_info = self._update_progressive_trailing_stop(
