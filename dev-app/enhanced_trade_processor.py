@@ -95,7 +95,12 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             TrailingConfig with appropriate settings for this trade
         """
         try:
-            from config import get_trailing_config_for_epic, compute_atr_trailing_config
+            from config import (
+                get_trailing_config_for_epic,
+                compute_atr_trailing_config,
+                compute_sltp_trailing_config,
+                SLTP_TRAILING_ENABLED,
+            )
 
             # Check if this is a scalp trade
             is_scalp = getattr(trade, 'is_scalp_trade', False)
@@ -106,9 +111,62 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             # Get pair-specific static config with scalp flag
             pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
 
-            # v3.2.0: ATR-adaptive trailing for scalp trades
-            atr_pips = None
-            if is_scalp and db is not None and getattr(trade, 'alert_id', None):
+            # v5.0.0: SL/TP-proportional trailing config
+            sl_tp_applied = False
+            if SLTP_TRAILING_ENABLED:
+                entry_price = getattr(trade, 'entry_price', None)
+                sl_price = getattr(trade, 'sl_price', None)
+                limit_price = getattr(trade, 'limit_price', None) or getattr(trade, 'tp_price', None)
+
+                if entry_price and sl_price and limit_price:
+                    try:
+                        point_value = get_point_value(trade.symbol)
+                        direction = trade.direction.upper()
+
+                        if direction == "BUY":
+                            tp_pips = (limit_price - entry_price) / point_value
+                            sl_pips = (entry_price - sl_price) / point_value
+                        else:
+                            tp_pips = (entry_price - limit_price) / point_value
+                            sl_pips = (sl_price - entry_price) / point_value
+
+                        if tp_pips > 2 and sl_pips > 1:
+                            static_snapshot = dict(pair_config)
+                            pair_config = compute_sltp_trailing_config(
+                                tp_pips=tp_pips,
+                                sl_pips=sl_pips,
+                                static_config=pair_config,
+                                is_scalp=is_scalp,
+                                epic=trade.symbol,
+                            )
+                            sl_tp_applied = True
+
+                            self.logger.info(
+                                f"📊 [SL/TP TRAILING] Trade {trade.id} {trade.symbol}: "
+                                f"TP={tp_pips:.1f} SL={sl_pips:.1f} pips → "
+                                f"earlyBE={pair_config['early_breakeven_trigger_points']}pts "
+                                f"(was {static_snapshot.get('early_breakeven_trigger_points')}), "
+                                f"S1={pair_config['stage1_trigger_points']}→lock {pair_config['stage1_lock_points']}, "
+                                f"S2={pair_config['stage2_trigger_points']}→lock {pair_config['stage2_lock_points']}, "
+                                f"S3={pair_config['stage3_trigger_points']}pts"
+                            )
+                        else:
+                            self.logger.warning(
+                                f"⚠️ [SL/TP TRAILING] Trade {trade.id}: Invalid distances "
+                                f"TP={tp_pips:.1f} SL={sl_pips:.1f}, using static config"
+                            )
+                    except Exception as e:
+                        self.logger.warning(
+                            f"⚠️ [SL/TP TRAILING] Trade {trade.id}: Computation failed ({e}), using static config"
+                        )
+                else:
+                    self.logger.debug(
+                        f"📊 [SL/TP TRAILING] Trade {trade.id}: Missing SL/TP data "
+                        f"(entry={entry_price}, sl={sl_price}, limit={limit_price}), using static config"
+                    )
+
+            # v3.2.0: ATR-adaptive trailing for scalp trades (fallback when SL/TP not available)
+            if not sl_tp_applied and is_scalp and db is not None and getattr(trade, 'alert_id', None):
                 try:
                     alert = db.query(AlertHistory).filter(
                         AlertHistory.id == trade.alert_id

@@ -841,10 +841,18 @@ YOUR INDEPENDENT ANALYSIS CHECKLIST:
 
 CRITICAL VALIDATION RULES:
 - If MACD histogram is significantly negative (< -0.0001), BULL signals should be REJECTED
-- If MACD histogram is significantly positive (> 0.0001), BEAR signals should be REJECTED  
+- If MACD histogram is significantly positive (> 0.0001), BEAR signals should be REJECTED
 - If price is below EMA 200 by significant margin, BULL signals are questionable
 - If price is above EMA 200 by significant margin, BEAR signals are questionable
 - If MACD and EMA strongly disagree, signal should be flagged
+
+OVEREXTENDED MOMENTUM RULE:
+- Do NOT reject a signal solely because it appears overextended or momentum is extended
+- Overextension is only a valid rejection reason when COMBINED with weak 4H trend structure (e.g., price below 4H EMA 200 for BULL, or clear 4H resistance confluence)
+- In a strong trending environment, overextended momentum entries often continue; this is a feature, not a flaw
+
+PAIR-SPECIFIC GUIDANCE:
+- USDJPY: This pair is driven by macro BoJ/USD policy trends and can sustain momentum for extended periods. "Near resistance" and "counter-trend on 4H" are weaker rejection signals for USDJPY than for other pairs. Only reject USDJPY BULL signals as counter-trend if price is BELOW the 4H EMA 200 and MACD is clearly negative. Similarly, only reject USDJPY BEAR signals as counter-trend if price is ABOVE the 4H EMA 200 and MACD is clearly positive. Do not reject based on nearby S/R levels alone — USDJPY S/R levels break frequently during macro trend phases.
 
 Respond EXACTLY in this format:
 
