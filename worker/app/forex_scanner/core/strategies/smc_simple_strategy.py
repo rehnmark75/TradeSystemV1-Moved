@@ -2715,6 +2715,11 @@ class SMCSimpleStrategy:
 
                     sweep_score = len(sweep_conditions)
                     sweep_detail = ", ".join(sweep_conditions) if sweep_conditions else "none"
+
+                    # Always store in trigger_details so it flows into alert_history
+                    trigger_details['sweep_score'] = sweep_score
+                    trigger_details['sweep_conditions'] = sweep_conditions
+
                     self.logger.info(
                         f"   🛡️  Sweep protection: score={sweep_score}/{sweep_min_cond} "
                         f"[{sweep_detail}] mode={sweep_mode}"
@@ -4055,6 +4060,10 @@ class SMCSimpleStrategy:
                 'mfi_value': _mfi_value_for_signal,
                 'mfi_slope': _mfi_slope_for_signal,
                 'mfi_confirmed': _mfi_confirmed_for_signal,
+
+                # v2.42.0: Sweep protection score for alert_history analysis
+                'sweep_score': trigger_details.get('sweep_score'),
+                'sweep_conditions': trigger_details.get('sweep_conditions'),
 
                 'filter_metadata': {
                     'volume_filter_enabled': self.volume_filter_enabled,

@@ -534,7 +534,9 @@ class AlertHistoryManager:
                         candle_body_pips, candle_upper_wick_pips, candle_lower_wick_pips, candle_type,
                         htf_candle_direction, htf_candle_direction_prev,
                         htf_bias_score, htf_bias_mode, htf_bias_details,
-                        lpf_penalty, lpf_would_block
+                        lpf_penalty, lpf_would_block,
+                        swing_significance, mfi_value, mfi_slope, mfi_confirmed,
+                        sweep_score, sweep_conditions
                     ) VALUES (
                         %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
@@ -573,7 +575,9 @@ class AlertHistoryManager:
                         %(candle_body_pips)s, %(candle_upper_wick_pips)s, %(candle_lower_wick_pips)s, %(candle_type)s,
                         %(htf_candle_direction)s, %(htf_candle_direction_prev)s,
                         %(htf_bias_score)s, %(htf_bias_mode)s, %(htf_bias_details)s,
-                        %(lpf_penalty)s, %(lpf_would_block)s
+                        %(lpf_penalty)s, %(lpf_would_block)s,
+                        %(swing_significance)s, %(mfi_value)s, %(mfi_slope)s, %(mfi_confirmed)s,
+                        %(sweep_score)s, %(sweep_conditions)s
                     ) RETURNING id
                 '''
 
@@ -1568,6 +1572,16 @@ class AlertHistoryManager:
                 'lpf_penalty': signal.get('lpf_penalty'),
                 'lpf_would_block': signal.get('lpf_would_block', False),
 
+                # Sweep Protection Filter (v2.42.0)
+                'sweep_score': signal.get('sweep_score'),
+                'sweep_conditions': signal.get('sweep_conditions'),
+
+                # v2.41.0: Swing Significance and MFI
+                'swing_significance': signal.get('swing_significance'),
+                'mfi_value': signal.get('mfi_value'),
+                'mfi_slope': signal.get('mfi_slope'),
+                'mfi_confirmed': signal.get('mfi_confirmed'),
+
                 # Deduplication
                 'signal_hash': signal_hash,
                 'data_source': data_source,
@@ -1723,7 +1737,9 @@ class AlertHistoryManager:
                 'stoch_k', 'stoch_d',
                 'supertrend_value',
                 'ema_9', 'ema_21', 'ema_50', 'ema_200',
-                'candle_body_pips', 'candle_upper_wick_pips', 'candle_lower_wick_pips'
+                'candle_body_pips', 'candle_upper_wick_pips', 'candle_lower_wick_pips',
+                # v2.41.0: Swing significance and MFI
+                'swing_significance', 'mfi_value', 'mfi_slope'
             ]
             
             for field in numeric_fields:
@@ -1747,7 +1763,8 @@ class AlertHistoryManager:
             boolean_fields = [
                 'volume_confirmation', 'is_market_hours',
                 'swing_proximity_valid', 'market_bias_conflict',
-                'liquidity_sweep_detected', 'all_timeframes_aligned'
+                'liquidity_sweep_detected', 'all_timeframes_aligned',
+                'mfi_confirmed'
             ]
             for field in boolean_fields:
                 if alert_data[field] is not None:
