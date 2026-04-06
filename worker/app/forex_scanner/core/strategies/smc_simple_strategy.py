@@ -1223,6 +1223,16 @@ class SMCSimpleStrategy:
         # Require entry candle color matches direction (green=BUY, red=SELL)
         self.scalp_require_entry_candle_alignment = getattr(config, 'scalp_require_entry_candle_alignment', False)
 
+        # v2.42.0: Sweep/overextension protection filter
+        # Blocks entries at likely liquidity sweep zones by scoring multiple overextension conditions.
+        self.sweep_protection_enabled = getattr(config, 'sweep_protection_enabled', True)
+        self.sweep_protection_mode = getattr(config, 'sweep_protection_mode', 'block')
+        self.sweep_rsi_threshold_buy = getattr(config, 'sweep_rsi_threshold_buy', 78.0)
+        self.sweep_rsi_threshold_sell = getattr(config, 'sweep_rsi_threshold_sell', 22.0)
+        self.sweep_max_ema_distance_pips = getattr(config, 'sweep_max_ema_distance_pips', 35.0)
+        self.sweep_max_ema_distance_pips_jpy = getattr(config, 'sweep_max_ema_distance_pips_jpy', 45.0)
+        self.sweep_min_conditions = getattr(config, 'sweep_min_conditions', 2)
+
     def _configure_scalp_mode(self):
         """Configure strategy for high-frequency scalping mode.
 
@@ -2637,6 +2647,115 @@ class SMCSimpleStrategy:
                     return None
 
                 # ================================================================
+                # Filter 4b: SWEEP PROTECTION (v2.42.0)
+                # Multi-condition overextension detector.
+                # Scores: (1) RSI extreme, (2) EMA overextension, (3) price outside BB.
+                # Blocks when conditions_met >= sweep_min_conditions (default 2).
+                # Prevents entries at liquidity sweep zones (e.g. RSI 85, EMA 35 pips,
+                # price above BB — all present in Apr 2026 EURUSD sweep loss).
+                # ================================================================
+                sweep_enabled = self.sweep_protection_enabled
+                sweep_mode = self.sweep_protection_mode
+
+                # Per-pair overrides
+                if self._config_service and epic:
+                    pair_sweep_enabled = self._config_service.get_pair_sweep_protection_enabled(epic)
+                    if pair_sweep_enabled is not None:
+                        sweep_enabled = pair_sweep_enabled
+                    pair_sweep_mode = self._config_service.get_pair_sweep_protection_mode(epic)
+                    if pair_sweep_mode is not None:
+                        sweep_mode = pair_sweep_mode
+
+                if sweep_enabled and rsi_value is not None:
+                    # Get per-pair thresholds (fall back to global)
+                    sweep_rsi_buy = self.sweep_rsi_threshold_buy
+                    sweep_rsi_sell = self.sweep_rsi_threshold_sell
+                    is_jpy = epic and 'JPY' in epic.upper()
+                    sweep_ema_max = self.sweep_max_ema_distance_pips_jpy if is_jpy else self.sweep_max_ema_distance_pips
+                    sweep_min_cond = self.sweep_min_conditions
+
+                    if self._config_service and epic:
+                        v = self._config_service.get_pair_sweep_rsi_threshold_buy(epic)
+                        if v is not None:
+                            sweep_rsi_buy = v
+                        v = self._config_service.get_pair_sweep_rsi_threshold_sell(epic)
+                        if v is not None:
+                            sweep_rsi_sell = v
+                        v = self._config_service.get_pair_sweep_max_ema_distance_pips(epic)
+                        if v is not None:
+                            sweep_ema_max = v
+                        v = self._config_service.get_pair_sweep_min_conditions(epic)
+                        if v is not None:
+                            sweep_min_cond = v
+
+                    # Score overextension conditions
+                    sweep_conditions = []
+
+                    # Condition 1: RSI extreme
+                    if direction == 'BULL' and rsi_value > sweep_rsi_buy:
+                        sweep_conditions.append(f"RSI {rsi_value:.1f}>{sweep_rsi_buy:.0f}")
+                    elif direction == 'BEAR' and rsi_value < sweep_rsi_sell:
+                        sweep_conditions.append(f"RSI {rsi_value:.1f}<{sweep_rsi_sell:.0f}")
+
+                    # Condition 2: EMA overextension
+                    if ema_distance > sweep_ema_max:
+                        sweep_conditions.append(f"EMA_dist {ema_distance:.1f}>{sweep_ema_max:.0f}pips")
+
+                    # Condition 3: Price outside Bollinger Bands
+                    current_price = entry_df['close'].iloc[-1] if 'close' in entry_df.columns else None
+                    if current_price is not None:
+                        if direction == 'BULL' and 'bb_upper' in entry_df.columns:
+                            bb_upper = entry_df['bb_upper'].iloc[-1]
+                            if bb_upper and current_price > bb_upper:
+                                sweep_conditions.append(f"price>{bb_upper:.5f}(BB_upper)")
+                        elif direction == 'BEAR' and 'bb_lower' in entry_df.columns:
+                            bb_lower = entry_df['bb_lower'].iloc[-1]
+                            if bb_lower and current_price < bb_lower:
+                                sweep_conditions.append(f"price<{bb_lower:.5f}(BB_lower)")
+
+                    sweep_score = len(sweep_conditions)
+                    sweep_detail = ", ".join(sweep_conditions) if sweep_conditions else "none"
+                    self.logger.info(
+                        f"   🛡️  Sweep protection: score={sweep_score}/{sweep_min_cond} "
+                        f"[{sweep_detail}] mode={sweep_mode}"
+                    )
+
+                    if sweep_score >= sweep_min_cond:
+                        rejection_reason = (
+                            f"Sweep protection: {sweep_score} overextension conditions "
+                            f"({sweep_detail})"
+                        )
+                        if sweep_mode == 'block':
+                            self.logger.info(f"   ❌ {rejection_reason}")
+                            context = self._collect_market_context(
+                                df_trigger, df_4h, entry_df, pip_value,
+                                ema_result=ema_result, swing_result=swing_result,
+                                pullback_result=pullback_result, direction=direction
+                            )
+                            context.update({
+                                'sweep_score': sweep_score,
+                                'sweep_conditions': sweep_conditions,
+                                'sweep_min_conditions': sweep_min_cond,
+                                'rsi': rsi_value,
+                                'ema_distance': ema_distance,
+                                'filter': 'sweep_protection'
+                            })
+                            self._track_rejection(
+                                stage='SCALP_ENTRY_FILTER',
+                                reason=rejection_reason,
+                                epic=epic,
+                                pair=pair,
+                                candle_timestamp=candle_timestamp,
+                                direction=direction,
+                                context=context
+                            )
+                            return None
+                        else:
+                            self.logger.warning(
+                                f"   ⚠️  [SWEEP MONITOR] Would have blocked: {rejection_reason}"
+                            )
+
+                # ================================================================
                 # Filter 5: REJECTION CANDLE CONFIRMATION (v2.25.0)
                 # Require entry-TF rejection candle before scalp entry
                 # Based on Jan 2026 analysis: MAE=0 means no reversal confirmation
@@ -3660,6 +3779,9 @@ class SMCSimpleStrategy:
             # Confirms that money is flowing in the direction of the trade.
             # Uses tick volume from IG (standard proxy for real volume in forex).
             # Starts in MONITORING mode: logs issues but doesn't block signals.
+            _mfi_value_for_signal = None
+            _mfi_slope_for_signal = None
+            _mfi_confirmed_for_signal = None
             try:
                 mfi_filter_enabled = getattr(self, 'mfi_filter_enabled', False)
                 if mfi_filter_enabled and self._config_service and epic:
@@ -3671,6 +3793,8 @@ class SMCSimpleStrategy:
                 if mfi_filter_enabled and 'mfi' in df_trigger.columns:
                     mfi_value = float(df_trigger['mfi'].iloc[-1])
                     mfi_slope = float(df_trigger['mfi_slope'].iloc[-1]) if 'mfi_slope' in df_trigger.columns else 0.0
+                    _mfi_value_for_signal = round(mfi_value, 2)
+                    _mfi_slope_for_signal = round(mfi_slope, 2)
                     mfi_mode = getattr(self, 'mfi_filter_mode', 'MONITORING')
                     if self._config_service and epic:
                         try:
@@ -3700,6 +3824,7 @@ class SMCSimpleStrategy:
                             mfi_issue = f"MFI rising ({mfi_slope:.1f} > {-mfi_min_slope:.1f})"
 
                     if mfi_issue:
+                        _mfi_confirmed_for_signal = False
                         if mfi_mode == 'ACTIVE':
                             self.logger.info(f"\n❌ MFI filter blocked: {mfi_issue}")
                             self._track_rejection(
@@ -3718,6 +3843,7 @@ class SMCSimpleStrategy:
                             self.logger.info(f"   ⚠️ [MFI MONITOR] {mfi_issue} — applying -{mfi_penalty*100:.0f}% confidence penalty")
                             confidence -= mfi_penalty
                     else:
+                        _mfi_confirmed_for_signal = True
                         self.logger.info(f"   ✅ MFI confirmed: {mfi_value:.0f} (slope: {mfi_slope:+.1f})")
                         # Small confidence bonus when MFI strongly confirms direction
                         if getattr(self, 'mfi_confidence_bonus_enabled', True):
@@ -3924,6 +4050,12 @@ class SMCSimpleStrategy:
                 'macd_histogram': round(macd_histogram, 6),
 
                 # v2.26.0: Filter metadata for performance analysis
+                # v2.41.0: Swing significance and MFI data for alert_history
+                'swing_significance': swing_significance,
+                'mfi_value': _mfi_value_for_signal,
+                'mfi_slope': _mfi_slope_for_signal,
+                'mfi_confirmed': _mfi_confirmed_for_signal,
+
                 'filter_metadata': {
                     'volume_filter_enabled': self.volume_filter_enabled,
                     'min_volume_ratio_threshold': pair_min_volume if self.volume_filter_enabled else None,

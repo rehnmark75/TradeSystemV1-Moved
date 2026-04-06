@@ -368,6 +368,19 @@ class SMCSimpleConfig:
     scalp_require_entry_candle_alignment: bool = False  # Require entry candle aligned with direction
     scalp_use_market_on_entry_alignment: bool = True  # Use market order when entry candle aligned
 
+    # SWEEP PROTECTION FILTER (v2.42.0)
+    # Multi-condition overextension detector: blocks entries at likely liquidity sweep zones.
+    # Scores 3 conditions (RSI extreme, EMA overextension, price outside BB).
+    # Blocks when conditions_met >= sweep_min_conditions (default 2).
+    # Apr 2026: Added after EURUSD loss at RSI 85 / EMA 35 pips / above BB upper.
+    sweep_protection_enabled: bool = True   # Master toggle
+    sweep_protection_mode: str = 'block'    # 'block' or 'monitor' (monitor logs but allows)
+    sweep_rsi_threshold_buy: float = 78.0   # RSI above this counts as extreme for BUY
+    sweep_rsi_threshold_sell: float = 22.0  # RSI below this counts as extreme for SELL
+    sweep_max_ema_distance_pips: float = 35.0     # EMA distance above this counts as overextended
+    sweep_max_ema_distance_pips_jpy: float = 45.0 # Higher threshold for JPY pairs (larger pip values)
+    sweep_min_conditions: int = 2           # Minimum conditions needed to trigger block
+
     # PATTERN CONFIRMATION (v2.23.0) - Alternative triggers
     # Price action patterns to boost confidence or enable marginal entries
     pattern_confirmation_enabled: bool = False  # Master toggle
@@ -1148,6 +1161,54 @@ class SMCSimpleConfig:
                 return bool(override['scalp_require_entry_candle_alignment'])
         return None
 
+    def get_pair_sweep_protection_enabled(self, epic: str) -> Optional[bool]:
+        """Get per-pair sweep protection override (None = use global setting)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('sweep_protection_enabled') is not None:
+                return bool(po['sweep_protection_enabled'])
+        return None
+
+    def get_pair_sweep_protection_mode(self, epic: str) -> Optional[str]:
+        """Get per-pair sweep protection mode ('block' or 'monitor', None = use global)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('sweep_protection_mode') is not None:
+                return str(po['sweep_protection_mode'])
+        return None
+
+    def get_pair_sweep_rsi_threshold_buy(self, epic: str) -> Optional[float]:
+        """Get per-pair RSI extreme threshold for BUY sweep detection (None = use global)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('sweep_rsi_threshold_buy') is not None:
+                return float(po['sweep_rsi_threshold_buy'])
+        return None
+
+    def get_pair_sweep_rsi_threshold_sell(self, epic: str) -> Optional[float]:
+        """Get per-pair RSI extreme threshold for SELL sweep detection (None = use global)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('sweep_rsi_threshold_sell') is not None:
+                return float(po['sweep_rsi_threshold_sell'])
+        return None
+
+    def get_pair_sweep_max_ema_distance_pips(self, epic: str) -> Optional[float]:
+        """Get per-pair max EMA distance threshold for sweep detection (None = use global)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('sweep_max_ema_distance_pips') is not None:
+                return float(po['sweep_max_ema_distance_pips'])
+        return None
+
+    def get_pair_sweep_min_conditions(self, epic: str) -> Optional[int]:
+        """Get per-pair minimum conditions to trigger sweep block (None = use global)."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('sweep_min_conditions') is not None:
+                return int(po['sweep_min_conditions'])
+        return None
+
     def get_pair_scalp_reversal_enabled(self, epic: str) -> Optional[bool]:
         """
         Get per-pair scalp reversal override enabled flag.
@@ -1771,6 +1832,11 @@ class SMCSimpleConfigService:
             'scalp_use_market_on_rejection',
             # SCALP ENTRY CANDLE ALIGNMENT (v2.25.1)
             'scalp_require_entry_candle_alignment', 'scalp_use_market_on_entry_alignment',
+            # SWEEP PROTECTION FILTER (v2.42.0) - Blocks overextended entries / liquidity sweeps
+            'sweep_protection_enabled', 'sweep_protection_mode',
+            'sweep_rsi_threshold_buy', 'sweep_rsi_threshold_sell',
+            'sweep_max_ema_distance_pips', 'sweep_max_ema_distance_pips_jpy',
+            'sweep_min_conditions',
             # PATTERN CONFIRMATION (v2.23.0) - Alternative triggers
             'pattern_confirmation_enabled', 'pattern_confirmation_mode',
             'pattern_min_strength', 'pattern_pin_bar_enabled',
@@ -1823,6 +1889,8 @@ class SMCSimpleConfigService:
             'scalp_micro_pullback_lookback',
             # Scalp qualification int fields
             'scalp_rsi_bull_min', 'scalp_rsi_bull_max', 'scalp_rsi_bear_min', 'scalp_rsi_bear_max',
+            # Sweep protection int fields
+            'sweep_min_conditions',
             # Pattern confirmation int fields
             'rsi_divergence_lookback',
         }
@@ -2186,6 +2254,30 @@ class SMCSimpleConfigService:
     def get_pair_require_body_close_break(self, epic: str) -> bool:
         """Check if body-close break requirement is enabled for a specific pair"""
         return self.get_config().get_pair_require_body_close_break(epic)
+
+    def get_pair_sweep_protection_enabled(self, epic: str) -> Optional[bool]:
+        """Get per-pair sweep protection override"""
+        return self.get_config().get_pair_sweep_protection_enabled(epic)
+
+    def get_pair_sweep_protection_mode(self, epic: str) -> Optional[str]:
+        """Get per-pair sweep protection mode"""
+        return self.get_config().get_pair_sweep_protection_mode(epic)
+
+    def get_pair_sweep_rsi_threshold_buy(self, epic: str) -> Optional[float]:
+        """Get per-pair RSI extreme threshold for BUY sweep detection"""
+        return self.get_config().get_pair_sweep_rsi_threshold_buy(epic)
+
+    def get_pair_sweep_rsi_threshold_sell(self, epic: str) -> Optional[float]:
+        """Get per-pair RSI extreme threshold for SELL sweep detection"""
+        return self.get_config().get_pair_sweep_rsi_threshold_sell(epic)
+
+    def get_pair_sweep_max_ema_distance_pips(self, epic: str) -> Optional[float]:
+        """Get per-pair max EMA distance threshold for sweep detection"""
+        return self.get_config().get_pair_sweep_max_ema_distance_pips(epic)
+
+    def get_pair_sweep_min_conditions(self, epic: str) -> Optional[int]:
+        """Get per-pair minimum conditions to trigger sweep block"""
+        return self.get_config().get_pair_sweep_min_conditions(epic)
 
 
 # Global singleton instance
