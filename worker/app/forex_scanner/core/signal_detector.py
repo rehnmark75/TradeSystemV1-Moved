@@ -477,7 +477,7 @@ class SignalDetector:
                 df_entry = self._filter_incomplete_candles(df_entry, entry_tf)
 
             df_entry_len = len(df_entry) if df_entry is not None else 0
-            self.logger.info(f"🔍 [SMC_SIMPLE] Passing to strategy: 4H({len(df_4h)} bars), {trigger_tf}({len(df_trigger)} bars), {entry_tf}({df_entry_len} bars)")
+            self.logger.info(f"🔍 [SMC_SIMPLE] Passing to strategy: {htf_tf}({len(df_4h)} bars), {trigger_tf}({len(df_trigger)} bars), {entry_tf}({df_entry_len} bars)")
 
             # Detect signal
             signal = self.smc_simple_strategy.detect_signal(
