@@ -174,9 +174,9 @@ class BacktestOrderLogger:
                 'validation_passed': validation_passed,
                 'rejection_reason': 'N/A' if validation_passed else (failure_reason or 'Unknown'),
                 'detailed_rejection_reason': detailed_reason,
-                # Add configured SL/TP from strategy
-                'stop_distance': signal.get('stop_distance', 0),
-                'limit_distance': signal.get('limit_distance', 0),
+                # Add configured SL/TP from strategy (stop_distance/limit_distance or risk_pips/reward_pips)
+                'stop_distance': signal.get('stop_distance') or signal.get('risk_pips', 0),
+                'limit_distance': signal.get('limit_distance') or signal.get('reward_pips', 0),
                 # Add simulation metadata if available
                 'exit_reason': signal.get('exit_reason'),
                 'trade_result': signal.get('trade_result'),
@@ -191,8 +191,8 @@ class BacktestOrderLogger:
             self.logger.info(f"   ⏰ Timestamp: {timestamp}")
 
             # Show configured SL/TP if available
-            stop_distance = signal.get('stop_distance', 0)
-            limit_distance = signal.get('limit_distance', 0)
+            stop_distance = signal.get('stop_distance') or signal.get('risk_pips', 0)
+            limit_distance = signal.get('limit_distance') or signal.get('reward_pips', 0)
             if stop_distance > 0 or limit_distance > 0:
                 self.logger.info(f"   🎯 Configured SL/TP: {stop_distance:.0f} / {limit_distance:.0f} pips")
 
@@ -216,8 +216,8 @@ class BacktestOrderLogger:
                 'direction': signal.get('signal_type'),
                 'size': signal.get('position_size', 1.0),
                 'level': signal.get('entry_price'),
-                'stop_level': signal.get('stop_loss_price'),
-                'limit_level': signal.get('take_profit_price'),
+                'stop_level': signal.get('stop_loss_price') or signal.get('stop_loss'),
+                'limit_level': signal.get('take_profit_price') or signal.get('take_profit'),
                 'logged_at': datetime.now(timezone.utc).isoformat()
             }
 
@@ -253,8 +253,8 @@ class BacktestOrderLogger:
 
             # Trade parameters
             entry_price = self._to_decimal(signal.get('entry_price') or signal.get('current_price', 0))
-            stop_loss_price = self._to_decimal(signal.get('stop_loss_price'))
-            take_profit_price = self._to_decimal(signal.get('take_profit_price'))
+            stop_loss_price = self._to_decimal(signal.get('stop_loss_price') or signal.get('stop_loss'))
+            take_profit_price = self._to_decimal(signal.get('take_profit_price') or signal.get('take_profit'))
             risk_reward_ratio = self._to_decimal(signal.get('risk_reward_ratio'))
 
             # Trade outcome (usually null for initial signals)
