@@ -79,9 +79,9 @@ def validate_sl_tp_levels(stop_distance: float, limit_distance: float,
     """
     Validate and adjust SL/TP levels to meet broker requirements.
 
-    When the broker's minimum distance forces SL wider than configured, TP is scaled
-    proportionally to preserve the original R:R ratio. This prevents the inverted R:R
-    situation where a widened SL exceeds the fixed TP.
+    When the broker's minimum distance forces SL wider than configured, TP is kept
+    unchanged. The trailing stop system handles progressive profit-taking, so an
+    unreachable TP (from proportional scaling) is worse than a lower R:R ratio.
 
     Args:
         stop_distance: Proposed stop distance in points
@@ -100,14 +100,13 @@ def validate_sl_tp_levels(stop_distance: float, limit_distance: float,
     # Ensure minimum distance requirements for SL (respect broker minimum exactly)
     if min_distance and stop_distance < min_distance:
         old_stop = stop_distance
-        old_limit = limit_distance
-        sl_scale = min_distance / stop_distance  # e.g. 1.5 if widened from 10 to 15
         stop_distance = int(min_distance)
-        # Proportionally scale TP to preserve R:R ratio
-        limit_distance = int(old_limit * sl_scale)
+        # v2.44.0: Keep TP unchanged when broker forces wider SL.
+        # Scaling TP proportionally made targets unreachable (e.g. EURJPY 18→27 pips).
+        # The trailing stop system handles progressive profit-taking before TP.
         adjustments.append(
             f"Stop widened from {old_stop} to {stop_distance} (broker min: {min_distance}); "
-            f"TP scaled from {old_limit} to {limit_distance} to preserve R:R"
+            f"TP kept at {limit_distance} (trailing system manages exits)"
         )
 
     # Ensure minimum distance requirements for limit (independent of SL widening)
