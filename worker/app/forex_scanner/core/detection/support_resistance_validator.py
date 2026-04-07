@@ -732,9 +732,14 @@ class SupportResistanceValidator:
         epic: str
     ) -> Tuple[bool, str, Dict]:
         """
-        Complete S/R validation including path-to-target blocking check.
+        S/R validation using path-to-target as the PRIMARY gate.
 
-        This combines the existing proximity check with the new path blocking check.
+        v2.44.0: Path-to-target is now the primary check. It asks "does S/R
+        actually block the profit path?" instead of "is entry near S/R?".
+        This prevents over-filtering directionally-aligned trades (e.g. SELL
+        signals near support in a downtrend that would have been winners).
+
+        Proximity-only check is used as FALLBACK when TP is unavailable.
 
         Args:
             signal: Trading signal with entry_price, take_profit, signal_type
@@ -744,20 +749,32 @@ class SupportResistanceValidator:
         Returns:
             Tuple of (is_valid, reason, details)
         """
-        # First, run standard proximity validation
-        is_valid, reason, details = self.validate_trade_direction(signal, df, epic)
-
-        if not is_valid:
-            return is_valid, reason, details
-
-        # Extract prices for path blocking check
         entry_price = self._get_current_price(signal)
         signal_type = signal.get('signal_type', '').upper()
 
+        # Build base validation details (levels, nearest S/R, etc.)
+        levels = self._get_support_resistance_levels(df, epic)
+        pip_size = self._get_pip_size(epic)
+
+        # v2.35.1: Check for per-signal tolerance override
+        tolerance_override = signal.get('sr_tolerance_pips')
+        effective_tolerance = tolerance_override if tolerance_override is not None else self.level_tolerance_pips
+
+        details = {
+            'support_levels': levels.get('support_levels', []),
+            'resistance_levels': levels.get('resistance_levels', []),
+            'nearest_support': levels.get('nearest_support'),
+            'nearest_resistance': levels.get('nearest_resistance'),
+            'current_price': entry_price,
+            'signal_type': signal_type,
+            'pip_size': pip_size,
+            'level_tolerance_pips': effective_tolerance,
+            'tolerance_override_applied': tolerance_override is not None,
+            'validation_timestamp': datetime.now().isoformat()
+        }
+
         # ================================================================
-        # FIX: Use per-pair fixed TP from config if available for path blocking
-        # This prevents overly aggressive path blocking when dynamic TPs are large
-        # (Dynamic TPs from swing targets can be 45+ pips, causing 80%+ blocking)
+        # PRIMARY: Try path-to-target blocking (context-aware)
         # ================================================================
         take_profit = None
         try:
@@ -766,8 +783,6 @@ class SupportResistanceValidator:
             fixed_tp_pips = config.get_pair_fixed_take_profit(epic)
 
             if fixed_tp_pips and entry_price:
-                pip_size = self._get_pip_size(epic)
-                # Calculate TP price from fixed pips
                 if signal_type in ['BUY', 'BULL']:
                     take_profit = entry_price + (fixed_tp_pips * pip_size)
                 else:
@@ -780,34 +795,48 @@ class SupportResistanceValidator:
         if take_profit is None:
             take_profit = signal.get('take_profit') or signal.get('tp_price')
 
-        if not entry_price or not take_profit:
-            details['path_blocking_skipped'] = True
-            details['path_blocking_reason'] = "Missing entry or TP price"
-            return is_valid, reason, details
+        if entry_price and take_profit:
+            # Path-to-target check — the primary gate
+            is_blocked, block_reason, block_details = self.check_path_to_target_blocking(
+                entry_price=entry_price,
+                take_profit=take_profit,
+                signal_type=signal_type,
+                levels=levels,
+                epic=epic
+            )
 
-        # Get levels for path blocking check
-        levels = self._get_support_resistance_levels(df, epic)
+            details['path_blocking'] = block_details
 
-        # Check path-to-target blocking
-        is_blocked, block_reason, block_details = self.check_path_to_target_blocking(
-            entry_price=entry_price,
-            take_profit=take_profit,
+            if is_blocked:
+                return False, block_reason, details
+
+            # Add warning info if present
+            if block_details.get('is_warning'):
+                return True, f"Path clear (with warning) | {block_reason}", details
+
+            return True, f"{signal_type} signal allowed - path to target clear", details
+
+        # ================================================================
+        # FALLBACK: Proximity check only when TP is unavailable
+        # ================================================================
+        self.logger.debug(f"⚠️ No TP available for {epic} — falling back to proximity check")
+        details['path_blocking_skipped'] = True
+        details['path_blocking_reason'] = "Missing TP price — using proximity fallback"
+
+        # Run standard proximity validation as fallback
+        validation_result = self._check_level_proximity(
+            current_price=entry_price,
             signal_type=signal_type,
             levels=levels,
-            epic=epic
+            df=df,
+            epic=epic,
+            tolerance_override=tolerance_override
         )
 
-        # Merge blocking details into main details
-        details['path_blocking'] = block_details
+        if not validation_result['is_valid']:
+            return False, validation_result['reason'], details
 
-        if is_blocked:
-            return False, block_reason, details
-
-        # Add path blocking info to reason if there was a warning
-        if block_details.get('is_warning'):
-            reason = f"{reason} | {block_reason}"
-
-        return True, reason, details
+        return True, validation_result['reason'], details
 
 
 # Integration function for trade_validator.py
