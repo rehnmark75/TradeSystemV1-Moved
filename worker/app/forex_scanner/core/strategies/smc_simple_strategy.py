@@ -1487,10 +1487,13 @@ class SMCSimpleStrategy:
 
         # v2.32.1: Per-pair HTF alignment override
         # Allows disabling the HTF alignment filter for specific pairs via parameter_overrides
-        if self._db_config:
-            htf_align = self._db_config.get_for_pair(epic, 'scalp_require_htf_alignment')
-            if htf_align is not None:
-                self.scalp_require_htf_alignment = bool(htf_align)
+        # Only apply if there's an EXPLICIT per-pair override (not the global fallback)
+        # to avoid clobbering backtest --override values
+        if self._db_config and not (self._backtest_mode and self._config_override and 'scalp_require_htf_alignment' in self._config_override):
+            pair_overrides = self._db_config._pair_overrides.get(epic, {})
+            param_overrides = pair_overrides.get('parameter_overrides', {})
+            if 'scalp_require_htf_alignment' in param_overrides:
+                self.scalp_require_htf_alignment = bool(param_overrides['scalp_require_htf_alignment'])
 
         # v2.32.2: Per-pair RSI entry threshold overrides
         # Without this, parameter_overrides JSONB values are ignored and global defaults (0/100) are used
