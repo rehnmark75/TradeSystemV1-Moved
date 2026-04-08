@@ -337,7 +337,8 @@ class MarketIntelligenceHistoryManager:
                 'average_trend_strength': self._safe_float(market_strength.get('average_trend_strength')),
                 'average_volatility': self._safe_float(market_strength.get('average_volatility')),
                 'directional_consensus': self._safe_float(market_strength.get('directional_consensus')),
-                'market_efficiency': self._safe_float(market_strength.get('market_efficiency')),
+                # DB column is 'market_efficiency', source key renamed to 'market_balance'
+                'market_efficiency': self._safe_float(market_strength.get('market_balance', market_strength.get('market_efficiency'))),
                 'volatility_percentile': self._safe_float(intelligence_report.get('volatility_percentile', 50.0))
             })
 

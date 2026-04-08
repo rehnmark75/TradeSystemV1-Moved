@@ -641,6 +641,26 @@ class IntelligentForexScanner:
             # ADD: Generate and store market intelligence for this scan cycle
             intelligence_report = self._capture_scan_market_intelligence(scan_start, clean_signals)
 
+            # Attach intelligence to signals for storage in alert_history (NOT for filtering)
+            # Strategy filters have already run at this point, so this is storage-only.
+            # This allows us to analyze intelligence vs trade outcomes later.
+            if intelligence_report and clean_signals:
+                market_regime = intelligence_report.get('market_regime', {})
+                session_analysis = intelligence_report.get('session_analysis', {})
+                trading_recs = intelligence_report.get('trading_recommendations', {})
+                formatted_intel = {
+                    'market_regime': market_regime,
+                    'session_analysis': session_analysis,
+                    'trading_recommendations': trading_recs,
+                    'intelligence_source': 'live_scan',
+                    'scan_timestamp': scan_start.isoformat() if scan_start else None,
+                }
+                for signal in clean_signals:
+                    signal['market_intelligence'] = formatted_intel
+                    signal['intelligence_source'] = 'live_scan'
+                    signal['market_regime'] = market_regime.get('dominant_regime', 'unknown')
+                    signal['regime_confidence'] = market_regime.get('confidence', 0.5)
+
             # ADD: Capture per-epic performance snapshots for rejection analysis
             self._capture_scan_performance_snapshots(
                 scan_cycle_id=scan_cycle_id,

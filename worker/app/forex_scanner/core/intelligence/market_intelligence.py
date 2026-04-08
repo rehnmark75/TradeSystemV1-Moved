@@ -200,7 +200,7 @@ class MarketIntelligenceEngine:
             'average_volatility': 0.5,
             'market_bias': 'neutral',
             'directional_consensus': 0.5,
-            'market_efficiency': 0.5
+            'market_balance': 0.5
         }
     
     def _get_fallback_correlation_analysis(self) -> Dict:
@@ -432,9 +432,12 @@ class MarketIntelligenceEngine:
                     else:
                         ema_score = 0.3
                 else:
-                    # Just 9/21 alignment
-                    if latest['ema_9'] > latest['ema_21'] or latest['ema_9'] < latest['ema_21']:
+                    # Just 9/21 alignment - require meaningful separation (>0.1%)
+                    ema_separation = abs(latest['ema_9'] - latest['ema_21']) / latest['close'] if latest['close'] != 0 else 0
+                    if ema_separation > 0.001:
                         ema_score = 0.7
+                    elif ema_separation > 0.0003:
+                        ema_score = 0.5
                     else:
                         ema_score = 0.3
                 scores.append(ema_score)
@@ -565,7 +568,8 @@ class MarketIntelligenceEngine:
             
             if long_term_atr > 0:
                 volatility_ratio = recent_atr / long_term_atr
-                return min(1.0, max(0.0, (volatility_ratio - 0.5) * 2))
+                # ratio=1.0 (normal) → 0.5, ratio=1.5 (+50%) → 0.75, ratio=0.5 (-50%) → 0.25
+                return min(1.0, max(0.0, 0.5 + (volatility_ratio - 1.0) * 0.5))
             else:
                 return 0.5
                 
@@ -663,7 +667,7 @@ class MarketIntelligenceEngine:
                 'average_volatility': total_volatility / valid_pairs,
                 'market_bias': market_bias,
                 'directional_consensus': directional_consensus,
-                'market_efficiency': 1 - abs(bullish_weight - bearish_weight) / total_weight if total_weight > 0 else 0.5,
+                'market_balance': 1 - abs(bullish_weight - bearish_weight) / total_weight if total_weight > 0 else 0.5,
                 # Additional debug info
                 'bullish_pairs': bullish_pairs,
                 'bearish_pairs': bearish_pairs,
@@ -712,17 +716,10 @@ class MarketIntelligenceEngine:
             
             for epic, change in price_changes.items():
                 try:
-                    # Simple currency extraction from epic name
-                    if 'EURUSD' in epic:
-                        base, quote = 'EUR', 'USD'
-                    elif 'GBPUSD' in epic:
-                        base, quote = 'GBP', 'USD'
-                    elif 'USDJPY' in epic:
-                        base, quote = 'USD', 'JPY'
-                    elif 'AUDUSD' in epic:
-                        base, quote = 'AUD', 'USD'
-                    elif 'USDCAD' in epic:
-                        base, quote = 'USD', 'CAD'
+                    # Extract base/quote currencies from epic name
+                    pair = epic.replace('CS.D.', '').split('.')[0]
+                    if len(pair) >= 6:
+                        base, quote = pair[:3], pair[3:6]
                     else:
                         continue
                     
@@ -906,12 +903,14 @@ class MarketIntelligenceEngine:
             # Determine current session (UTC hours)
             if 22 <= hour or hour < 6:
                 session = 'asian'
-            elif 6 <= hour < 14:
-                session = 'london'  
-            elif 14 <= hour < 22:
+            elif 6 <= hour < 12:
+                session = 'london'
+            elif 12 <= hour < 16:
+                session = 'overlap'  # London/NY overlap (12-16 UTC)
+            elif 16 <= hour < 22:
                 session = 'new_york'
             else:
-                session = 'overlap'
+                session = 'unknown'
             
             # FIXED: Session configurations with consistent structure
             session_configs = {
