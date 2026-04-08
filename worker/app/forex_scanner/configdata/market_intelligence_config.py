@@ -429,14 +429,14 @@ MARKET_BIAS_MIN_CONSENSUS = 0.70              # Block when directional_consensus
 ENHANCED_REGIME_DETECTION_ENABLED = True   # ENABLED - uses ADX-based trending
 
 # ADX-based trending detection thresholds
-ADX_TRENDING_THRESHOLD = 25          # ADX > 25 = trending market
-ADX_STRONG_TREND_THRESHOLD = 40      # ADX > 40 = strong trend
+ADX_TRENDING_THRESHOLD = 30          # ADX > 30 = trending market (raised from 25 — forex ADX sits 25-35 most of the time)
+ADX_STRONG_TREND_THRESHOLD = 45      # ADX > 45 = strong trend (raised from 40)
 ADX_WEAK_TREND_THRESHOLD = 20        # ADX < 20 = ranging/consolidating
 
-# EMA alignment weight in trending score
-EMA_ALIGNMENT_WEIGHT = 0.4           # 40% weight for EMA alignment
-ADX_WEIGHT = 0.4                     # 40% weight for ADX value
-MOMENTUM_WEIGHT = 0.2                # 20% weight for momentum
+# Component weights in trending score (must sum to 1.0)
+ADX_WEIGHT = 0.50                    # 50% weight for ADX (most reliable trend indicator)
+EMA_ALIGNMENT_WEIGHT = 0.30          # 30% weight for EMA alignment (now ATR-relative)
+MOMENTUM_WEIGHT = 0.20               # 20% weight for momentum
 
 # Volatility-Directionality separation
 SEPARATE_VOLATILITY_FROM_STRUCTURE = True   # Treat volatility as orthogonal

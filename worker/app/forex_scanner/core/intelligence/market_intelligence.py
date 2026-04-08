@@ -1554,7 +1554,7 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
                 'is_ranging': False
             }
 
-            # 1. ADX-based trend strength (40% weight)
+            # 1. ADX-based trend strength (50% weight)
             adx = self._calculate_adx(df_primary)
             if adx is not None:
                 result['adx_value'] = adx
@@ -1562,48 +1562,73 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
                 if adx >= ADX_STRONG_TREND_THRESHOLD:
                     adx_score = 1.0
                 elif adx >= ADX_TRENDING_THRESHOLD:
-                    adx_score = 0.7 + (adx - ADX_TRENDING_THRESHOLD) / (ADX_STRONG_TREND_THRESHOLD - ADX_TRENDING_THRESHOLD) * 0.3
+                    adx_score = 0.6 + (adx - ADX_TRENDING_THRESHOLD) / (ADX_STRONG_TREND_THRESHOLD - ADX_TRENDING_THRESHOLD) * 0.4
                 elif adx >= ADX_WEAK_TREND_THRESHOLD:
-                    adx_score = 0.4 + (adx - ADX_WEAK_TREND_THRESHOLD) / (ADX_TRENDING_THRESHOLD - ADX_WEAK_TREND_THRESHOLD) * 0.3
+                    # 20-30 range: linearly scale 0.2 to 0.6 (was 0.4 to 0.7)
+                    adx_score = 0.2 + (adx - ADX_WEAK_TREND_THRESHOLD) / (ADX_TRENDING_THRESHOLD - ADX_WEAK_TREND_THRESHOLD) * 0.4
                 else:
-                    adx_score = adx / ADX_WEAK_TREND_THRESHOLD * 0.4
+                    # Below 20: strongly ranging (0.0 to 0.2)
+                    adx_score = adx / ADX_WEAK_TREND_THRESHOLD * 0.2
             else:
                 adx_score = 0.5
 
-            # 2. EMA alignment (40% weight)
+            # 2. EMA alignment — ATR-relative separation (30% weight)
+            # EMAs being on different sides means nothing if the separation is tiny
+            # relative to recent volatility. Require meaningful separation.
             ema_score = 0.5
             trend_direction = 'neutral'
 
             try:
                 if all(col in df_secondary.columns for col in ['ema_9', 'ema_21']):
                     latest = df_secondary.iloc[-1]
+                    close = latest['close'] if latest['close'] != 0 else 1.0
 
-                    if 'ema_50' in df_secondary.columns:
-                        # Check 9/21/50 alignment
-                        if latest['ema_9'] > latest['ema_21'] > latest['ema_50']:
-                            ema_score = 1.0
-                            trend_direction = 'bullish'
-                        elif latest['ema_9'] < latest['ema_21'] < latest['ema_50']:
-                            ema_score = 1.0
-                            trend_direction = 'bearish'
-                        elif latest['ema_9'] > latest['ema_21']:
-                            ema_score = 0.6
-                            trend_direction = 'bullish'
-                        elif latest['ema_9'] < latest['ema_21']:
-                            ema_score = 0.6
-                            trend_direction = 'bearish'
-                        else:
-                            ema_score = 0.3
+                    # Calculate ATR-relative EMA separation
+                    ema_sep = abs(latest['ema_9'] - latest['ema_21'])
+                    # Use ATR if available, otherwise use recent high-low range as proxy
+                    if 'atr' in df_secondary.columns and not pd.isna(df_secondary['atr'].iloc[-1]):
+                        atr = df_secondary['atr'].iloc[-1]
                     else:
-                        # Just 9/21
-                        if latest['ema_9'] > latest['ema_21'] * 1.001:  # 0.1% buffer
+                        recent = df_secondary.tail(14)
+                        atr = (recent['high'] - recent['low']).mean() if len(recent) > 0 else close * 0.005
+                    atr = max(atr, close * 0.0001)  # floor to avoid division by zero
+
+                    # Separation as multiple of ATR
+                    sep_ratio = ema_sep / atr
+
+                    # Determine direction
+                    if latest['ema_9'] > latest['ema_21']:
+                        trend_direction = 'bullish'
+                    elif latest['ema_9'] < latest['ema_21']:
+                        trend_direction = 'bearish'
+
+                    # Score based on ATR-relative separation
+                    if 'ema_50' in df_secondary.columns and not pd.isna(latest.get('ema_50', float('nan'))):
+                        # Full 9/21/50 alignment check
+                        fully_aligned = (
+                            (latest['ema_9'] > latest['ema_21'] > latest['ema_50']) or
+                            (latest['ema_9'] < latest['ema_21'] < latest['ema_50'])
+                        )
+                        if fully_aligned and sep_ratio >= 1.0:
+                            ema_score = 1.0
+                        elif fully_aligned and sep_ratio >= 0.5:
                             ema_score = 0.7
-                            trend_direction = 'bullish'
-                        elif latest['ema_9'] < latest['ema_21'] * 0.999:
-                            ema_score = 0.7
-                            trend_direction = 'bearish'
-                        else:
+                        elif sep_ratio >= 0.5:
+                            ema_score = 0.5
+                        elif sep_ratio >= 0.2:
                             ema_score = 0.3
+                        else:
+                            ema_score = 0.1  # EMAs nearly overlapping = ranging
+                    else:
+                        # Just 9/21 — require meaningful ATR-relative separation
+                        if sep_ratio >= 1.0:
+                            ema_score = 0.8
+                        elif sep_ratio >= 0.5:
+                            ema_score = 0.5
+                        elif sep_ratio >= 0.2:
+                            ema_score = 0.3
+                        else:
+                            ema_score = 0.1
             except Exception as e:
                 self.logger.debug(f"EMA alignment calc error: {e}")
 
