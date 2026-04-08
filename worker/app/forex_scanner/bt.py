@@ -48,7 +48,7 @@ def main():
             arg = args[i]
 
             # Handle epic shortcuts (e.g., "EURUSD" -> "CS.D.EURUSD.CEEM.IP", others -> "CS.D.PAIR.MINI.IP")
-            if arg in ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD", "EURJPY", "AUDJPY", "GBPJPY"]:
+            if arg in ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD", "EURJPY", "AUDJPY", "GBPJPY", "EURGBP"]:
                 # EURUSD uses CEEM, all others use MINI
                 if arg == "EURUSD":
                     processed_args.extend(["--epic", f"CS.D.{arg}.CEEM.IP"])

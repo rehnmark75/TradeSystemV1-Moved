@@ -1492,6 +1492,16 @@ class SMCSimpleStrategy:
             if htf_align is not None:
                 self.scalp_require_htf_alignment = bool(htf_align)
 
+        # v2.32.2: Per-pair RSI entry threshold overrides
+        # Without this, parameter_overrides JSONB values are ignored and global defaults (0/100) are used
+        if self._db_config:
+            rsi_sell_min = self._db_config.get_for_pair(epic, 'scalp_entry_rsi_sell_min')
+            if rsi_sell_min is not None:
+                self.scalp_entry_rsi_sell_min = float(rsi_sell_min)
+            rsi_buy_max = self._db_config.get_for_pair(epic, 'scalp_entry_rsi_buy_max')
+            if rsi_buy_max is not None:
+                self.scalp_entry_rsi_buy_max = float(rsi_buy_max)
+
         # Log if using per-pair overrides
         pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
         self.logger.debug(f"📊 {pair} Scalp Config: EMA={pair_config['ema_period']}, "
@@ -4320,18 +4330,24 @@ class SMCSimpleStrategy:
                     original_two_pole_enabled = self._signal_qualifier.two_pole_filter_enabled
 
                     if hasattr(self, '_db_config') and self._db_config:
-                        pair_mode = self._db_config.get_pair_scalp_qualification_mode(epic)
-                        if pair_mode:
-                            effective_mode = pair_mode
-                            self._signal_qualifier.mode = pair_mode  # Temporarily set for this signal
+                        # CLI override takes precedence over per-pair DB qualification mode
+                        if 'scalp_qualification_mode' in (self._config_override or {}):
+                            effective_mode = self._config_override['scalp_qualification_mode']
+                            self._signal_qualifier.mode = effective_mode
+                        else:
+                            pair_mode = self._db_config.get_pair_scalp_qualification_mode(epic)
+                            if pair_mode:
+                                effective_mode = pair_mode
+                                self._signal_qualifier.mode = pair_mode  # Temporarily set for this signal
 
                         # v2.38.0: Check for per-pair filter overrides in parameter_overrides
+                        # Backtest CLI overrides (_config_override) take precedence over DB pair overrides
                         pair_overrides = self._db_config._pair_overrides.get(epic, {})
                         param_overrides = pair_overrides.get('parameter_overrides', {})
                         if param_overrides:
-                            if 'scalp_rsi_filter_enabled' in param_overrides:
+                            if 'scalp_rsi_filter_enabled' in param_overrides and 'scalp_rsi_filter_enabled' not in (self._config_override or {}):
                                 self._signal_qualifier.rsi_filter_enabled = param_overrides['scalp_rsi_filter_enabled']
-                            if 'scalp_two_pole_filter_enabled' in param_overrides:
+                            if 'scalp_two_pole_filter_enabled' in param_overrides and 'scalp_two_pole_filter_enabled' not in (self._config_override or {}):
                                 self._signal_qualifier.two_pole_filter_enabled = param_overrides['scalp_two_pole_filter_enabled']
 
                     qual_passed, qual_score, qual_results = self._signal_qualifier.qualify_signal(
