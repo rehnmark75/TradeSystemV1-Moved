@@ -73,6 +73,13 @@ class RSPopulator:
             # Calculate returns using available data
             # Use all available days up to 20
             closes = hist['Close'].values
+            # Filter out NaN closes (e.g. pre-market rows before market opens)
+            closes = closes[~np.isnan(closes)]
+
+            if len(closes) < 5:
+                logger.error(f"Insufficient valid SPY closes: {len(closes)} (need at least 5)")
+                return False
+
             current_price = closes[-1]
 
             # Use oldest available price for "20-day" return (or whatever we have)
@@ -82,6 +89,10 @@ class RSPopulator:
 
             self.spy_return_20d = ((current_price / price_20d_ago) - 1) * 100
             self.spy_return_5d = ((current_price / price_5d_ago) - 1) * 100
+
+            if np.isnan(self.spy_return_20d) or np.isnan(self.spy_return_5d):
+                logger.error("SPY returns calculated as NaN - data issue")
+                return False
 
             logger.info(f"SPY {available_days}-day return: {self.spy_return_20d:+.2f}%")
             logger.info(f"SPY 5-day return: {self.spy_return_5d:+.2f}%")

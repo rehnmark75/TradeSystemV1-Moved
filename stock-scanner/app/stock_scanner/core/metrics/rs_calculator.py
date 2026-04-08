@@ -98,7 +98,7 @@ class RSCalculator:
 
         # Step 1: Get SPY 20-day return
         spy_return = await self._get_benchmark_return(SPY_TICKER, calculation_date, 20)
-        if spy_return is None:
+        if spy_return is None or np.isnan(spy_return):
             logger.error("Cannot calculate RS: SPY data not available")
             return {'error': 'SPY data not available'}
 
@@ -204,6 +204,8 @@ class RSCalculator:
                 hist = etf.history(period="3mo")
                 if len(hist) >= days + 1:
                     closes = hist['Close'].values.tolist()
+                    # Filter out NaN closes (e.g. pre-market rows before market opens)
+                    closes = [c for c in closes if not (isinstance(c, float) and np.isnan(c))]
                     rows = [{'close': c} for c in reversed(closes)]
             except Exception as e:
                 logger.debug(f"Failed to fetch {ticker} from yfinance: {e}")
@@ -212,9 +214,10 @@ class RSCalculator:
             return None
 
         current = float(rows[0]['close'])
-        past = float(rows[-1]['close'])
+        # Use rows[days] for correct N-day lookback, not rows[-1] which may span the full history
+        past = float(rows[days]['close'])
 
-        if past > 0:
+        if past > 0 and not np.isnan(current) and not np.isnan(past):
             return ((current / past) - 1) * 100
 
         return None
