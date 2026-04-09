@@ -679,6 +679,43 @@ REASON: Analysis error - neutral assessment"""
             except Exception:
                 pass  # Database config not available, skip fixed SL/TP note
 
+            # --- EXTENDED MARKET CONTEXT FIELDS ---
+            # Market regime (from market_intelligence dict added by TradeValidator)
+            market_intel = signal.get('market_intelligence', {})
+            regime_analysis = market_intel.get('regime_analysis', {})
+            market_regime = regime_analysis.get('dominant_regime', 'unknown')
+            regime_confidence = regime_analysis.get('confidence', 0)
+            current_session = market_intel.get('session_analysis', {}).get('current_session', 'unknown')
+            volatility_level = market_intel.get('volatility_level', '')
+            mi_confidence_modifier = signal.get('market_intelligence_confidence_modifier')
+
+            # Technical indicators (added by _add_performance_metrics in smc_simple_strategy)
+            rsi_value = signal.get('rsi')
+            rsi_zone = signal.get('rsi_zone', '')
+            adx_value = signal.get('adx_value')
+            adx_trend_strength = signal.get('adx_trend_strength', '')
+            mtf_confluence = signal.get('mtf_confluence_score')
+            all_tfs_aligned = signal.get('all_timeframes_aligned')
+            atr_percentile = signal.get('atr_percentile')
+            entry_quality = signal.get('entry_quality_score')
+
+            # LPF data (added by Loss Prevention Filter in TradeValidator)
+            lpf_penalty = signal.get('lpf_penalty')
+            lpf_would_block = signal.get('lpf_would_block', False)
+            lpf_rules = signal.get('lpf_triggered_rules', [])
+
+            # Day of week from signal timestamp
+            from datetime import datetime as _datetime
+            signal_ts = signal.get('timestamp') or signal.get('created_at')
+            day_of_week = ''
+            if signal_ts:
+                try:
+                    if isinstance(signal_ts, str):
+                        signal_ts = _datetime.fromisoformat(signal_ts)
+                    day_of_week = signal_ts.strftime('%A')
+                except Exception:
+                    pass
+
             # Opposite swing for SL reference
             opposite_swing = signal.get('opposite_swing', 0)
 
@@ -845,6 +882,49 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - Entry Position: {price_in_bb} region
 """
 
+            # Build market context section
+            rsi_warning = ''
+            if rsi_value:
+                if direction == 'BULL' and rsi_value > 65:
+                    rsi_warning = ' ⚠️ Overbought for BUY'
+                elif direction == 'BEAR' and rsi_value < 35:
+                    rsi_warning = ' ⚠️ Oversold for SELL'
+
+            adx_warning = ' ⚠️ Weak trend' if adx_value and adx_value < 20 else ''
+
+            mtf_status = ''
+            if all_tfs_aligned:
+                mtf_status = ' ✅ All TFs aligned'
+            elif mtf_confluence is not None:
+                mtf_status = ' ⚠️ Partial alignment'
+
+            market_context_section = f"""
+═══════════════════════════════════════════════════════════════
+🌍 MARKET CONTEXT
+═══════════════════════════════════════════════════════════════
+**Regime:** {market_regime.upper()} (confidence: {regime_confidence:.0%})
+**Session:** {current_session.upper()}{f'  |  Day: {day_of_week}' if day_of_week else ''}
+**Volatility:** {volatility_level.upper() if volatility_level else 'N/A'}  |  ATR Percentile: {f'{atr_percentile:.0f}%' if atr_percentile is not None else 'N/A'}
+
+**Technical Indicators:**
+- RSI(14): {f'{rsi_value:.1f} ({rsi_zone})' if rsi_value else 'N/A'}{rsi_warning}
+- ADX: {f'{adx_value:.1f} ({adx_trend_strength})' if adx_value else 'N/A'}{adx_warning}
+- MTF Confluence: {f'{mtf_confluence:.2f}' if mtf_confluence is not None else 'N/A'}{mtf_status}
+- Entry Quality Score: {f'{entry_quality:.2f}' if entry_quality is not None else 'N/A'}
+- MI Confidence Modifier: {f'{mi_confidence_modifier:+.1%}' if mi_confidence_modifier is not None else 'N/A'}
+"""
+
+            # Build LPF section (only if LPF fired)
+            lpf_section = ''
+            if lpf_penalty or lpf_rules:
+                rules_str = ', '.join(lpf_rules) if lpf_rules else 'none'
+                lpf_section = f"""
+⚠️ **LOSS PREVENTION FILTER ALERT:**
+- Penalty: {f'{lpf_penalty:.2f}' if lpf_penalty else '0'}  |  Would Block: {'YES' if lpf_would_block else 'NO'}
+- Rules Triggered: {rules_str}
+(LPF uses historical win-rate data to flag high-risk conditions — weight this heavily in your assessment)
+"""
+
             # Build SMC-specific analysis section
             smc_analysis = f"""
 ## SMC SIMPLE v2.3.0 STRATEGY DATA (3-TIER VALIDATION)
@@ -892,6 +972,8 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 • Take Profit: {reward_pips:.1f} pips
 • Risk:Reward Ratio: {rr_ratio:.2f}:1{fixed_sl_note}
 {chart_instruction}
+{market_context_section}
+{lpf_section}
 {smc_analysis}
 ═══════════════════════════════════════════════════════════════
 📋 REQUIRED RESPONSE FORMAT
@@ -927,6 +1009,15 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - For BULL: Resistance should be BEYOND take profit level
 - For BEAR: Support should be BEYOND take profit level
 - S/R within 50% of target distance = caution, within 25% = strong concern
+
+**MARKET CONTEXT EVALUATION (use the 🌍 section above):**
+- RANGING regime + trend-following signal: reduce score by 1-2 points
+- RSI overbought (>65) for BUY or oversold (<35) for SELL: flag as concern, reduce score by 1
+- ADX < 20 (weak trend): flag low trend strength, reduce score by 1 for trend-following entries
+- MTF confluence < 0.5 or not all TFs aligned: treat as increased risk
+- Entry Quality Score < 0.4: strategy itself rated this entry poorly — reduce score by 1
+- LPF "Would Block: YES": the loss-prevention system flagged this — apply additional caution, reduce score by 1-2
+- MI Confidence Modifier strongly negative (< -10%): market intelligence is bearish on this signal
 
 **AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
 - **4H trend structure opposes signal** — BUY when 4H shows Lower Highs/Lower Lows, or SELL when 4H shows Higher Highs/Higher Lows. Look at the CANDLE STRUCTURE, not just EMA position.
