@@ -641,6 +641,21 @@ REASON: Analysis error - neutral assessment"""
             swing_level = tier2_swing.get('swing_level', signal.get('swing_level', 0))
             body_close_confirmed = tier2_swing.get('body_close_confirmed', True)
             volume_confirmed = tier2_swing.get('volume_confirmed', signal.get('volume_confirmed', False))
+            # Raw volume ratio (break candle volume / 20-bar SMA). "volume_confirmed" is a spike
+            # flag (ratio > 1.3x by default), not a "volume exists" flag — show the raw value
+            # so Claude can tell "no spike but normal volume" apart from "genuinely quiet candle".
+            volume_ratio_val = signal.get('volume_ratio')
+            if volume_ratio_val is not None:
+                try:
+                    _vr = float(volume_ratio_val)
+                    volume_spike_display = (
+                        f"✅ Yes ({_vr:.2f}x avg)" if volume_confirmed
+                        else f"❌ No ({_vr:.2f}x avg, threshold 1.30x)"
+                    )
+                except (TypeError, ValueError):
+                    volume_spike_display = '✅ Yes' if volume_confirmed else '❌ No'
+            else:
+                volume_spike_display = '✅ Yes' if volume_confirmed else '❌ No'
 
             # Tier 3 - Entry data
             tier3_entry = strategy_indicators.get('tier3_entry', {})
@@ -938,7 +953,7 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - Swing Level Broken: {self._format_price(swing_level)}
 - Opposite Swing (SL reference): {self._format_price(opposite_swing)}
 - Body Close Confirmed: {'✅ Yes' if body_close_confirmed else '❌ No'}
-- Volume Confirmed: {'✅ Yes' if volume_confirmed else '❌ No'}
+- Volume Spike: {volume_spike_display} — normal volume is fine; this only flags above-average spikes
 
 **TIER 3 - Entry Analysis:**
 {entry_type_detail}
