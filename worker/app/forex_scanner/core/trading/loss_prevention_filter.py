@@ -372,9 +372,8 @@ class LossPreventionFilter:
         return True
 
     def _check_direction_and_indicator(self, cond: Dict, signal: Dict) -> bool:
-        direction = signal.get('signal_type', '').upper()
-        expected_dir = cond.get('direction', '').upper()
-        if direction != expected_dir:
+        # Normalize signal_type so BULL→BUY and BEAR→SELL, matching _check_direction
+        if not self._check_direction(cond, signal):
             return False
         return self._check_indicator_threshold(cond, signal)
 
