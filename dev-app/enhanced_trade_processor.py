@@ -151,10 +151,24 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                                 f"S3={pair_config['stage3_trigger_points']}pts"
                             )
                         else:
-                            self.logger.warning(
-                                f"⚠️ [SL/TP TRAILING] Trade {trade.id}: Invalid distances "
-                                f"TP={tp_pips:.1f} SL={sl_pips:.1f}, using static config"
+                            # Once the trade has moved past its initial state (early BE or full BE),
+                            # the live sl_price is above entry for BUY (below for SELL), so sl_pips
+                            # becomes 0 or negative. That is expected and the static pair config is
+                            # the right thing to fall back to — not an error worth warning about.
+                            post_be = (
+                                getattr(trade, 'moved_to_breakeven', False)
+                                or getattr(trade, 'early_be_executed', False)
                             )
+                            if post_be:
+                                self.logger.debug(
+                                    f"📊 [SL/TP TRAILING] Trade {trade.id}: Post-BE state "
+                                    f"(TP={tp_pips:.1f} SL={sl_pips:.1f}), using static config"
+                                )
+                            else:
+                                self.logger.warning(
+                                    f"⚠️ [SL/TP TRAILING] Trade {trade.id}: Invalid distances "
+                                    f"TP={tp_pips:.1f} SL={sl_pips:.1f}, using static config"
+                                )
                     except Exception as e:
                         self.logger.warning(
                             f"⚠️ [SL/TP TRAILING] Trade {trade.id}: Computation failed ({e}), using static config"

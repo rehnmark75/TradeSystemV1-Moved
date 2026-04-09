@@ -299,6 +299,18 @@ async def adjust_stop_logic(
                 if hasattr(TradeMonitor, '_instance') and TradeMonitor._instance:
                     TradeMonitor._instance.position_cache.invalidate_position(deal_id)
                     logger.debug(f"[CACHE] Invalidated position {deal_id} after stop update")
+
+                # Also clear the MismatchDetector position cache. Without this,
+                # its 10s TTL can return a pre-update snapshot of /positions and
+                # produce a false CRITICAL mismatch against the freshly updated
+                # DB sl_price (triggering a spurious auto-correct). See Apr 2026
+                # AUDJPY trade 2413 investigation.
+                try:
+                    from services.mismatch_detector import get_mismatch_detector
+                    get_mismatch_detector().clear_cache()
+                    logger.debug(f"[CACHE] Cleared mismatch detector cache after {epic} stop update")
+                except Exception as mismatch_cache_error:
+                    logger.debug(f"Mismatch detector cache clear skipped: {mismatch_cache_error}")
         except Exception as cache_error:
             logger.debug(f"Cache invalidation skipped: {cache_error}")
 
