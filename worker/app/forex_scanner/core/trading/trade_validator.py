@@ -717,6 +717,83 @@ class TradeValidator:
         self.logger.info(f"✅ Claude APPROVED {epic} (Score: {score}/10)")
         return True, f"Claude approved (Score: {score}/10)", claude_result
 
+    # Step name → DB step label mapping
+    _REJECTION_STEP_MAP = {
+        'Structure':            'STRUCTURE',
+        'Market hours':         'MARKET_HOURS',
+        'Epic':                 'EPIC',
+        'Confidence':           'CONFIDENCE',
+        'Risk':                 'RISK',
+        'S/R Level':            'SR_LEVEL',
+        'News filtering':       'NEWS',
+        'Market Intelligence':  'MARKET_INTELLIGENCE',
+        'Market Bias Filter':   'MARKET_INTELLIGENCE',
+        'Reversal Regime Filter': 'MARKET_INTELLIGENCE',
+        'Trading':              'TRADING_SUITABILITY',
+        'LPF':                  'LPF',
+        'Claude filtering':     'CLAUDE',
+    }
+
+    def _log_validator_rejection(self, signal: Dict, reason: str) -> None:
+        """Persist every TradeValidator rejection to validator_rejections table.
+
+        Non-blocking — a DB error never propagates to the caller.
+        Skipped in backtest mode.
+        """
+        if self.backtest_mode:
+            return
+        if not (hasattr(self, 'db_manager') and self.db_manager is not None):
+            return
+        try:
+            # Derive step label from reason prefix
+            step = 'UNKNOWN'
+            for prefix, label in self._REJECTION_STEP_MAP.items():
+                if reason.startswith(prefix):
+                    step = label
+                    break
+            if step == 'UNKNOWN' and reason.startswith('LPF blocked'):
+                step = 'LPF'
+
+            epic = signal.get('epic', 'unknown')
+            pair = signal.get('pair') or epic.split('.')[2] if '.' in epic else epic
+
+            # Market context (populated after step 11 for later steps)
+            market_intel = signal.get('market_intelligence', {})
+            market_regime = market_intel.get('regime_analysis', {}).get('dominant_regime')
+            market_session = market_intel.get('session_analysis', {}).get('current_session')
+
+            sql = """
+                INSERT INTO validator_rejections
+                    (epic, pair, signal_type, strategy, confidence_score, step, rejection_reason,
+                     entry_price, risk_pips, reward_pips, rr_ratio,
+                     market_regime, market_session,
+                     lpf_penalty, lpf_would_block, lpf_triggered_rules)
+                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+            """
+            import json as _json
+            lpf_rules = signal.get('lpf_triggered_rules')
+            params = (
+                epic,
+                pair,
+                signal.get('signal_type', signal.get('signal')),
+                signal.get('strategy'),
+                signal.get('confidence_score'),
+                step,
+                reason,
+                signal.get('entry_price', signal.get('price')),
+                signal.get('risk_pips'),
+                signal.get('reward_pips'),
+                signal.get('rr_ratio'),
+                market_regime,
+                market_session,
+                signal.get('lpf_penalty'),
+                signal.get('lpf_would_block', False) if step == 'LPF' else None,
+                _json.dumps(lpf_rules) if lpf_rules else None,
+            )
+            self.db_manager.execute_query(sql, params, fetch=False)
+        except Exception as e:
+            self.logger.debug(f"_log_validator_rejection: non-critical DB error: {e}")
+
     def _save_claude_rejection(self, signal: Dict, claude_result: Dict, rejection_reason: str = None):
         """Save Claude rejection for analysis - to both file and database"""
         epic = signal.get('epic', 'unknown')
@@ -1177,6 +1254,7 @@ class TradeValidator:
                 self.validation_stats['failed_format'] += 1
                 if self.backtest_mode:
                     self.logger.warning(f"🚫 BACKTEST STEP 1 FAILED - Structure: {msg}")
+                self._log_validator_rejection(signal, f"Structure: {msg}")
                 return False, f"Structure: {msg}"
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 1 PASSED - Structure validation")
@@ -1188,6 +1266,7 @@ class TradeValidator:
                     self.validation_stats['failed_market_hours'] += 1
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 2 FAILED - Market hours: {msg}")
+                    self._log_validator_rejection(signal, f"Market hours: {msg}")
                     return False, f"Market hours: {msg}"
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 2 PASSED - Market hours validation")
@@ -1198,6 +1277,7 @@ class TradeValidator:
                 self.validation_stats['failed_epic_blocked'] += 1
                 if self.backtest_mode:
                     self.logger.warning(f"🚫 BACKTEST STEP 3 FAILED - Epic: {msg}")
+                self._log_validator_rejection(signal, f"Epic: {msg}")
                 return False, f"Epic: {msg}"
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 3 PASSED - Epic validation")
@@ -1208,6 +1288,7 @@ class TradeValidator:
                 self.validation_stats['failed_confidence'] += 1
                 if self.backtest_mode:
                     self.logger.warning(f"🚫 BACKTEST STEP 4 FAILED - Confidence: {msg}")
+                self._log_validator_rejection(signal, f"Confidence: {msg}")
                 return False, f"Confidence: {msg}"
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 4 PASSED - Confidence validation")
@@ -1228,6 +1309,7 @@ class TradeValidator:
                 self.validation_stats['failed_risk_management'] += 1
                 if self.backtest_mode:
                     self.logger.warning(f"🚫 BACKTEST STEP 6 FAILED - Risk: {msg}")
+                self._log_validator_rejection(signal, f"Risk: {msg}")
                 return False, f"Risk: {msg}"
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 6 PASSED - Risk validation")
@@ -1247,6 +1329,7 @@ class TradeValidator:
                     self.validation_stats['failed_sr_validation'] += 1
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 7 FAILED - S/R Level: {msg}")
+                    self._log_validator_rejection(signal, f"S/R Level: {msg}")
                     return False, f"S/R Level: {msg}"
             elif skip_sr_for_strategy and self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 7 PASSED - S/R validation (skipped for {strategy} - has built-in confluence)")
@@ -1263,6 +1346,7 @@ class TradeValidator:
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 8 FAILED - News filtering: {msg}")
                     self.logger.info(f"📰 NEWS BLOCKED: {epic} {signal_type} - {msg}")
+                    self._log_validator_rejection(signal, f"News filtering: {msg}")
                     return False, f"News filtering: {msg}"
                 else:
                     if self.backtest_mode:
@@ -1283,6 +1367,7 @@ class TradeValidator:
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 9 FAILED - Market Intelligence: {msg}")
                     self.logger.warning(f"🧠🚫 {epic} {signal_type} BLOCKED BY MARKET INTELLIGENCE: {msg}")
+                    self._log_validator_rejection(signal, f"Market Intelligence: {msg}")
                     return False, f"Market Intelligence: {msg}"
                 else:
                     if self.backtest_mode:
@@ -1299,6 +1384,7 @@ class TradeValidator:
                 self.validation_stats['failed_other'] += 1
                 if self.backtest_mode:
                     self.logger.warning(f"🚫 BACKTEST STEP 10 FAILED - Trading suitability: {msg}")
+                self._log_validator_rejection(signal, f"Trading: {msg}")
                 return False, f"Trading: {msg}"
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 10 PASSED - Trading suitability")
@@ -1339,6 +1425,7 @@ class TradeValidator:
                     msg = f"LPF blocked (penalty={lpf_result['total_penalty']:.2f}, rules={rules_str})"
                     if self.backtest_mode:
                         self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - {msg}")
+                    self._log_validator_rejection(signal, msg)
                     return False, msg
                 elif lpf_result['decision'] == 'would_block':
                     if self.backtest_mode:
@@ -1371,6 +1458,7 @@ class TradeValidator:
                         if self.alert_history_manager or self.save_claude_rejections:
                             self._save_claude_rejection(signal, claude_result, rejection_reason=msg)
 
+                    self._log_validator_rejection(signal, f"Claude filtering: {msg}")
                     return False, f"Claude filtering: {msg}"
                 else:
                     # Note: _validate_with_claude already logs approval
