@@ -739,11 +739,14 @@ class TradeValidator:
 
         Non-blocking — a DB error never propagates to the caller.
         Skipped in backtest mode.
+        Uses get_connection() (raw psycopg2) — same pattern as AlertHistoryManager.
         """
         if self.backtest_mode:
             return
         if not (hasattr(self, 'db_manager') and self.db_manager is not None):
             return
+        conn = None
+        cursor = None
         try:
             # Derive step label from reason prefix
             step = 'UNKNOWN'
@@ -755,12 +758,15 @@ class TradeValidator:
                 step = 'LPF'
 
             epic = signal.get('epic', 'unknown')
-            pair = signal.get('pair') or epic.split('.')[2] if '.' in epic else epic
+            pair = signal.get('pair') or (epic.split('.')[2] if '.' in epic else epic)
 
             # Market context (populated after step 11 for later steps)
             market_intel = signal.get('market_intelligence', {})
             market_regime = market_intel.get('regime_analysis', {}).get('dominant_regime')
             market_session = market_intel.get('session_analysis', {}).get('current_session')
+
+            import json as _json
+            lpf_rules = signal.get('lpf_triggered_rules')
 
             sql = """
                 INSERT INTO validator_rejections
@@ -768,10 +774,8 @@ class TradeValidator:
                      entry_price, risk_pips, reward_pips, rr_ratio,
                      market_regime, market_session,
                      lpf_penalty, lpf_would_block, lpf_triggered_rules)
-                VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
-            import json as _json
-            lpf_rules = signal.get('lpf_triggered_rules')
             params = (
                 epic,
                 pair,
@@ -790,9 +794,28 @@ class TradeValidator:
                 signal.get('lpf_would_block', False) if step == 'LPF' else None,
                 _json.dumps(lpf_rules) if lpf_rules else None,
             )
-            self.db_manager.execute_query(sql, params, fetch=False)
+            conn = self.db_manager.get_connection()
+            cursor = conn.cursor()
+            cursor.execute(sql, params)
+            conn.commit()
         except Exception as e:
             self.logger.debug(f"_log_validator_rejection: non-critical DB error: {e}")
+            if conn:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+        finally:
+            if cursor:
+                try:
+                    cursor.close()
+                except Exception:
+                    pass
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
 
     def _save_claude_rejection(self, signal: Dict, claude_result: Dict, rejection_reason: str = None):
         """Save Claude rejection for analysis - to both file and database"""
