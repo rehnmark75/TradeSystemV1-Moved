@@ -284,6 +284,9 @@ export default function ForexAnalyticsPage() {
         <Link href="/forex/smc-rejections" className="forex-pill">
           SMC Rejections
         </Link>
+        <Link href="/forex/validator-rejections" className="forex-pill">
+          Validator Rejections
+        </Link>
         <Link href="/forex/filter-effectiveness" className="forex-pill">
           Filter Audit
         </Link>
