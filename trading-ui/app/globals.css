@@ -236,6 +236,12 @@ input {
   color: #6b4b33;
 }
 
+.forex-pill.active {
+  background: #1971c2;
+  border-color: #1971c2;
+  color: #fff;
+}
+
 .section-tab {
   border: 1px solid var(--border);
   background: #fff7eb;

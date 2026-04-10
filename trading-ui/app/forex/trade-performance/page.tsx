@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
+import ForexNav from "../_components/ForexNav";
 
 type TradeRow = {
   id: number;
@@ -209,35 +210,7 @@ export default function ForexTradePerformancePage() {
         <div className="header-chip">Forex</div>
       </div>
 
-      <div className="forex-nav">
-        <Link href="/forex" className="forex-pill">
-          Overview
-        </Link>
-        <Link href="/forex/strategy" className="forex-pill">
-          Strategy Performance
-        </Link>
-        <Link href="/forex/trade-analysis" className="forex-pill">
-          Trade Analysis
-        </Link>
-        <Link href="/forex/entry-timing" className="forex-pill">
-          Entry Timing
-        </Link>
-        <Link href="/forex/mae-analysis" className="forex-pill">
-          MAE Analysis
-        </Link>
-        <Link href="/forex/alert-history" className="forex-pill">
-          Alert History
-        </Link>
-        <Link href="/forex/performance-snapshot" className="forex-pill">
-          Performance Snapshot
-        </Link>
-        <Link href="/forex/market-intelligence" className="forex-pill">
-          Market Intelligence
-        </Link>
-        <Link href="/forex/smc-rejections" className="forex-pill">
-          SMC Rejections
-        </Link>
-      </div>
+      <ForexNav activeHref="/forex/trade-performance" />
 
       <div className="panel">
         <div className="forex-controls">

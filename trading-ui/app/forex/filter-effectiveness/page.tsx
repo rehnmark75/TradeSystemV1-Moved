@@ -3,6 +3,7 @@
 
 import Link from "next/link";
 import { useEffect, useState } from "react";
+import ForexNav from "../_components/ForexNav";
 
 type FilterMetric = {
   filter_name: string;
@@ -103,16 +104,7 @@ export default function FilterEffectivenessPage() {
         <div className="header-chip">Forex</div>
       </div>
 
-      <div className="forex-nav">
-        <Link href="/forex" className="forex-pill">Overview</Link>
-        <Link href="/forex/strategy" className="forex-pill">Strategy</Link>
-        <Link href="/forex/trade-performance" className="forex-pill">Trade Performance</Link>
-        <Link href="/forex/entry-timing" className="forex-pill">Entry Timing</Link>
-        <Link href="/forex/mae-analysis" className="forex-pill">MAE Analysis</Link>
-        <Link href="/forex/alert-history" className="forex-pill">Alert History</Link>
-        <Link href="/forex/smc-rejections" className="forex-pill">SMC Rejections</Link>
-        <Link href="/forex/filter-effectiveness" className="forex-pill active">Filter Audit</Link>
-      </div>
+      <ForexNav activeHref="/forex/filter-effectiveness" />
 
       <div className="panel">
         <div className="forex-controls">
