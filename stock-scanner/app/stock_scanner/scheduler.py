@@ -113,6 +113,14 @@ except ImportError:
     STALE_ORDER_GUARDIAN_AVAILABLE = False
     StaleOrderGuardian = None
 
+# Import watchlist backtest service
+try:
+    from stock_scanner.services.watchlist_backtest_service import WatchlistBacktestService
+    WATCHLIST_BACKTEST_AVAILABLE = True
+except ImportError:
+    WATCHLIST_BACKTEST_AVAILABLE = False
+    WatchlistBacktestService = None
+
 # Import deep analysis orchestrator for watchlist DAQ scoring
 try:
     from stock_scanner.services.deep_analysis import DeepAnalysisOrchestrator
@@ -232,6 +240,7 @@ class StockScheduler:
         self.performance_tracker: PerformanceTracker = None
         self.premarket_service: PreMarketService = None
         self.deep_analysis_orchestrator: DeepAnalysisOrchestrator = None
+        self.watchlist_backtest_service: WatchlistBacktestService = None
         self.running = False
 
     async def setup(self):
@@ -261,6 +270,11 @@ class StockScheduler:
         if DEEP_ANALYSIS_AVAILABLE:
             self.deep_analysis_orchestrator = DeepAnalysisOrchestrator(self.db)
             logger.info("Deep Analysis Orchestrator initialized")
+
+        # Initialize watchlist backtest service if available
+        if WATCHLIST_BACKTEST_AVAILABLE:
+            self.watchlist_backtest_service = WatchlistBacktestService(self.db)
+            logger.info("Watchlist Backtest Service initialized")
 
         # Initialize scanner manager if available
         if SCANNER_MANAGER_AVAILABLE:
@@ -1679,9 +1693,14 @@ async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[i
                 print(f"Analyzed {len(successful)}/{len(results)} technical watchlist stocks (avg DAQ: {avg_daq:.1f})")
             else:
                 print("Deep Analysis Orchestrator not available")
+        elif task == "watchlist_backtest":
+            if scheduler.watchlist_backtest_service:
+                await scheduler.watchlist_backtest_service.run_ema50_today(days=90)
+            else:
+                print("Watchlist Backtest Service not available")
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, guardian, techwldaq")
+            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, guardian, techwldaq, watchlist_backtest")
     finally:
         await scheduler.cleanup()
 
@@ -1694,7 +1713,7 @@ def main():
                        choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
-                               'guardian', 'techwldaq', 'status'],
+                               'guardian', 'techwldaq', 'watchlist_backtest', 'status'],
                        help='Command to execute')
     parser.add_argument('--date', help='Watchlist scan date (YYYY-MM-DD) for recommendations')
     parser.add_argument('--limit', type=int, help='Max tickers to refresh (default config)')
@@ -1715,7 +1734,8 @@ def main():
 
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc', 'watchlist',
                           'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations', 'intraday',
-                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'guardian', 'techwldaq']:
+                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'guardian', 'techwldaq',
+                          'watchlist_backtest']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command, scan_date=args.date, limit=args.limit, force=args.force))
 
@@ -1766,6 +1786,7 @@ def main():
         print("  watchlist        - Build watchlist only")
         print("  brokersync       - Sync broker trades to database")
         print("  techwldaq        - Run DAQ analysis for technical watchlists")
+        print("  watchlist_backtest - Backtest EMA50 crossover watchlist (90d)")
 
 
 if __name__ == '__main__':

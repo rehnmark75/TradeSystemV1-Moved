@@ -71,7 +71,13 @@ export async function GET(request: Request) {
           bt_closed.last_closed_time,
           bt_closed.last_closed_profit,
           bt_closed.last_closed_profit_pct,
-          bt_closed.last_closed_side
+          bt_closed.last_closed_side,
+          w.bt_ema50_90d_signals,
+          w.bt_ema50_90d_win_rate,
+          w.bt_ema50_90d_avg_pnl,
+          w.bt_ema50_90d_total_pnl,
+          w.bt_ema50_90d_profit_factor,
+          w.bt_ema50_90d_avg_hold_days
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -177,7 +183,13 @@ export async function GET(request: Request) {
         bt_closed.last_closed_time,
         bt_closed.last_closed_profit,
         bt_closed.last_closed_profit_pct,
-        bt_closed.last_closed_side
+        bt_closed.last_closed_side,
+        w.bt_ema50_90d_signals,
+        w.bt_ema50_90d_win_rate,
+        w.bt_ema50_90d_avg_pnl,
+        w.bt_ema50_90d_total_pnl,
+        w.bt_ema50_90d_profit_factor,
+        w.bt_ema50_90d_avg_hold_days
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker

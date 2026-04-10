@@ -60,6 +60,12 @@ type WatchlistRow = {
   last_closed_profit?: number | null;
   last_closed_profit_pct?: number | null;
   last_closed_side?: string | null;
+  bt_ema50_90d_signals?: number | null;
+  bt_ema50_90d_win_rate?: number | null;
+  bt_ema50_90d_avg_pnl?: number | null;
+  bt_ema50_90d_total_pnl?: number | null;
+  bt_ema50_90d_profit_factor?: number | null;
+  bt_ema50_90d_avg_hold_days?: number | null;
 };
 
 type WatchlistDetail = WatchlistRow & {
@@ -654,16 +660,17 @@ export default function Page() {
     setOrderMessage((prev) => ({ ...prev, [ticker]: null }));
     const d = details[ticker];
     try {
-      const res = await fetch(`${apiPath("orders/place")}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          ticker,
-          side: "buy",
-          order_type: os.orderType,
-          quantity: os.quantity,
-          price: os.orderType === "limit" ? os.price : undefined,
-          stop_loss: os.stopLoss,
+    const res = await fetch(`${apiPath("orders/place")}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        ticker,
+        watchlist_name: watchlist,
+        side: "buy",
+        order_type: os.orderType,
+        quantity: os.quantity,
+        price: os.orderType === "limit" ? os.price : undefined,
+        stop_loss: os.stopLoss,
           take_profit: os.takeProfit > 0 ? os.takeProfit : undefined,
           trade_ready_override: os.override,
           signal_id: d?.signal_id || undefined,
@@ -885,6 +892,7 @@ export default function Page() {
           <span>1D</span>
           <span>W</span>
           <span>M</span>
+          <span>BT Win%</span>
         </div>
 
         {loading ? (
@@ -1017,6 +1025,11 @@ export default function Page() {
                         ? `${Number(row.perf_1m) >= 0 ? "+" : ""}${Number(row.perf_1m).toFixed(1)}%`
                         : "-"}
                     </span>
+                    <span>
+                      {row.bt_ema50_90d_win_rate !== null && row.bt_ema50_90d_win_rate !== undefined
+                        ? `${Number(row.bt_ema50_90d_win_rate).toFixed(1)}%`
+                        : "-"}
+                    </span>
                   </div>
 
                   {expandedRow ? (
@@ -1137,6 +1150,15 @@ export default function Page() {
                                 <div className="detail-item">
                                   Risk: {formatValue(details[row.ticker]?.risk_percent, 1)}%
                                 </div>
+                              </div>
+                              <h4>EMA50 Backtest (90d)</h4>
+                              <div className="detail-grid">
+                                <div className="detail-item">Signals: {row.bt_ema50_90d_signals ?? "-"}</div>
+                                <div className="detail-item">Win%: {row.bt_ema50_90d_win_rate != null ? `${Number(row.bt_ema50_90d_win_rate).toFixed(1)}%` : "-"}</div>
+                                <div className="detail-item">Avg PnL: {row.bt_ema50_90d_avg_pnl != null ? `${Number(row.bt_ema50_90d_avg_pnl) >= 0 ? "+" : ""}${Number(row.bt_ema50_90d_avg_pnl).toFixed(2)}%` : "-"}</div>
+                                <div className="detail-item">Total PnL: {row.bt_ema50_90d_total_pnl != null ? `${Number(row.bt_ema50_90d_total_pnl) >= 0 ? "+" : ""}${Number(row.bt_ema50_90d_total_pnl).toFixed(1)}%` : "-"}</div>
+                                <div className="detail-item">Profit Factor: {row.bt_ema50_90d_profit_factor != null ? Number(row.bt_ema50_90d_profit_factor).toFixed(2) : "-"}</div>
+                                <div className="detail-item">Avg Hold Days: {row.bt_ema50_90d_avg_hold_days != null ? Number(row.bt_ema50_90d_avg_hold_days).toFixed(1) : "-"}</div>
                               </div>
                               {details[row.ticker]?.trade_ready_reasons ? (
                                 <div style={{ marginTop: 8 }}>

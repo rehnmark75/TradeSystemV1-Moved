@@ -9,6 +9,7 @@ const API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com
 
 interface PlaceOrderBody {
   ticker: string;
+  watchlist_name?: string;
   side: "buy" | "sell";
   order_type: "market" | "limit";
   quantity: number;
@@ -27,7 +28,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid JSON body" }, { status: 400 });
   }
 
-  const { ticker, side, order_type, quantity, price, stop_loss, take_profit, trade_ready_override, signal_id } = body;
+  const { ticker, watchlist_name, side, order_type, quantity, price, stop_loss, take_profit, trade_ready_override, signal_id } = body;
 
   // Validation
   if (!ticker || typeof ticker !== "string") {
@@ -60,17 +61,32 @@ export async function POST(request: Request) {
   try {
     // Check trade_ready gate
     if (!trade_ready_override) {
-      const trResult = await client.query(
-        `SELECT trade_ready FROM stock_watchlist_results
-         WHERE ticker = $1 AND status = 'active'
-         ORDER BY scan_date DESC LIMIT 1`,
-        [ticker]
-      );
-      if (trResult.rows.length > 0 && !trResult.rows[0].trade_ready) {
-        return NextResponse.json(
-          { error: `${ticker} is not trade-ready. Check the override box to place anyway.` },
-          { status: 400 }
+      if (watchlist_name) {
+        const trResult = await client.query(
+          `SELECT trade_ready FROM stock_watchlist_results
+           WHERE ticker = $1 AND watchlist_name = $2 AND status = 'active'
+           ORDER BY scan_date DESC LIMIT 1`,
+          [ticker, watchlist_name]
         );
+        if (trResult.rows.length > 0 && !trResult.rows[0].trade_ready) {
+          return NextResponse.json(
+            { error: `${ticker} is not trade-ready. Check the override box to place anyway.` },
+            { status: 400 }
+          );
+        }
+      } else {
+        const trResult = await client.query(
+          `SELECT trade_ready FROM stock_watchlist_results
+           WHERE ticker = $1 AND status = 'active'
+           ORDER BY scan_date DESC LIMIT 1`,
+          [ticker]
+        );
+        if (trResult.rows.length > 0 && !trResult.rows[0].trade_ready) {
+          return NextResponse.json(
+            { error: `${ticker} is not trade-ready. Check the override box to place anyway.` },
+            { status: 400 }
+          );
+        }
       }
     }
 
