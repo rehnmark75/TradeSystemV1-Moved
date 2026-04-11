@@ -7,5 +7,39 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #4841 | 10:11 AM | 🔵 | Watchlist Scanner Generates SL/TP for User's Primary Signal Source | ~437 |
+| #4844 | 11:14 AM | 🔵 | Watchlist Scanner Trade Plan Implementation | ~361 |
+| #4835 | 9:44 AM | 🔵 | Stock Scanner System Architecture Mapped | ~414 |
+
+### Mar 4, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4955 | 7:23 AM | 🔵 | Trade-Ready Enrichment Pipeline and Data Flow | ~398 |
+| #4945 | 7:21 AM | 🔵 | Complete Trade-Ready Filter Criteria | ~140 |
+| #4941 | 7:19 AM | 🔵 | Stock Scanner Watchlist Types and Entry Criteria | ~144 |
+| #4939 | 7:17 AM | 🔵 | DAQ vs RS Weighting in EMA 50 Watchlist Signals | ~237 |
+
+### Mar 5, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #4964 | 6:52 AM | 🔴 | Added recalculate_trade_ready() Public Method to WatchlistScanner | ~240 |
+| #4962 | 6:49 AM | 🔵 | Root Cause Found: Trade Ready Calculated Before DAQ Scoring | ~282 |
+| #4960 | 6:48 AM | 🔵 | Trade Ready Calculation Logic in Watchlist Scanner | ~256 |
+
+### Apr 8, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #5558 | 5:15 PM | 🔴 | Fixed RS column showing 0 in EMA 50 crossover watchlist | ~551 |
+| #5557 | 5:13 PM | 🔴 | Fixed RS Calculator NaN handling and N-day lookback calculation | ~369 |
+
+### Apr 11, 2026
+
+| ID | Time | T | Title | Read |
+|----|------|---|-------|------|
+| #5719 | 1:20 PM | ⚖️ | EMA 50 Crossover Signal Quality Validation Plan | ~357 |
+| #5717 | 1:01 PM | 🔵 | Available RS7DAQ and TradingView Data for Signal Validation | ~390 |
+| #5703 | 12:07 PM | 🔵 | Stock Scanner Architecture Deep Dive | ~468 |
+| #5702 | 12:06 PM | 🔵 | Stock Scanner System Architecture Overview | ~452 |
 </claude-mem-context>
