@@ -5260,3 +5260,28 @@ input {
     grid-template-columns: 1fr;
   }
 }
+
+/* ── Scanner settings section icon ────────────────── */
+.scanner-section-icon {
+  display: inline-block;
+  margin-right: 8px;
+  opacity: 0.7;
+  font-size: 1rem;
+  vertical-align: middle;
+}
+
+/* ── Scanner subgroup description ─────────────────── */
+.strategy-subgroup-desc {
+  font-size: 0.78rem;
+  color: var(--muted);
+  margin: -4px 0 10px;
+  line-height: 1.5;
+}
+
+/* ── Critical badge on subsection title ───────────── */
+.subgroup-critical-badge {
+  margin-left: 8px;
+  font-size: 0.75rem;
+  color: var(--bad);
+  opacity: 0.85;
+}

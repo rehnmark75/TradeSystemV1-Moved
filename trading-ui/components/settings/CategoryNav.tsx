@@ -7,6 +7,9 @@ export interface CategoryNavItem {
   fieldCount: number;
   modifiedCount: number;
   overriddenCount: number;
+  // Optional display overrides (used for scanner categories)
+  displayLabel?: string;
+  displayIcon?: string;
 }
 
 interface CategoryNavProps {
@@ -82,10 +85,10 @@ export default function CategoryNav({
               type="button"
               className={`category-nav-item ${isActive ? "active" : ""}`}
               onClick={() => onSelect(item.category)}
-              title={item.category}
+              title={item.displayLabel ?? item.category}
             >
-              <span className="category-nav-icon">{getIcon(item.category)}</span>
-              <span className="category-nav-label">{shortLabel(item.category)}</span>
+              <span className="category-nav-icon">{item.displayIcon ?? getIcon(item.category)}</span>
+              <span className="category-nav-label">{item.displayLabel ?? shortLabel(item.category)}</span>
               <span className="category-nav-badges">
                 {item.modifiedCount > 0 ? (
                   <span className="category-nav-badge badge-modified" title="Modified">

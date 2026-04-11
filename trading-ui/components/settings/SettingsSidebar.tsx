@@ -1,19 +1,5 @@
 import Link from "next/link";
 
-const scannerCategories = [
-  { key: "core", label: "Core" },
-  { key: "indicators", label: "Indicators" },
-  { key: "data-quality", label: "Data Quality" },
-  { key: "trading-control", label: "Trading Control" },
-  { key: "duplicate-detection", label: "Duplicate Detection" },
-  { key: "risk-management", label: "Risk Management" },
-  { key: "trading-hours", label: "Trading Hours" },
-  { key: "order-executor", label: "Order Executor" },
-  { key: "smc-conflict", label: "SMC Conflict" },
-  { key: "claude-ai", label: "Claude AI" },
-  { key: "audit", label: "Audit" }
-];
-
 export default function SettingsSidebar() {
   return (
     <nav className="settings-sidebar">
@@ -34,11 +20,8 @@ export default function SettingsSidebar() {
       </div>
       <div className="settings-sidebar-section">
         <h3>Scanner</h3>
-        {scannerCategories.map((category) => (
-          <Link key={category.key} href={`/settings/scanner/${category.key}`}>
-            {category.label}
-          </Link>
-        ))}
+        <Link href="/settings/scanner">Scanner Settings</Link>
+        <Link href="/settings/scanner/audit">Audit Trail</Link>
       </div>
       <div className="settings-sidebar-section">
         <h3>Strategy</h3>
