@@ -1,110 +1,268 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import CategoryNav, { type CategoryNavItem } from "../../../components/settings/CategoryNav";
+import SettingsToolbar, { type SettingsMode } from "../../../components/settings/SettingsToolbar";
+import ParameterContextPanel from "../../../components/settings/ParameterContextPanel";
 import SettingsField from "../../../components/settings/SettingsField";
-import SettingsForm from "../../../components/settings/SettingsForm";
-import SettingsSearch from "../../../components/settings/SettingsSearch";
+import SaveModal from "../../../components/settings/SaveModal";
+import SnapshotPanel from "../../../components/settings/SnapshotPanel";
 import ConflictModal from "../../../components/settings/ConflictModal";
 import { useSmcConfig } from "../../../hooks/settings/useSmcConfig";
 import { useSmcMetadata } from "../../../hooks/settings/useSmcMetadata";
 import { useSettingsSearch } from "../../../hooks/settings/useSettingsSearch";
+import { usePairOverrides } from "../../../hooks/settings/usePairOverrides";
+import { apiUrl } from "../../../lib/settings/api";
 import { logTelemetry } from "../../../lib/settings/telemetry";
 import type { SmcParameterMetadata } from "../../../types/settings";
 
+type EffectivePayload = {
+  epic: string;
+  global: Record<string, unknown>;
+  override: Record<string, unknown> | null;
+  effective: Record<string, unknown>;
+};
+
+const SYSTEM_FIELDS = new Set([
+  "id", "created_at", "updated_at", "updated_by", "change_reason",
+  "version", "is_active", "enabled_pairs",
+]);
+
+const META_FIELDS = new Set([
+  "id", "config_id", "epic", "created_at", "updated_at", "updated_by", "change_reason",
+]);
+
+const PREFERRED_ORDER = [
+  "Tier 1: 4H Directional Bias",
+  "Tier 2: 15m Entry Trigger",
+  "Tier 3: 5m Execution",
+  "Risk Management",
+  "Session Filter",
+  "Confidence Scoring",
+  "MACD Alignment Filter",
+  "Swing Proximity Validation (TIER 4)",
+  "Adaptive Cooldown",
+  "Scalp Mode (High-Frequency Trading)",
+  "Scalp",
+  "Scalp Qualification",
+  "Alternative Triggers",
+  "Enabled Trading Pairs",
+  "Other",
+];
+
 function toLabel(value: string) {
-  return value.replace(/_/g, " ");
+  return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
-export default function SmcGlobalSettingsPage() {
-  const [query, setQuery] = useState("");
-  const [modifiedOnly, setModifiedOnly] = useState(false);
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [updatedBy, setUpdatedBy] = useState("");
-  const [changeReason, setChangeReason] = useState("");
+function valuesEqual(a: unknown, b: unknown) {
+  if (a === b) return true;
+  if (typeof a === "object" && typeof b === "object") {
+    return JSON.stringify(a) === JSON.stringify(b);
+  }
+  return false;
+}
+
+function hasKey(obj: Record<string, unknown>, key: string) {
+  return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+export default function UnifiedStrategySettings() {
+  // Mode
+  const [mode, setMode] = useState<SettingsMode>("global");
+
+  // Global config
   const {
     effectiveData,
-    loading,
-    error,
+    loading: configLoading,
+    error: configError,
     changes,
     updateField,
     saveChanges,
     resetChanges,
     conflict,
     setConflict,
-    setChanges
+    setChanges,
   } = useSmcConfig();
-  const {
-    metadata,
-    loading: metadataLoading,
-    error: metadataError
-  } = useSmcMetadata();
 
-  const data = effectiveData as Record<string, unknown> | null;
-  const keys = data ? Object.keys(data).filter((key) => !["id", "created_at"].includes(key)) : [];
-  const searchIndex = useMemo(() => {
-    const index: Record<string, string> = {};
-    (metadata ?? []).forEach((item) => {
-      index[item.parameter_name] = [
-        item.parameter_name,
-        item.display_name,
-        item.description,
-        item.help_text,
-        item.category,
-        item.subcategory
-      ]
-        .filter(Boolean)
-        .join(" ")
-        .toLowerCase();
-    });
-    return index;
-  }, [metadata]);
-  const filtered = useSettingsSearch(keys, data, {}, query, modifiedOnly, searchIndex);
+  // Metadata
+  const { metadata, loading: metadataLoading } = useSmcMetadata();
+
+  // Pair overrides
+  const {
+    overrides,
+    loading: overridesLoading,
+    bulkAction,
+    deleteOverride,
+    saveOverride,
+    createOverride,
+    reload: reloadOverrides,
+  } = usePairOverrides();
+
+  // Pair state
+  const [selectedEpic, setSelectedEpic] = useState("");
+  const [effective, setEffective] = useState<EffectivePayload | null>(null);
+  const [overrideColumns, setOverrideColumns] = useState<string[]>([]);
+  const [draftOverrides, setDraftOverrides] = useState<Record<string, unknown>>({});
+  const [initialOverrides, setInitialOverrides] = useState<Record<string, unknown>>({});
+  const [baseParamOverrides, setBaseParamOverrides] = useState<Record<string, unknown>>({});
+
+  // UI state
+  const [query, setQuery] = useState("");
+  const [filters, setFilters] = useState({
+    modifiedOnly: false,
+    showAdvanced: false,
+    overriddenOnly: false,
+    requiresRestartOnly: false,
+  });
+  const [focusedParam, setFocusedParam] = useState<string | null>(null);
+  const [activeCategory, setActiveCategory] = useState<string | null>(null);
+  const [showSaveModal, setShowSaveModal] = useState(false);
+  const [showSnapshotPanel, setShowSnapshotPanel] = useState(false);
+  const [changeReason, setChangeReason] = useState("");
+  const [pairSaveLoading, setPairSaveLoading] = useState(false);
+
+  // Refs for section scrolling
+  const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
+  const contentRef = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
     logTelemetry({ event_type: "page_view", page: "/settings/strategy" });
   }, []);
 
-  const sections = useMemo(() => {
-    if (!data) return [];
-    const filteredSet = new Set(filtered);
-    const metadataList = metadata ?? [];
-    const metadataMap = new Map<string, SmcParameterMetadata>();
-    metadataList.forEach((item) => metadataMap.set(item.parameter_name, item));
+  // Load override columns
+  useEffect(() => {
+    fetch(apiUrl("/api/settings/strategy/smc/pairs/columns"))
+      .then((r) => r.json())
+      .then((p) => setOverrideColumns(Array.isArray(p?.columns) ? p.columns : []))
+      .catch(() => setOverrideColumns([]));
+  }, []);
 
-    const preferredOrder = [
-      "Tier 1: 4H Directional Bias",
-      "Tier 2: 15m Entry Trigger",
-      "Tier 3: 5m Execution",
-      "Risk Management",
-      "Session Filter",
-      "Confidence Scoring",
-      "MACD Alignment Filter",
-      "Swing Proximity Validation (TIER 4)",
-      "Adaptive Cooldown",
-      "Scalp Mode (High-Frequency Trading)",
-      "Scalp",
-      "Scalp Qualification",
-      "Alternative Triggers",
-      "Enabled Trading Pairs",
-      "Other"
-    ];
+  // Derive all pairs
+  const globalConfig = effectiveData as Record<string, unknown> | null;
+  const enabledPairs = useMemo(() => {
+    const v = globalConfig?.enabled_pairs;
+    return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
+  }, [globalConfig]);
 
-    const sectionsMap = new Map<
-      string,
-      {
-        category: string;
-        items: SmcParameterMetadata[];
-        subgroups: Map<string, SmcParameterMetadata[]>;
+  const allPairs = useMemo(() => {
+    const pairs = new Set<string>(enabledPairs);
+    overrides.forEach((o) => pairs.add(o.epic));
+    return Array.from(pairs).sort();
+  }, [enabledPairs, overrides]);
+
+  // Auto-select first pair
+  useEffect(() => {
+    if (!selectedEpic && allPairs.length) setSelectedEpic(allPairs[0]);
+  }, [allPairs, selectedEpic]);
+
+  // Load effective config for selected pair
+  useEffect(() => {
+    if (!selectedEpic) { setEffective(null); return; }
+    const controller = new AbortController();
+    fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}`), { signal: controller.signal })
+      .then((r) => r.json())
+      .then(setEffective)
+      .catch(() => {});
+    return () => controller.abort();
+  }, [selectedEpic]);
+
+  // Sync draft overrides when effective config changes
+  useEffect(() => {
+    if (!effective) { setDraftOverrides({}); setInitialOverrides({}); setBaseParamOverrides({}); return; }
+    const override = effective.override ?? {};
+    const paramOverrides = (override.parameter_overrides as Record<string, unknown>) ?? {};
+    const columnSet = new Set(overrideColumns.filter((k) => k !== "parameter_overrides"));
+    const columnOverrides: Record<string, unknown> = {};
+    Object.keys(override).forEach((key) => {
+      if (META_FIELDS.has(key) || key === "parameter_overrides") return;
+      if (!columnSet.has(key)) return;
+      const value = override[key];
+      if (value !== null && value !== undefined) columnOverrides[key] = value;
+    });
+    const merged = { ...paramOverrides, ...columnOverrides };
+    setInitialOverrides(merged);
+    setDraftOverrides(merged);
+    setBaseParamOverrides(paramOverrides);
+  }, [effective, overrideColumns]);
+
+  // Override counts
+  const overrideCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    overrides.forEach((ov) => {
+      let count = 0;
+      if (ov.parameter_overrides && typeof ov.parameter_overrides === "object") {
+        count += Object.keys(ov.parameter_overrides as Record<string, unknown>).length;
       }
-    >();
+      Object.entries(ov).forEach(([k, v]) => {
+        if (META_FIELDS.has(k) || k === "parameter_overrides") return;
+        if (v !== null && v !== undefined) count++;
+      });
+      counts.set(ov.epic, count);
+    });
+    return counts;
+  }, [overrides]);
+
+  // Dirty pair override keys
+  const dirtyKeys = useMemo(() => {
+    const keys = new Set<string>();
+    const allKeys = new Set([...Object.keys(initialOverrides), ...Object.keys(draftOverrides)]);
+    allKeys.forEach((key) => {
+      const hasInitial = hasKey(initialOverrides, key);
+      const hasDraft = hasKey(draftOverrides, key);
+      if (hasInitial !== hasDraft) { keys.add(key); return; }
+      if (!valuesEqual(initialOverrides[key], draftOverrides[key])) keys.add(key);
+    });
+    return keys;
+  }, [draftOverrides, initialOverrides]);
+
+  // Build metadata map and search index
+  const metadataMap = useMemo(() => {
+    const map = new Map<string, SmcParameterMetadata>();
+    (metadata ?? []).forEach((item) => map.set(item.parameter_name, item));
+    return map;
+  }, [metadata]);
+
+  const searchIndex = useMemo(() => {
+    const index: Record<string, string> = {};
+    (metadata ?? []).forEach((item) => {
+      index[item.parameter_name] = [
+        item.parameter_name, item.display_name, item.description,
+        item.help_text, item.category, item.subcategory,
+      ].filter(Boolean).join(" ").toLowerCase();
+    });
+    return index;
+  }, [metadata]);
+
+  // Source data for current mode
+  const sourceData = mode === "global"
+    ? (globalConfig ?? {})
+    : (effective?.global ?? globalConfig ?? {});
+
+  const fieldKeys = Object.keys(sourceData).filter((k) => !SYSTEM_FIELDS.has(k));
+
+  const currentChanges = mode === "global" ? changes : draftOverrides;
+  const filteredKeys = useSettingsSearch(fieldKeys, sourceData, {}, query, filters.modifiedOnly, searchIndex);
+
+  // Apply additional filters
+  const visibleKeys = useMemo(() => {
+    let keys = filteredKeys;
+    if (filters.requiresRestartOnly) {
+      keys = keys.filter((k) => metadataMap.get(k)?.requires_restart);
+    }
+    if (mode === "pair" && filters.overriddenOnly) {
+      keys = keys.filter((k) => hasKey(draftOverrides, k));
+    }
+    return keys;
+  }, [filteredKeys, filters, metadataMap, mode, draftOverrides]);
+
+  // Build sections
+  const sections = useMemo(() => {
+    const filteredSet = new Set(visibleKeys);
+    const sectionsMap = new Map<string, { category: string; items: SmcParameterMetadata[]; subgroups: Map<string, SmcParameterMetadata[]> }>();
 
     const addItem = (item: SmcParameterMetadata) => {
       const category = item.category || "Other";
-      const section = sectionsMap.get(category) ?? {
-        category,
-        items: [],
-        subgroups: new Map<string, SmcParameterMetadata[]>()
-      };
+      const section = sectionsMap.get(category) ?? { category, items: [] as SmcParameterMetadata[], subgroups: new Map<string, SmcParameterMetadata[]>() };
       const subcategory = item.subcategory?.trim();
       if (subcategory) {
         const bucket = section.subgroups.get(subcategory) ?? [];
@@ -116,187 +274,317 @@ export default function SmcGlobalSettingsPage() {
       sectionsMap.set(category, section);
     };
 
-    metadataList.forEach((item) => {
+    (metadata ?? []).forEach((item) => {
       if (!filteredSet.has(item.parameter_name)) return;
-      if (!showAdvanced && item.is_advanced) return;
+      if (!filters.showAdvanced && item.is_advanced) return;
       addItem(item);
     });
 
     filteredSet.forEach((field) => {
       if (metadataMap.has(field)) return;
-      addItem({
-        id: 0,
-        parameter_name: field,
-        display_name: toLabel(field),
-        category: "Other",
-        data_type: typeof data[field],
-        display_order: 0
-      });
+      addItem({ id: 0, parameter_name: field, display_name: toLabel(field), category: "Other", data_type: typeof sourceData[field], display_order: 0 });
     });
 
     const sortItems = (items: SmcParameterMetadata[]) =>
-      [...items].sort((a, b) => {
-        const orderA = a.display_order ?? 0;
-        const orderB = b.display_order ?? 0;
-        if (orderA !== orderB) return orderA - orderB;
-        return a.display_name.localeCompare(b.display_name);
-      });
+      [...items].sort((a, b) => ((a.display_order ?? 0) - (b.display_order ?? 0)) || a.display_name.localeCompare(b.display_name));
 
     return [...sectionsMap.values()]
       .sort((a, b) => {
-        const indexA = preferredOrder.indexOf(a.category);
-        const indexB = preferredOrder.indexOf(b.category);
-        if (indexA !== -1 || indexB !== -1) {
-          return (indexA === -1 ? 999 : indexA) - (indexB === -1 ? 999 : indexB);
-        }
-        return a.category.localeCompare(b.category);
+        const ia = PREFERRED_ORDER.indexOf(a.category);
+        const ib = PREFERRED_ORDER.indexOf(b.category);
+        return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       })
-      .map((section) => ({
-        ...section,
-        items: sortItems(section.items),
-        subgroups: new Map(
-          [...section.subgroups.entries()].map(([key, items]) => [
-            key,
-            sortItems(items)
-          ])
-        )
+      .map((s) => ({
+        ...s,
+        items: sortItems(s.items),
+        subgroups: new Map([...s.subgroups.entries()].map(([k, v]) => [k, sortItems(v)])),
       }));
-  }, [data, filtered, metadata, showAdvanced]);
+  }, [visibleKeys, metadata, metadataMap, filters.showAdvanced, sourceData]);
 
-  const changeKeys = useMemo(() => new Set(Object.keys(changes)), [changes]);
-  const safeData = data ?? {};
+  // Category nav items
+  const categoryNavItems: CategoryNavItem[] = useMemo(() => {
+    return sections.map((s) => {
+      const allFields = [
+        ...s.items.map((i) => i.parameter_name),
+        ...[...s.subgroups.values()].flat().map((i) => i.parameter_name),
+      ];
+      const modifiedCount = mode === "global"
+        ? allFields.filter((f) => hasKey(changes, f)).length
+        : allFields.filter((f) => hasKey(draftOverrides, f)).length;
+      const overriddenCount = mode === "pair"
+        ? allFields.filter((f) => hasKey(draftOverrides, f)).length
+        : 0;
+      return { category: s.category, fieldCount: allFields.length, modifiedCount, overriddenCount };
+    });
+  }, [sections, mode, changes, draftOverrides]);
 
-  if (loading) {
-    return <div className="settings-panel">Loading settings...</div>;
-  }
+  // Pending count
+  const pendingCount = mode === "global" ? Object.keys(changes).length : dirtyKeys.size;
+
+  // Per-pair effective values for context panel
+  const perPairEffective = useMemo(() => {
+    const map = new Map<string, unknown>();
+    if (focusedParam && effective) {
+      map.set(selectedEpic, effective.effective[focusedParam]);
+    }
+    return map;
+  }, [focusedParam, effective, selectedEpic]);
+
+  // IntersectionObserver for active category tracking
+  useEffect(() => {
+    const refs = sectionRefs.current;
+    const observer = new IntersectionObserver(
+      (entries) => {
+        for (const entry of entries) {
+          if (entry.isIntersecting) {
+            setActiveCategory(entry.target.getAttribute("data-category"));
+            break;
+          }
+        }
+      },
+      { threshold: 0.1, rootMargin: "-100px 0px -60% 0px" }
+    );
+    refs.forEach((el) => observer.observe(el));
+    return () => observer.disconnect();
+  }, [sections]);
+
+  // Scroll to category
+  const scrollToCategory = (category: string) => {
+    const el = sectionRefs.current.get(category);
+    if (el) {
+      el.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  };
+
+  // Save handlers
+  const handleSave = () => setShowSaveModal(true);
+
+  const handleConfirmSave = async (reason: string) => {
+    if (mode === "global") {
+      await saveChanges({ updatedBy: "admin", changeReason: reason });
+    } else {
+      if (!selectedEpic) return;
+      const columnSet = new Set(overrideColumns.filter((k) => k !== "parameter_overrides"));
+      const nextParamOverrides = { ...baseParamOverrides };
+      const updates: Record<string, unknown> = {};
+      let paramChanged = false;
+
+      dirtyKeys.forEach((key) => {
+        const hasDraft = hasKey(draftOverrides, key);
+        const nextValue = hasDraft ? draftOverrides[key] : null;
+        if (columnSet.has(key)) {
+          updates[key] = nextValue;
+        } else {
+          if (hasDraft) nextParamOverrides[key] = nextValue;
+          else delete nextParamOverrides[key];
+          paramChanged = true;
+        }
+      });
+      if (paramChanged) updates.parameter_overrides = nextParamOverrides;
+
+      setPairSaveLoading(true);
+      try {
+        const activePairOverride = overrides.find((o) => o.epic === selectedEpic);
+        if (activePairOverride && effective?.override?.updated_at) {
+          await saveOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason, updatedAt: String(effective.override.updated_at) });
+        } else {
+          await createOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason });
+        }
+        await reloadOverrides();
+        const refreshed = await fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}`)).then((r) => r.json());
+        setEffective(refreshed);
+      } finally {
+        setPairSaveLoading(false);
+      }
+    }
+    setShowSaveModal(false);
+  };
+
+  const handleDiscard = () => {
+    if (mode === "global") resetChanges();
+    else { setDraftOverrides(initialOverrides); }
+  };
+
+  // Override toggle / update
+  const toggleOverride = (field: string, next: boolean) => {
+    setDraftOverrides((prev) => {
+      const copy = { ...prev };
+      if (next) copy[field] = effective?.global[field] ?? "";
+      else delete copy[field];
+      return copy;
+    });
+  };
+
+  const updateOverrideValue = (field: string, value: unknown) => {
+    setDraftOverrides((prev) => ({ ...prev, [field]: value }));
+  };
+
+  // Render a field
+  const renderField = (item: SmcParameterMetadata) => {
+    const name = item.parameter_name;
+    const label = item.display_name || toLabel(name);
+    const descParts = [item.help_text ?? item.description];
+    if (item.requires_restart) descParts.push("Requires restart");
+    const description = descParts.filter(Boolean).join(" · ");
+
+    if (mode === "global") {
+      return (
+        <SettingsField
+          key={name}
+          name={name}
+          label={label}
+          description={description}
+          unit={item.unit ?? undefined}
+          value={sourceData[name]}
+          defaultValue={item.default_value ?? undefined}
+          metadata={item}
+          pending={hasKey(changes, name)}
+          onFocus={() => setFocusedParam(name)}
+          onChange={(v) => updateField(name, v)}
+        />
+      );
+    }
+
+    // Pair override mode
+    const isOverridden = hasKey(draftOverrides, name);
+    return (
+      <SettingsField
+        key={name}
+        name={name}
+        label={label}
+        description={description}
+        unit={item.unit ?? undefined}
+        value={isOverridden ? draftOverrides[name] : (effective?.global[name] ?? sourceData[name])}
+        defaultValue={item.default_value ?? undefined}
+        metadata={item}
+        pending={dirtyKeys.has(name)}
+        overrideMode
+        globalValue={effective?.global[name] ?? sourceData[name]}
+        effectiveValue={effective?.effective[name]}
+        isOverridden={isOverridden}
+        onToggle={(next) => toggleOverride(name, next)}
+        onFocus={() => setFocusedParam(name)}
+        onChange={(v) => updateOverrideValue(name, v)}
+      />
+    );
+  };
+
+  const isLoading = configLoading || metadataLoading || (mode === "pair" && overridesLoading);
+
+  // Original values for save modal diff
+  const originalValues = useMemo(() => {
+    if (mode === "global") return globalConfig ?? {};
+    return initialOverrides;
+  }, [mode, globalConfig, initialOverrides]);
 
   return (
-    <div className="settings-panel">
-      <div className="settings-hero">
-        <h1>SMC Global Settings</h1>
-        <p>Global configuration for SMC Simple strategy.</p>
-      </div>
-      {error ? <div className="settings-placeholder">Error: {error}</div> : null}
-      {metadataError ? (
-        <div className="settings-placeholder">Metadata error: {metadataError}</div>
-      ) : null}
-      <SettingsSearch value={query} onChange={setQuery} />
-      <div className="settings-toggle">
-        <label>
-          <input
-            type="checkbox"
-            checked={modifiedOnly}
-            onChange={(event) => setModifiedOnly(event.target.checked)}
-          />
-          Show modified only
-        </label>
-      </div>
-      <div className="settings-toggle">
-        <label>
-          <input
-            type="checkbox"
-            checked={showAdvanced}
-            onChange={(event) => setShowAdvanced(event.target.checked)}
-          />
-          Show advanced parameters
-        </label>
-      </div>
-      {(metadataLoading || sections.length === 0) && !error ? (
-        <div className="settings-placeholder">Loading SMC metadata...</div>
-      ) : null}
-      {sections.map((section, index) => {
-        const fields = [
-          ...section.items.map((item) => item.parameter_name),
-          ...[...section.subgroups.values()].flat().map((item) => item.parameter_name)
-        ];
-        const changedCount = fields.filter((field) => changeKeys.has(field)).length;
-        const open =
-          index === 0 || !!query.trim() || modifiedOnly || changedCount > 0;
-
-        return (
-          <details className="settings-section" key={section.category} open={open}>
-            <summary className="settings-section-summary">
-              <div>
-                <h2>{section.category}</h2>
-                <p>{fields.length} fields</p>
-              </div>
-              <div className="settings-section-meta">
-                {changedCount > 0 ? (
-                  <span className="settings-section-count">
-                    {changedCount} changed
-                  </span>
-                ) : null}
-                {section.subgroups.size > 0 ? (
-                  <span className="settings-section-count">
-                    {section.subgroups.size} groups
-                  </span>
-                ) : null}
-              </div>
-            </summary>
-            <div className="settings-section-body">
-              {section.subgroups.size > 0
-                ? [...section.subgroups.entries()].map(([title, items]) => (
-                    <div className="settings-subgroup" key={title}>
-                      <div className="settings-subgroup-title">{title}</div>
-                      <div className="settings-section-grid">
-                        {items.map((item) => {
-                          const descriptionParts = [item.help_text ?? item.description];
-                          if (item.requires_restart) {
-                            descriptionParts.push("Requires restart");
-                          }
-                          return (
-                            <SettingsField
-                              key={item.parameter_name}
-                              name={item.parameter_name}
-                              label={item.display_name || toLabel(item.parameter_name)}
-                              value={safeData[item.parameter_name]}
-                              defaultValue={item.default_value ?? undefined}
-                              description={descriptionParts.filter(Boolean).join(" · ")}
-                              unit={item.unit ?? undefined}
-                              pending={changeKeys.has(item.parameter_name)}
-                              onChange={(value) => updateField(item.parameter_name, value)}
-                            />
-                          );
-                        })}
-                      </div>
-                    </div>
-                  ))
-                : section.items.map((item) => {
-                    const descriptionParts = [item.help_text ?? item.description];
-                    if (item.requires_restart) {
-                      descriptionParts.push("Requires restart");
-                    }
-                    return (
-                      <SettingsField
-                        key={item.parameter_name}
-                        name={item.parameter_name}
-                        label={item.display_name || toLabel(item.parameter_name)}
-                        value={safeData[item.parameter_name]}
-                        defaultValue={item.default_value ?? undefined}
-                        description={descriptionParts.filter(Boolean).join(" · ")}
-                        unit={item.unit ?? undefined}
-                        pending={changeKeys.has(item.parameter_name)}
-                        onChange={(value) => updateField(item.parameter_name, value)}
-                      />
-                    );
-                  })}
-            </div>
-          </details>
-        );
-      })}
-      <SettingsForm
-        title="SMC Updates"
-        changes={changes}
-        updatedBy={updatedBy}
-        changeReason={changeReason}
-        onUpdatedByChange={setUpdatedBy}
-        onChangeReasonChange={setChangeReason}
-        onSave={({ updatedBy, changeReason }) =>
-          saveChanges({ updatedBy, changeReason })
-        }
-        onRevert={resetChanges}
-        onDiscard={resetChanges}
+    <div className="strategy-page">
+      <SettingsToolbar
+        mode={mode}
+        onModeChange={setMode}
+        pairs={allPairs}
+        selectedPair={selectedEpic}
+        pairOverrideCounts={overrideCounts}
+        onPairChange={setSelectedEpic}
+        query={query}
+        onQueryChange={setQuery}
+        filters={filters}
+        onFiltersChange={setFilters}
+        pendingCount={pendingCount}
+        onSave={handleSave}
+        onSnapshot={() => setShowSnapshotPanel(true)}
+        onDiscard={handleDiscard}
       />
+
+      <div className="strategy-layout">
+        <CategoryNav
+          items={categoryNavItems}
+          activeCategory={activeCategory ?? undefined}
+          onSelect={scrollToCategory}
+          showSnapshots
+          onSnapshotsClick={() => setShowSnapshotPanel(true)}
+        />
+
+        <div className="strategy-content" ref={contentRef}>
+          {isLoading ? (
+            <div className="settings-placeholder">Loading…</div>
+          ) : configError ? (
+            <div className="settings-placeholder">Error: {configError}</div>
+          ) : (
+            sections.map((section) => {
+              const allFields = [
+                ...section.items.map((i) => i.parameter_name),
+                ...[...section.subgroups.values()].flat().map((i) => i.parameter_name),
+              ];
+              return (
+                <section
+                  key={section.category}
+                  className="strategy-section"
+                  data-category={section.category}
+                  ref={(el) => {
+                    if (el) sectionRefs.current.set(section.category, el);
+                    else sectionRefs.current.delete(section.category);
+                  }}
+                >
+                  <div className="strategy-section-header">
+                    <h2>{section.category}</h2>
+                    <span className="strategy-section-count">{allFields.length} fields</span>
+                  </div>
+
+                  {section.subgroups.size > 0
+                    ? [...section.subgroups.entries()].map(([title, items]) => (
+                        <div key={title} className="strategy-subgroup">
+                          <div className="strategy-subgroup-title">{title}</div>
+                          <div className="strategy-field-grid">
+                            {items.map(renderField)}
+                          </div>
+                        </div>
+                      ))
+                    : (
+                      <div className="strategy-field-grid">
+                        {section.items.map(renderField)}
+                      </div>
+                    )
+                  }
+                </section>
+              );
+            })
+          )}
+        </div>
+
+        <ParameterContextPanel
+          paramName={focusedParam}
+          metadata={focusedParam ? metadataMap.get(focusedParam) : undefined}
+          currentValue={focusedParam ? (sourceData[focusedParam]) : undefined}
+          allPairEpics={allPairs}
+          allPairEffectiveValues={perPairEffective}
+          onReset={focusedParam && mode === "global"
+            ? () => {
+                const meta = metadataMap.get(focusedParam!);
+                if (meta?.default_value !== undefined) {
+                  updateField(focusedParam!, meta.default_value);
+                }
+              }
+            : undefined}
+        />
+      </div>
+
+      {showSaveModal ? (
+        <SaveModal
+          changes={mode === "global" ? (changes as Record<string, unknown>) : Object.fromEntries([...dirtyKeys].map((k) => [k, draftOverrides[k]]))}
+          originalValues={originalValues as Record<string, unknown>}
+          onConfirm={handleConfirmSave}
+          onCancel={() => setShowSaveModal(false)}
+        />
+      ) : null}
+
+      {showSnapshotPanel ? (
+        <SnapshotPanel
+          onClose={() => setShowSnapshotPanel(false)}
+          onRestored={() => window.location.reload()}
+        />
+      ) : null}
+
       <ConflictModal
         open={!!conflict}
         current={conflict}
@@ -304,22 +592,10 @@ export default function SmcGlobalSettingsPage() {
         onClose={() => setConflict(null)}
         onResolve={async ({ action, mergedChanges }) => {
           if (!conflict) return;
-          if (action === "discard") {
-            resetChanges();
-            setConflict(null);
-            return;
-          }
+          if (action === "discard") { resetChanges(); setConflict(null); return; }
           if (mergedChanges) {
-            if (!updatedBy.trim() || !changeReason.trim()) {
-              alert("Updated by and change reason are required.");
-              return;
-            }
             setChanges(mergedChanges);
-            await saveChanges(
-              { updatedBy, changeReason },
-              mergedChanges,
-              (conflict as any).updated_at
-            );
+            await saveChanges({ updatedBy: "admin", changeReason: changeReason || "Conflict resolution" }, mergedChanges, (conflict as any).updated_at);
             setConflict(null);
           }
         }}

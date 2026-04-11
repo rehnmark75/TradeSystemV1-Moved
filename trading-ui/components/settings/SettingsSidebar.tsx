@@ -42,8 +42,7 @@ export default function SettingsSidebar() {
       </div>
       <div className="settings-sidebar-section">
         <h3>Strategy</h3>
-        <Link href="/settings/strategy">SMC Global</Link>
-        <Link href="/settings/strategy/pairs">Per-Pair Overrides</Link>
+        <Link href="/settings/strategy">SMC Settings</Link>
         <Link href="/settings/strategy/effective">Effective View</Link>
       </div>
     </nav>

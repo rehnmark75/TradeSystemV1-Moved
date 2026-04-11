@@ -50,6 +50,32 @@ export interface AuditEntry {
   category?: string | null;
 }
 
+export interface ConfigSnapshot {
+  id: number;
+  snapshot_name: string;
+  description?: string | null;
+  base_config_id?: number | null;
+  base_config_version?: string | null;
+  parameter_overrides: Record<string, SettingsValue>;
+  created_at: string;
+  updated_at: string;
+  created_by?: string | null;
+  last_tested_at?: string | null;
+  test_results?: Record<string, SettingsValue> | null;
+  test_count: number;
+  is_promoted: boolean;
+  is_backtest_only: boolean;
+  is_active: boolean;
+  tags: string[];
+}
+
+export interface SnapshotDiff {
+  field: string;
+  snapshot_value: SettingsValue;
+  current_value: SettingsValue;
+  changed: boolean;
+}
+
 export interface SmcParameterMetadata {
   id: number;
   parameter_name: string;
