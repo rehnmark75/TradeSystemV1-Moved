@@ -66,6 +66,10 @@ type WatchlistRow = {
   bt_ema50_90d_total_pnl?: number | null;
   bt_ema50_90d_profit_factor?: number | null;
   bt_ema50_90d_avg_hold_days?: number | null;
+  bt_ema50_90d_score?: number | null;
+  bt_ema50_90d_grade?: string | null;
+  bt_ema50_90d_confidence?: string | null;
+  bt_ema50_90d_supports_signal?: string | null;
 };
 
 type WatchlistDetail = WatchlistRow & {
@@ -192,7 +196,7 @@ export default function Page() {
   const [noteEditDraft, setNoteEditDraft] = useState<Record<string, string>>({});
   const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
   const [tradeReadyOnly, setTradeReadyOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready">("signal");
+  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade">("signal");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   // Order form state (keyed by ticker)
@@ -285,6 +289,8 @@ export default function Page() {
         return numberOrNull(row.tv_overall_score) ?? -Infinity;
       case "days":
         return numberOrNull(row.days_on_list) ?? -Infinity;
+      case "bt_grade":
+        return numberOrNull(row.bt_ema50_90d_score) ?? -Infinity;
       case "signal":
       default:
         return getSignalDate(row);
@@ -304,7 +310,7 @@ export default function Page() {
     return data;
   }, [filteredRows, sortKey, sortDir, watchlist]);
 
-  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days" | "ready") => {
+  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade") => {
     if (sortKey === key) {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
     } else {
@@ -892,7 +898,9 @@ export default function Page() {
           <span>1D</span>
           <span>W</span>
           <span>M</span>
-          <span>BT Win%</span>
+          <button className="sort-btn" onClick={() => toggleSort("bt_grade")}>
+            BT {sortKey === "bt_grade" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
         </div>
 
         {loading ? (
@@ -1025,10 +1033,24 @@ export default function Page() {
                         ? `${Number(row.perf_1m) >= 0 ? "+" : ""}${Number(row.perf_1m).toFixed(1)}%`
                         : "-"}
                     </span>
-                    <span>
-                      {row.bt_ema50_90d_win_rate !== null && row.bt_ema50_90d_win_rate !== undefined
-                        ? `${Number(row.bt_ema50_90d_win_rate).toFixed(1)}%`
-                        : "-"}
+                    <span
+                      className={
+                        row.bt_ema50_90d_grade
+                          ? `pill ${
+                              row.bt_ema50_90d_supports_signal === "supports" ? "good"
+                              : row.bt_ema50_90d_supports_signal === "contradicts" ? "bad"
+                              : row.bt_ema50_90d_supports_signal === "neutral" ? "warn"
+                              : "muted"
+                            }`
+                          : ""
+                      }
+                      title={
+                        row.bt_ema50_90d_grade
+                          ? `Grade: ${row.bt_ema50_90d_grade} | Score: ${row.bt_ema50_90d_score ?? "-"} | WR: ${row.bt_ema50_90d_win_rate != null ? Number(row.bt_ema50_90d_win_rate).toFixed(0) + "%" : "-"} | ${row.bt_ema50_90d_signals ?? 0} signals (${row.bt_ema50_90d_confidence ?? "none"})`
+                          : ""
+                      }
+                    >
+                      {row.bt_ema50_90d_grade ?? "-"}
                     </span>
                   </div>
 
@@ -1152,14 +1174,84 @@ export default function Page() {
                                 </div>
                               </div>
                               <h4>EMA50 Backtest (90d)</h4>
-                              <div className="detail-grid">
-                                <div className="detail-item">Signals: {row.bt_ema50_90d_signals ?? "-"}</div>
-                                <div className="detail-item">Win%: {row.bt_ema50_90d_win_rate != null ? `${Number(row.bt_ema50_90d_win_rate).toFixed(1)}%` : "-"}</div>
-                                <div className="detail-item">Avg PnL: {row.bt_ema50_90d_avg_pnl != null ? `${Number(row.bt_ema50_90d_avg_pnl) >= 0 ? "+" : ""}${Number(row.bt_ema50_90d_avg_pnl).toFixed(2)}%` : "-"}</div>
-                                <div className="detail-item">Total PnL: {row.bt_ema50_90d_total_pnl != null ? `${Number(row.bt_ema50_90d_total_pnl) >= 0 ? "+" : ""}${Number(row.bt_ema50_90d_total_pnl).toFixed(1)}%` : "-"}</div>
-                                <div className="detail-item">Profit Factor: {row.bt_ema50_90d_profit_factor != null ? Number(row.bt_ema50_90d_profit_factor).toFixed(2) : "-"}</div>
-                                <div className="detail-item">Avg Hold Days: {row.bt_ema50_90d_avg_hold_days != null ? Number(row.bt_ema50_90d_avg_hold_days).toFixed(1) : "-"}</div>
-                              </div>
+                              {(() => {
+                                const grade = row.bt_ema50_90d_grade;
+                                const score = row.bt_ema50_90d_score;
+                                const confidence = row.bt_ema50_90d_confidence;
+                                const verdict = row.bt_ema50_90d_supports_signal;
+                                const signals = row.bt_ema50_90d_signals;
+                                const winRate = row.bt_ema50_90d_win_rate;
+                                const avgPnl = row.bt_ema50_90d_avg_pnl;
+                                const totalPnl = row.bt_ema50_90d_total_pnl;
+                                const pf = row.bt_ema50_90d_profit_factor;
+                                const holdDays = row.bt_ema50_90d_avg_hold_days;
+
+                                const verdictIcon = verdict === "supports" ? "✓" : verdict === "contradicts" ? "✗" : verdict === "neutral" ? "~" : "?";
+                                const verdictLabel = verdict === "supports" ? "Backtest Supports Signal"
+                                  : verdict === "contradicts" ? "Backtest Contradicts Signal"
+                                  : verdict === "neutral" ? "Backtest Inconclusive"
+                                  : "Insufficient Data";
+                                const verdictSub = verdict === "supports"
+                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — history backs this setup`
+                                  : verdict === "contradicts"
+                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — history warns against this setup`
+                                  : verdict === "neutral"
+                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — mixed historical results`
+                                  : `Only ${signals ?? 0} signal${(signals ?? 0) === 1 ? "" : "s"} — not enough data to validate`;
+                                const gradeClass = grade === "A+" ? "grade-a-plus" : grade === "A" ? "grade-a" : grade === "B" ? "grade-b" : grade === "C" ? "grade-c" : grade === "D" ? "grade-d" : grade === "F" ? "grade-f" : "grade-na";
+
+                                return (
+                                  <>
+                                    <div className={`bt-verdict ${verdict ?? "insufficient_data"}`}>
+                                      <span className="bt-verdict-icon">{verdictIcon}</span>
+                                      <div className="bt-verdict-text">
+                                        <div className="bt-verdict-label">{verdictLabel}</div>
+                                        <div className="bt-verdict-sub">{verdictSub}</div>
+                                      </div>
+                                      <div className={`bt-grade-badge ${gradeClass}`}>
+                                        {grade ?? "-"}
+                                      </div>
+                                      {confidence && confidence !== "none" ? (
+                                        <span className={`bt-confidence-tag ${confidence}`}>{confidence}</span>
+                                      ) : null}
+                                    </div>
+                                    <div className="bt-stats-row">
+                                      <div className="bt-stat">
+                                        <div className="bt-stat-value" style={{ color: winRate != null && Number(winRate) >= 60 ? "#1e7e34" : winRate != null && Number(winRate) < 45 ? "#c0392b" : "#856404" }}>
+                                          {winRate != null ? `${Number(winRate).toFixed(1)}%` : "-"}
+                                        </div>
+                                        <div className="bt-stat-label">Win Rate</div>
+                                      </div>
+                                      <div className="bt-stat">
+                                        <div className="bt-stat-value" style={{ color: pf != null && Number(pf) >= 1.5 ? "#1e7e34" : pf != null && Number(pf) < 1.0 ? "#c0392b" : "#856404" }}>
+                                          {pf != null ? Number(pf).toFixed(2) : "-"}
+                                        </div>
+                                        <div className="bt-stat-label">Profit Factor</div>
+                                      </div>
+                                      <div className="bt-stat">
+                                        <div className="bt-stat-value" style={{ color: avgPnl != null && Number(avgPnl) > 0 ? "#1e7e34" : avgPnl != null && Number(avgPnl) < 0 ? "#c0392b" : "#856404" }}>
+                                          {avgPnl != null ? `${Number(avgPnl) >= 0 ? "+" : ""}${Number(avgPnl).toFixed(2)}%` : "-"}
+                                        </div>
+                                        <div className="bt-stat-label">Avg PnL</div>
+                                      </div>
+                                      <div className="bt-stat">
+                                        <div className="bt-stat-value" style={{ color: totalPnl != null && Number(totalPnl) > 0 ? "#1e7e34" : totalPnl != null && Number(totalPnl) < 0 ? "#c0392b" : "#856404" }}>
+                                          {totalPnl != null ? `${Number(totalPnl) >= 0 ? "+" : ""}${Number(totalPnl).toFixed(1)}%` : "-"}
+                                        </div>
+                                        <div className="bt-stat-label">Total PnL</div>
+                                      </div>
+                                      <div className="bt-stat">
+                                        <div className="bt-stat-value">{signals ?? "-"}</div>
+                                        <div className="bt-stat-label">Signals</div>
+                                      </div>
+                                      <div className="bt-stat">
+                                        <div className="bt-stat-value">{holdDays != null ? Number(holdDays).toFixed(1) : "-"}</div>
+                                        <div className="bt-stat-label">Avg Hold</div>
+                                      </div>
+                                    </div>
+                                  </>
+                                );
+                              })()}
                               {details[row.ticker]?.trade_ready_reasons ? (
                                 <div style={{ marginTop: 8 }}>
                                   <strong>Trade Ready: {details[row.ticker]?.trade_ready ? (

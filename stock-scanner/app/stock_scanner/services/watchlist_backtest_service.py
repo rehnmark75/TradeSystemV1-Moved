@@ -19,6 +19,14 @@ logger = logging.getLogger(__name__)
 
 
 @dataclass
+class BacktestGrade:
+    score: Optional[float]       # 0-100 composite, sample-size-adjusted
+    grade: str                   # A+, A, B, C, D, F, N/A
+    confidence: str              # none, low, medium, high
+    supports_signal: Optional[str]  # supports, neutral, contradicts, insufficient_data
+
+
+@dataclass
 class BacktestSummary:
     total_signals: int
     wins: int
@@ -28,6 +36,7 @@ class BacktestSummary:
     total_pnl: float
     profit_factor: Optional[float]
     avg_hold_days: Optional[float]
+    grade: Optional[BacktestGrade] = None
 
 
 class WatchlistBacktestService:
@@ -99,6 +108,79 @@ class WatchlistBacktestService:
 
         logger.info("EMA50 watchlist backtest complete: %s tickers", processed)
         return processed
+
+    @staticmethod
+    def compute_grade(summary: 'BacktestSummary') -> BacktestGrade:
+        """Compute a composite backtest grade accounting for sample size."""
+        if summary.total_signals == 0:
+            return BacktestGrade(score=None, grade="N/A", confidence="none", supports_signal=None)
+
+        signals = summary.total_signals
+        win_rate = summary.win_rate / 100.0  # stored as 0-100, normalize
+        # If PF is null (no losses), treat as max cap — 100% WR is excellent
+        pf = summary.profit_factor if summary.profit_factor is not None else (3.0 if summary.wins > 0 else 0.0)
+        avg_pnl = summary.avg_pnl
+
+        # Sample size multiplier — gates everything
+        sample_mult = {1: 0.40, 2: 0.60, 3: 0.75, 4: 0.85}.get(signals, 1.0)
+
+        # Win rate component (0-40 pts)
+        wr_score = min(40.0, max(0.0, (win_rate - 0.40) / 0.60 * 40.0))
+
+        # Profit factor component (0-35 pts)
+        pf_capped = min(pf, 3.0)
+        pf_score = min(35.0, max(0.0, (pf_capped - 1.0) / 2.0 * 35.0))
+
+        # Avg PnL component (0-25 pts) — 5% avg = full marks
+        pnl_score = min(25.0, max(0.0, (avg_pnl / 5.0) * 25.0))
+
+        raw_score = wr_score + pf_score + pnl_score
+        composite = round(raw_score * sample_mult, 1)
+
+        # Letter grade
+        if composite >= 80:
+            grade = "A+"
+        elif composite >= 68:
+            grade = "A"
+        elif composite >= 55:
+            grade = "B"
+        elif composite >= 42:
+            grade = "C"
+        elif composite >= 28:
+            grade = "D"
+        else:
+            grade = "F"
+
+        # Cap grade by sample size
+        if signals == 1 and grade in ("A+", "A"):
+            grade = "B"
+        if signals == 2 and grade == "A+":
+            grade = "A"
+
+        # Statistical confidence
+        if signals >= 5:
+            confidence = "high"
+        elif signals >= 3:
+            confidence = "medium"
+        else:
+            confidence = "low"
+
+        # Signal support verdict
+        if confidence == "low":
+            supports_signal = "insufficient_data"
+        elif win_rate >= 0.60 and pf >= 1.15 and avg_pnl > 0:
+            supports_signal = "supports"
+        elif win_rate <= 0.45 or pf < 0.90:
+            supports_signal = "contradicts"
+        else:
+            supports_signal = "neutral"
+
+        return BacktestGrade(
+            score=composite,
+            grade=grade,
+            confidence=confidence,
+            supports_signal=supports_signal
+        )
 
     async def _get_latest_scan_date(self) -> Optional[date]:
         row = await self.db.fetchrow(
@@ -195,7 +277,7 @@ class WatchlistBacktestService:
             profit_factor = round(win_sum / abs(loss_sum), 4) if abs(loss_sum) > 0 else None
         avg_hold_days = round(hold_days_sum / total_signals, 2) if total_signals else None
 
-        return BacktestSummary(
+        summary = BacktestSummary(
             total_signals=total_signals,
             wins=wins,
             losses=losses,
@@ -205,6 +287,8 @@ class WatchlistBacktestService:
             profit_factor=profit_factor,
             avg_hold_days=avg_hold_days
         )
+        summary.grade = self.compute_grade(summary)
+        return summary
 
     def _find_signals(self, df: pd.DataFrame, start_date: date) -> List[int]:
         signals: List[int] = []
@@ -288,6 +372,7 @@ class WatchlistBacktestService:
     async def _store_summary(self, row_id: int, scan_date: date, days: int, summary: BacktestSummary) -> None:
         end_date = scan_date
         start_date = scan_date - timedelta(days=days)
+        grade = summary.grade
 
         await self.db.execute(
             """
@@ -303,8 +388,12 @@ class WatchlistBacktestService:
                 bt_ema50_90d_avg_hold_days = $8,
                 bt_ema50_90d_start_date = $9,
                 bt_ema50_90d_end_date = $10,
-                bt_ema50_90d_last_run = $11
-            WHERE id = $12
+                bt_ema50_90d_last_run = $11,
+                bt_ema50_90d_score = $12,
+                bt_ema50_90d_grade = $13,
+                bt_ema50_90d_confidence = $14,
+                bt_ema50_90d_supports_signal = $15
+            WHERE id = $16
             """,
             summary.total_signals,
             summary.wins,
@@ -317,5 +406,9 @@ class WatchlistBacktestService:
             start_date,
             end_date,
             datetime.utcnow(),
+            grade.score if grade else None,
+            grade.grade if grade else None,
+            grade.confidence if grade else None,
+            grade.supports_signal if grade else None,
             row_id
         )

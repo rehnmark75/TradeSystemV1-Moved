@@ -872,6 +872,122 @@ input {
   color: #721c24;
 }
 
+.pill.muted {
+  background: #e9e5df;
+  color: #7a7168;
+}
+
+/* Backtest verdict banner */
+.bt-verdict {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 14px;
+  border-radius: 10px;
+  margin-bottom: 10px;
+}
+
+.bt-verdict.supports {
+  background: linear-gradient(135deg, #d4edda 0%, #e8f5e8 100%);
+  border: 1px solid #a3d9a5;
+}
+
+.bt-verdict.contradicts {
+  background: linear-gradient(135deg, #f8d7da 0%, #fce4e4 100%);
+  border: 1px solid #e4a5a5;
+}
+
+.bt-verdict.neutral {
+  background: linear-gradient(135deg, #fff3cd 0%, #fef9e7 100%);
+  border: 1px solid #d4c17a;
+}
+
+.bt-verdict.insufficient_data {
+  background: linear-gradient(135deg, #e9e5df 0%, #f3f0ec 100%);
+  border: 1px solid #cdc7be;
+}
+
+.bt-verdict-icon {
+  font-size: 1.5rem;
+  line-height: 1;
+}
+
+.bt-verdict-text {
+  flex: 1;
+}
+
+.bt-verdict-label {
+  font-weight: 700;
+  font-size: 0.85rem;
+  margin-bottom: 2px;
+}
+
+.bt-verdict-sub {
+  font-size: 0.75rem;
+  opacity: 0.8;
+}
+
+.bt-grade-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  font-weight: 800;
+  font-size: 0.9rem;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.bt-grade-badge.grade-a-plus { background: #155724; color: #fff; }
+.bt-grade-badge.grade-a { background: #1e7e34; color: #fff; }
+.bt-grade-badge.grade-b { background: #28a745; color: #fff; }
+.bt-grade-badge.grade-c { background: #856404; color: #fff; }
+.bt-grade-badge.grade-d { background: #c0392b; color: #fff; }
+.bt-grade-badge.grade-f { background: #721c24; color: #fff; }
+.bt-grade-badge.grade-na { background: #cdc7be; color: #5b5048; }
+
+.bt-stats-row {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 6px;
+}
+
+.bt-stat {
+  background: #fff;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px 8px;
+  text-align: center;
+}
+
+.bt-stat-value {
+  font-weight: 700;
+  font-size: 0.95rem;
+  font-family: "Space Grotesk", sans-serif;
+}
+
+.bt-stat-label {
+  font-size: 0.65rem;
+  color: #7a7168;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bt-confidence-tag {
+  display: inline-block;
+  padding: 1px 6px;
+  border-radius: 4px;
+  font-size: 0.65rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.bt-confidence-tag.high { background: #d4edda; color: #155724; }
+.bt-confidence-tag.medium { background: #fff3cd; color: #856404; }
+.bt-confidence-tag.low { background: #e9e5df; color: #7a7168; }
+
 .expander {
   background: #fefaf2;
   border: 1px solid #efe2cc;

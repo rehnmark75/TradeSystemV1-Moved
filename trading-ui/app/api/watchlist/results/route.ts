@@ -77,7 +77,11 @@ export async function GET(request: Request) {
           w.bt_ema50_90d_avg_pnl,
           w.bt_ema50_90d_total_pnl,
           w.bt_ema50_90d_profit_factor,
-          w.bt_ema50_90d_avg_hold_days
+          w.bt_ema50_90d_avg_hold_days,
+          w.bt_ema50_90d_score,
+          w.bt_ema50_90d_grade,
+          w.bt_ema50_90d_confidence,
+          w.bt_ema50_90d_supports_signal
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
