@@ -1597,6 +1597,7 @@ class TradeValidator:
                 'support_levels': details.get('support_levels', []),
                 'resistance_levels': details.get('resistance_levels', []),
                 'current_price': current_price,
+                'flip_analysis': details.get('flip_analysis', {}),
             }
 
             # Ensure strategy_indicators exists and has dataframe_analysis

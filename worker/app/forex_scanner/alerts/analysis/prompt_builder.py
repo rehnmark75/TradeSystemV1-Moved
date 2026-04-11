@@ -853,11 +853,33 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
                 else:
                     path_note = '✅ Clear path'
 
+                # Build level flip context if available
+                flip_context = ""
+                flip_data = sr_data.get('flip_analysis', {})
+                if flip_data:
+                    flip_lines = []
+                    for key, info in flip_data.items():
+                        if key == 'warning':
+                            continue
+                        if isinstance(info, dict) and 'original_type' in info:
+                            orig = info.get('original_type', 'unknown')
+                            dist = info.get('distance_pips', 0)
+                            recent = info.get('is_recent_flip', False)
+                            strength = info.get('strength', 0)
+                            # Extract price from key like "flipped_support_1.17230"
+                            price_str = key.rsplit('_', 1)[-1] if '_' in key else '?'
+                            recency = "RECENT" if recent else "older"
+                            flip_lines.append(
+                                f"  - {price_str}: former {orig} → now flipped ({recency}, strength {strength:.2f}, {dist:.1f} pips away)"
+                            )
+                    if flip_lines:
+                        flip_context = "\n- **Level Flips (broken S/R):**\n" + "\n".join(flip_lines) + "\n  ⚠️ Flipped levels indicate a structural break — former resistance becomes support (and vice versa). Do NOT reject solely because price is near a level that has already been broken."
+
                 sr_context = f"""
 **SUPPORT/RESISTANCE CONTEXT:**
 - Nearest Support: {support_str}
 - Nearest Resistance: {resistance_str}
-- Path to Target: {path_note}
+- Path to Target: {path_note}{flip_context}
 """
 
             # Build EMA stack context
