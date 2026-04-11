@@ -1,0 +1,13 @@
+"use strict";(()=>{var e={};e.id=2264,e.ids=[2264],e.modules={399:e=>{e.exports=require("next/dist/compiled/next-server/app-page.runtime.prod.js")},517:e=>{e.exports=require("next/dist/compiled/next-server/app-route.runtime.prod.js")},2282:(e,t,r)=>{r.r(t),r.d(t,{originalPathname:()=>T,patchFetch:()=>y,requestAsyncStorage:()=>c,routeModule:()=>d,serverHooks:()=>g,staticGenerationAsyncStorage:()=>m});var s={};r.r(s),r.d(s,{POST:()=>l,dynamic:()=>p});var n=r(7599),o=r(4294),a=r(4588),i=r(2921),u=r(4372);let p="force-dynamic";async function l(e){let t=await e.json().catch(()=>null);if(!t||"object"!=typeof t)return i.NextResponse.json({error:"Invalid request body"},{status:400});let{event_type:r,user:s,page:n,details:o}=t;if(!r)return i.NextResponse.json({error:"event_type is required"},{status:400});try{return await u.A.query(`
+        CREATE TABLE IF NOT EXISTS settings_telemetry (
+          id SERIAL PRIMARY KEY,
+          event_type VARCHAR(50) NOT NULL,
+          username VARCHAR(100),
+          page TEXT,
+          details JSONB,
+          created_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP
+        )
+      `),await u.A.query(`
+        INSERT INTO settings_telemetry (event_type, username, page, details)
+        VALUES ($1, $2, $3, $4)
+      `,[r,s??null,n??null,o??null]),i.NextResponse.json({success:!0})}catch(e){return console.error("Failed to log telemetry",e),i.NextResponse.json({error:"Failed to log telemetry"},{status:500})}}let d=new n.AppRouteRouteModule({definition:{kind:o.x.APP_ROUTE,page:"/api/settings/telemetry/route",pathname:"/api/settings/telemetry",filename:"route",bundlePath:"app/api/settings/telemetry/route"},resolvedPagePath:"/home/hr/Projects/TradeSystemV1/trading-ui/app/api/settings/telemetry/route.ts",nextConfigOutput:"standalone",userland:s}),{requestAsyncStorage:c,staticGenerationAsyncStorage:m,serverHooks:g}=d,T="/api/settings/telemetry/route";function y(){return(0,a.patchFetch)({serverHooks:g,staticGenerationAsyncStorage:m})}},4372:(e,t,r)=>{r.d(t,{A:()=>n}),function(){var e=Error("Cannot find module 'pg'");throw e.code="MODULE_NOT_FOUND",e}();let s=process.env.STRATEGY_CONFIG_DATABASE_URL||"postgresql://postgres:postgres@postgres:5432/strategy_config",n=Object(function(){var e=Error("Cannot find module 'pg'");throw e.code="MODULE_NOT_FOUND",e}())({connectionString:s,max:10})}};var t=require("../../../../webpack-runtime.js");t.C(e);var r=e=>t(t.s=e),s=t.X(0,[5822,9967],()=>r(2282));module.exports=s})();
