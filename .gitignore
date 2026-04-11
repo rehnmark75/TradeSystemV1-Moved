@@ -90,3 +90,6 @@ worker/app/forex_scanner/scripts/claude_analysis/
 # Vector DB runtime files
 vector-db/vectordb/*/
 worker/app/forex_scanner/config_trailing_stops.py.bak
+
+# Next.js build output
+trading-ui/.next/
