@@ -1,6 +1,12 @@
 # ================================================
-# DEV-APP CONFIGURATION
+# TRADING APP CONFIGURATION
 # ================================================
+# Supports both LIVE and DEMO modes via TRADING_ENVIRONMENT env var.
+# Default: 'demo' (safe — no accidental live trades)
+
+import os
+TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
+IS_LIVE = TRADING_ENVIRONMENT == 'live'
 
 # ================== EPIC MAPPINGS ==================
 # Ticker maps of IG specific ticker names
@@ -58,8 +64,19 @@ DEFAULT_EPICS = {
 }
 
 # ================== API ENDPOINTS ==================
-# IG Markets API
-API_BASE_URL = "https://demo-api.ig.com/gateway/deal"  # or your demo/live base URL
+# IG Markets API — switches based on TRADING_ENVIRONMENT
+if IS_LIVE:
+    API_BASE_URL = "https://api.ig.com/gateway/deal"
+    LIGHTSTREAMER_URL = "https://apd.marketdatasystems.com"
+    IG_USERNAME = "rehnmarkh"
+    IG_API_KEY = "prodapikey"
+    IG_PWD = "prodpwd"
+else:
+    API_BASE_URL = "https://demo-api.ig.com/gateway/deal"
+    LIGHTSTREAMER_URL = "https://demo-apd.marketdatasystems.com"
+    IG_USERNAME = "rehnmarkhdemo"
+    IG_API_KEY = "demoapikey"
+    IG_PWD = "demopwd"
 
 # Internal service URLs
 FASTAPI_DEV_URL = "http://fastapi-dev:8000"
@@ -68,15 +85,15 @@ FASTAPI_STREAM_URL = "http://fastapi-stream:8000"
 # Specific endpoints
 ADJUST_STOP_URL = f"{FASTAPI_DEV_URL}/orders/adjust-stop"
 
-# IG Lightstreamer (for streaming)
-LIGHTSTREAMER_URL = "https://demo-apd.marketdatasystems.com"
-
-# ================== AUTHENTICATION ==================
-# Note: IG_API_KEY and IG_PWD values are now mapped to environment variables
-# by the keyvault.py service. These names are kept for backward compatibility.
-IG_USERNAME = "rehnmarkhdemo"
-IG_API_KEY = "demoapikey"
-IG_PWD = "demopwd"
+# ================== POSITION CLOSER (LIVE ONLY) ==================
+# Weekend protection - automatically close positions on Fridays
+ENABLE_POSITION_CLOSER = IS_LIVE  # Only enabled in live mode
+POSITION_CLOSURE_HOUR_UTC = 20
+POSITION_CLOSURE_MINUTE_UTC = 30
+POSITION_CLOSURE_WEEKDAY = 4  # Friday
+POSITION_CLOSER_TIMEOUT_SECONDS = 60
+POSITION_CLOSER_MAX_RETRY_ATTEMPTS = 3
+POSITION_CLOSER_RETRY_DELAY_SECONDS = 5
 
 # ================== TRADE COOLDOWN CONTROLS ==================
 TRADE_COOLDOWN_ENABLED = True

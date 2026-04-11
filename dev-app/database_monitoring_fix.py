@@ -22,6 +22,7 @@ Date: 2025-09-24
 Priority: CRITICAL - Prevents loss of break-even protection
 """
 
+import os
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Set
@@ -31,6 +32,9 @@ import time
 
 from services.models import TradeLog
 from services.db import SessionLocal
+
+# Environment filter — ensures this monitor only manages its own trades
+TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
 class DatabaseMonitoringFix:
     """Enhanced monitoring system to prevent missed trades"""
@@ -53,13 +57,13 @@ class DatabaseMonitoringFix:
                           "ema_exit_pending", "profit_protected", "partial_closed",
                           "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]
 
-        # Primary query - the standard approach
+        # Primary query - the standard approach (filtered by environment)
         try:
-            active_trades = (db.query(TradeLog)
-                           .filter(TradeLog.status.in_(active_statuses))
-                           .order_by(TradeLog.id.desc())
-                           .limit(50)
-                           .all())
+            query = db.query(TradeLog).filter(TradeLog.status.in_(active_statuses))
+            # Filter by environment if the column exists (backward compatible)
+            if hasattr(TradeLog, 'environment'):
+                query = query.filter(TradeLog.environment == TRADING_ENVIRONMENT)
+            active_trades = query.order_by(TradeLog.id.desc()).limit(50).all()
 
             current_trade_ids = {trade.id for trade in active_trades}
 

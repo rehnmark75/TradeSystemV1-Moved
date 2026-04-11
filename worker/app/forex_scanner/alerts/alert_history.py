@@ -16,6 +16,7 @@ CHANGES MADE:
 ✅ FIXED: Removed duplicate and broken method definitions
 """
 
+import os
 import pandas as pd
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Optional, Any
@@ -490,7 +491,10 @@ class AlertHistoryManager:
                 strategy_config = signal.get('strategy_config', {})
                 config_hash = hashlib.md5(json.dumps(strategy_config, sort_keys=True).encode()).hexdigest()
                 alert_data['strategy_config_hash'] = config_hash
-                
+
+                # Tag with trading environment (live/demo)
+                alert_data['environment'] = os.getenv('TRADING_ENVIRONMENT', 'demo')
+
                 # Add current timestamp for alert_timestamp
                 from datetime import datetime
                 alert_data['alert_timestamp'] = datetime.utcnow()
@@ -536,7 +540,8 @@ class AlertHistoryManager:
                         htf_bias_score, htf_bias_mode, htf_bias_details,
                         lpf_penalty, lpf_would_block,
                         swing_significance, mfi_value, mfi_slope, mfi_confirmed,
-                        sweep_score, sweep_conditions
+                        sweep_score, sweep_conditions,
+                        environment
                     ) VALUES (
                         %(alert_timestamp)s,
                         %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
@@ -577,7 +582,8 @@ class AlertHistoryManager:
                         %(htf_bias_score)s, %(htf_bias_mode)s, %(htf_bias_details)s,
                         %(lpf_penalty)s, %(lpf_would_block)s,
                         %(swing_significance)s, %(mfi_value)s, %(mfi_slope)s, %(mfi_confirmed)s,
-                        %(sweep_score)s, %(sweep_conditions)s
+                        %(sweep_score)s, %(sweep_conditions)s,
+                        %(environment)s
                     ) RETURNING id
                 '''
 

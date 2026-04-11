@@ -508,7 +508,10 @@ async def startup_coordinator():
     🔄 CONSOLIDATED: Single coordinated startup function with proper phases
     ✅ FIXED: Eliminates race conditions from multiple startup decorators
     """
-    logger.info("🚀 Starting Enhanced FastAPI Trading API v3.1.1...")
+    from config import TRADING_ENVIRONMENT, IS_LIVE
+    env_label = "🔴 LIVE" if IS_LIVE else "🟢 DEMO"
+    logger.info(f"🚀 Starting Enhanced FastAPI Trading API v3.1.1... [{env_label}]")
+    logger.info(f"   TRADING_ENVIRONMENT={TRADING_ENVIRONMENT}")
 
     startup_errors = []
 
@@ -699,6 +702,48 @@ async def startup_coordinator():
                 logger.info("⚠️ Virtual Stop Loss service not available")
             elif not VIRTUAL_STOP_LOSS_ENABLED:
                 logger.info("⚠️ Virtual Stop Loss service disabled in config")
+
+        # ═══════════════════════════════════════════════════════════════
+        # PHASE 3.6: POSITION CLOSER SCHEDULER (LIVE MODE ONLY)
+        # ═══════════════════════════════════════════════════════════════
+        from config import IS_LIVE, TRADING_ENVIRONMENT
+        if IS_LIVE:
+            logger.info(f"🔴 Phase 3.6: Position closer scheduler (TRADING_ENVIRONMENT={TRADING_ENVIRONMENT})")
+            try:
+                from apscheduler.schedulers.asyncio import AsyncIOScheduler
+                from apscheduler.triggers.cron import CronTrigger
+                import httpx as _httpx
+
+                async def _call_position_closer():
+                    try:
+                        logger.info("⏰ Scheduled position closure check triggered")
+                        async with _httpx.AsyncClient() as client:
+                            response = await client.post(
+                                "http://localhost:8000/position-closer/check-and-close",
+                                headers={"x-apim-gateway": "verified"},
+                                timeout=60.0
+                            )
+                            logger.info(f"Position closer response: {response.status_code}")
+                    except Exception as e:
+                        logger.error(f"Position closer error: {e}")
+
+                _scheduler = AsyncIOScheduler()
+                _scheduler.add_job(
+                    _call_position_closer,
+                    CronTrigger(day_of_week=4, hour=20, minute=30, timezone='UTC'),
+                    id='friday_position_closer',
+                    name='Friday 20:30 UTC Position Closer',
+                    replace_existing=True
+                )
+                _scheduler.start()
+                logger.info("✅ Position closer scheduler started — Friday 20:30 UTC")
+            except ImportError:
+                logger.warning("⚠️ APScheduler not available — position closer scheduler disabled")
+            except Exception as e:
+                startup_errors.append(f"Position closer scheduler: {e}")
+                logger.error(f"❌ Position closer scheduler failed: {e}")
+        else:
+            logger.info(f"ℹ️ Position closer disabled (TRADING_ENVIRONMENT={TRADING_ENVIRONMENT})")
 
         # ═══════════════════════════════════════════════════════════════
         # PHASE 4: STARTUP COMPLETION LOGGING
@@ -1142,6 +1187,16 @@ if VSL_AVAILABLE and vsl_router:
     print("   • GET  /api/vsl/status - Service status and tracked positions")
     print("   • GET  /api/vsl/health - Health check")
     print("   • POST /api/vsl/refresh - Force position sync")
+
+# Position Closer (live mode only — weekend protection)
+from config import IS_LIVE
+if IS_LIVE:
+    try:
+        from routers.position_closer_router import router as position_closer_router
+        app.include_router(position_closer_router, prefix="/position-closer", tags=["position-closer"])
+        print("✅ Position closer router registered (LIVE mode)")
+    except ImportError as e:
+        print(f"⚠️ Position closer router not available: {e}")
     print("   • GET  /api/vsl/position/{trade_id} - Get position details")
     print("   • POST /api/vsl/position/{trade_id} - Add position to tracking")
     print("   • DELETE /api/vsl/position/{trade_id} - Remove from tracking")

@@ -1,9 +1,12 @@
+import os
 from fastapi import APIRouter, Request, HTTPException, Depends, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 from datetime import datetime, timedelta
 import json
 import traceback
+
+TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
 from services.ig_auth import ig_login
 from services.ig_orders import (
     has_open_position, place_market_order, get_deal_confirmation,
@@ -740,6 +743,7 @@ async def ig_place_order(
                         # Troubleshooting data for IG rejections
                         min_stop_distance_points=min_distance,
                         trigger_distance=trigger_distance_value,
+                        environment=TRADING_ENVIRONMENT,
                     )
 
                     db.add(trade_log)
@@ -1044,6 +1048,7 @@ async def ig_place_order(
                 # VSL fields deprecated (system disabled)
                 virtual_sl_pips=None,
                 virtual_sl_price=None,
+                environment=TRADING_ENVIRONMENT,
             )
 
             db.add(trade_log)

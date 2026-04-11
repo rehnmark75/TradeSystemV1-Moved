@@ -27,6 +27,7 @@ import logging
 import time
 import random
 from typing import Dict, Optional, List
+import os
 from datetime import datetime, timedelta
 from dataclasses import dataclass
 from enum import Enum
@@ -914,6 +915,9 @@ class OrderExecutor:
             self.logger.info(f"📋 Limit order fields: entry_level={entry_level:.5f}, expiry={limit_expiry_minutes}min, api_type={api_order_type}")
         else:
             order_data["order_type"] = "market"
+
+        # Tag with trading environment (live/demo)
+        order_data["environment"] = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
         # Include alert_id in the request if provided
         if alert_id is not None:

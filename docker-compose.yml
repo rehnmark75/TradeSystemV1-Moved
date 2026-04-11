@@ -19,6 +19,7 @@ services:
       - "8001"
     environment:
       - PORT=8001
+      - TRADING_ENVIRONMENT=demo
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${DEMO_API_KEY}
@@ -37,28 +38,35 @@ services:
     depends_on:
       - postgres
 
-  fastapi-prod:
+  fastapi-live:
     build:
       context: .
       dockerfile: Dockerfile.fastapi
       args:
-        APP_DIR: prod-app
-    container_name: fastapi-prod
+        APP_DIR: dev-app
+    container_name: fastapi-live
     restart: unless-stopped
-    ports:
-      - "8002:8000"  
     volumes:
-      - ./prod-app:/app:cached
-      - ./logs/prod:/app/logs
+      - ./dev-app:/app:cached
+      - ./logs/live:/app/logs
     working_dir: /app
+    ports:
+      - "8002:8000"
     expose:
       - "8002"
     environment:
       - PORT=8002
+      - TRADING_ENVIRONMENT=live
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
+      # Telegram notifications
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
+      - TRADE_NOTIFICATION_TELEGRAM_ENABLED=${TRADE_NOTIFICATION_TELEGRAM_ENABLED:-true}
+    healthcheck:
+      disable: true
     networks:
       - lab-net
     depends_on:
@@ -100,7 +108,7 @@ services:
     command: /bin/sh -c "sleep 5 && nginx -g 'daemon off;'"
     depends_on:
       - fastapi-dev
-      - fastapi-prod
+      - fastapi-live
       - pgadmin
     networks:
       - lab-net
@@ -253,7 +261,7 @@ services:
       - lab-net
     depends_on:
       - fastapi-dev
-      - fastapi-prod
+      - fastapi-live
       - minio
       - task-worker
 
@@ -266,6 +274,8 @@ services:
       - ./worker/app:/app
       - ./logs/worker:/app/logs
     environment:
+      - TRADING_ENVIRONMENT=demo
+      - TRADING_CONFIG_SET=demo
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
@@ -282,10 +292,44 @@ services:
       - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
       - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin123}
       - MINIO_BUCKET_NAME=claude-charts
+      - SCAN_OFFSET_SECONDS=0
     networks:
       - lab-net
     depends_on:
       - postgres
+      - fastapi-dev
+      - minio
+
+  task-worker-live:
+    build:
+      context: ./worker
+    container_name: task-worker-live
+    restart: unless-stopped
+    volumes:
+      - ./worker/app:/app
+      - ./logs/worker-live:/app/logs
+    environment:
+      - TRADING_ENVIRONMENT=live
+      - TRADING_CONFIG_SET=live
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
+      - ORDER_API_URL=http://fastapi-live:8000/orders/place-order
+      - IG_API_KEY=${PROD_API_KEY}
+      - IG_PWD=${PROD_PASSWORD}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
+      - MINIO_ENDPOINT=minio:9000
+      - MINIO_ACCESS_KEY=${MINIO_ROOT_USER:-minioadmin}
+      - MINIO_SECRET_KEY=${MINIO_ROOT_PASSWORD:-minioadmin123}
+      - MINIO_BUCKET_NAME=claude-charts
+      - SCAN_OFFSET_SECONDS=60
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+      - fastapi-live
       - minio
 
   stock-scanner:

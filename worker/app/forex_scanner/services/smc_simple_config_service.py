@@ -1680,11 +1680,13 @@ class SMCSimpleConfigService:
         self,
         database_url: str = None,
         cache_ttl_seconds: int = 120,
-        enable_hot_reload: bool = True
+        enable_hot_reload: bool = True,
+        config_set: str = None
     ):
         self.database_url = database_url or self._get_default_database_url()
         self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self.enable_hot_reload = enable_hot_reload
+        self.config_set = config_set or os.getenv('TRADING_CONFIG_SET', 'live')
 
         # Thread-safe cache
         self._lock = RLock()
@@ -1717,7 +1719,7 @@ class SMCSimpleConfigService:
         """Load initial configuration on service startup"""
         try:
             self._load_from_database()
-            logger.info("SMC Simple config service initialized from database")
+            logger.info(f"SMC Simple config service initialized from database (config_set={self.config_set})")
         except Exception as e:
             logger.warning(f"Failed to load initial config from database: {e}")
             # Create default config
@@ -1771,10 +1773,10 @@ class SMCSimpleConfigService:
                 # Load global config
                 cur.execute("""
                     SELECT * FROM smc_simple_global_config
-                    WHERE is_active = TRUE
+                    WHERE is_active = TRUE AND config_set = %s
                     ORDER BY updated_at DESC
                     LIMIT 1
-                """)
+                """, (self.config_set,))
                 global_row = cur.fetchone()
 
                 if global_row is None:
@@ -2346,7 +2348,8 @@ _service_lock = RLock()
 def get_smc_simple_config_service(
     database_url: str = None,
     cache_ttl_seconds: int = 120,
-    enable_hot_reload: bool = True
+    enable_hot_reload: bool = True,
+    config_set: str = None
 ) -> SMCSimpleConfigService:
     """Get singleton instance of config service"""
     global _service_instance
@@ -2355,7 +2358,8 @@ def get_smc_simple_config_service(
             _service_instance = SMCSimpleConfigService(
                 database_url=database_url,
                 cache_ttl_seconds=cache_ttl_seconds,
-                enable_hot_reload=enable_hot_reload
+                enable_hot_reload=enable_hot_reload,
+                config_set=config_set
             )
         return _service_instance
 

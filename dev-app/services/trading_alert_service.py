@@ -115,6 +115,11 @@ class TradingAlertService:
         if not self._can_send_telegram():
             return False
 
+        # Prefix with environment label
+        env = os.getenv('TRADING_ENVIRONMENT', 'demo')
+        env_prefix = "🔴 LIVE" if env == 'live' else "🟢 DEMO"
+        message = f"[{env_prefix}] {message}"
+
         try:
             url = f"https://api.telegram.org/bot{self._telegram_bot_token}/sendMessage"
             payload = {

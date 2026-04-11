@@ -50,9 +50,10 @@ class Settings(BaseSettings):
     # Container configuration
     critical_containers: List[str] = [
         "postgres",
-        "fastapi-prod",
+        "fastapi-live",
         "fastapi-stream",
         "task-worker",
+        "task-worker-live",
         "nginx",
         "stock-scanner"
     ]
@@ -69,7 +70,7 @@ class Settings(BaseSettings):
 
 # Container health check endpoints
 HEALTH_ENDPOINTS = {
-    "fastapi-prod": "http://fastapi-prod:8000/position-closer/health",
+    "fastapi-live": "http://fastapi-live:8000/position-closer/health",
     "fastapi-stream": "http://fastapi-stream:8000/stream/health",
     "tradingview": "http://tradingview:8080/health",
     "vector-db": "http://vector-db:8090/health",
@@ -78,7 +79,7 @@ HEALTH_ENDPOINTS = {
 
 # Custom headers for health checks (e.g., authentication bypass)
 HEALTH_HEADERS = {
-    "fastapi-prod": {"x-apim-gateway": "verified"},
+    "fastapi-live": {"x-apim-gateway": "verified"},
     "fastapi-stream": {"x-apim-gateway": "verified"},
 }
 
@@ -93,14 +94,15 @@ TCP_CHECK_CONTAINERS = {
 CONTAINER_DESCRIPTIONS = {
     "postgres": "PostgreSQL Database - Core data storage",
     "fastapi-dev": "Development API - Trading endpoints (demo)",
-    "fastapi-prod": "Production API - Trading endpoints (live)",
+    "fastapi-live": "Production API - Trading endpoints (live)",
     "fastapi-stream": "Stream API - Real-time market data",
     "nginx": "Reverse Proxy - SSL termination & routing",
     "streamlit": "Web UI - Analytics dashboard",
     "tradingview": "TradingView Service - Script indexing & RAG",
     "vector-db": "Vector Database - Semantic search (ChromaDB)",
     "economic-calendar": "Economic Calendar - Event scraping",
-    "task-worker": "Task Worker - Background jobs & forex scanner",
+    "task-worker": "Task Worker - Background jobs & forex scanner (demo)",
+    "task-worker-live": "Task Worker Live - Forex scanner (live trading)",
     "stock-scanner": "Stock Scheduler - Daily stock data updates & weekly instrument sync",
     "db-backup": "Database Backup - Automated backups",
     "pgadmin": "PgAdmin - Database management UI",

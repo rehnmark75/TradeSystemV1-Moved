@@ -2,13 +2,17 @@ import os
 from functools import lru_cache
 
 # Mapping from Azure KeyVault secret names to environment variable names
+# In live mode, both demo* and prod* secret names resolve to IG_API_KEY/IG_PWD
+# (which docker-compose sets to the PROD credentials)
+_is_live = os.getenv('TRADING_ENVIRONMENT', 'demo') == 'live'
+
 SECRET_ENV_MAP = {
-    # Demo/Development credentials for dev-app
-    "demoapikey": "IG_API_KEY",  # Uses DEMO_API_KEY from docker-compose
-    "demopwd": "IG_PWD",         # Uses DEMO_PASSWORD from docker-compose
-    # Production credentials (for VSL streaming - must use production account)
-    "prodapikey": "PROD_IG_API_KEY",  # Uses PROD_API_KEY from docker-compose
-    "prodpwd": "PROD_IG_PWD",         # Uses PROD_PASSWORD from docker-compose
+    # Demo/Development credentials
+    "demoapikey": "IG_API_KEY",  # Uses DEMO_API_KEY (demo) or PROD_API_KEY (live) from docker-compose
+    "demopwd": "IG_PWD",         # Uses DEMO_PASSWORD (demo) or PROD_PASSWORD (live) from docker-compose
+    # Production credentials
+    "prodapikey": "IG_API_KEY" if _is_live else "PROD_IG_API_KEY",
+    "prodpwd": "IG_PWD" if _is_live else "PROD_IG_PWD",
     # Other secrets
     "gemini": "GEMINI_API_KEY"
 }

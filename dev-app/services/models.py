@@ -127,6 +127,9 @@ class TradeLog(Base):
     vsl_mae_price = Column(Float, nullable=True)  # Price at worst point
     vsl_mae_timestamp = Column(DateTime, nullable=True)  # When worst was reached
 
+    # Trading environment (live/demo) — distinguishes real vs paper trades
+    environment = Column(String(10), default='demo')
+
     def __repr__(self):
         return f"<TradeLog(id={self.id}, symbol={self.symbol}, deal_id={self.deal_id}, profit_loss={self.profit_loss})>"
 
