@@ -291,6 +291,8 @@ class LossPreventionFilter:
                 return self._check_move_exhaustion(cond, signal)
             elif rule_type == 'regime_and_efficiency':
                 return self._check_regime_and_efficiency(cond, signal)
+            elif rule_type == 'day_and_hour':
+                return self._check_day_of_week(cond, signal, signal_timestamp) and self._check_hours(cond, signal, signal_timestamp)
             else:
                 logger.debug(f"🛡️ LPF: Unknown rule type '{rule_type}' in {rule['rule_name']}")
                 return False
