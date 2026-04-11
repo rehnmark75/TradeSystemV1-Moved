@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type IntelligencePayload = {
   summary: {
@@ -63,6 +65,7 @@ const buildDonutGradient = (rows: { label: string; value: number }[]) => {
 };
 
 export default function ForexMarketIntelligencePage() {
+  const { environment } = useEnvironment();
   const [start, setStart] = useState(toDateInput(new Date(Date.now() - 7 * 24 * 3600 * 1000)));
   const [end, setEnd] = useState(toDateInput(new Date()));
   const [source, setSource] = useState("comprehensive");
@@ -74,7 +77,7 @@ export default function ForexMarketIntelligencePage() {
     setLoading(true);
     setError(null);
     fetch(
-      `/trading/api/forex/market-intelligence/?start=${start}&end=${end}&source=${source}`
+      `/trading/api/forex/market-intelligence/?start=${start}&end=${end}&source=${source}&env=${environment}`
     )
       .then((res) => res.json())
       .then((data) => setPayload(data))
@@ -187,6 +190,7 @@ export default function ForexMarketIntelligencePage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

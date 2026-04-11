@@ -16,6 +16,7 @@ function parseDays(value: string | null) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -36,10 +37,11 @@ export async function GET(request: Request) {
       FROM trade_log t
       INNER JOIN alert_history a ON t.alert_id = a.id
       WHERE t.timestamp >= $1
+        AND t.environment = $2
       GROUP BY a.strategy
       ORDER BY total_pnl DESC
       `,
-      [since]
+      [since, env]
     );
 
     const strategies = (strategyResult.rows ?? []).map((row) => {
@@ -73,10 +75,11 @@ export async function GET(request: Request) {
         COALESCE(MIN(profit_loss), 0) as worst_trade
       FROM trade_log
       WHERE timestamp >= $1
+        AND environment = $2
       GROUP BY symbol
       ORDER BY total_pnl DESC
       `,
-      [since]
+      [since, env]
     );
 
     const pairs = (pairResult.rows ?? []).map((row) => {

@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type FilterMetric = {
   filter_name: string;
@@ -56,6 +58,7 @@ const formatPercent = (value: unknown, fractionDigits = 1) => {
 };
 
 export default function FilterEffectivenessPage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(30);
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -65,7 +68,7 @@ export default function FilterEffectivenessPage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/trading/api/forex/filter-effectiveness/?days=${days}`, {
+    fetch(`/trading/api/forex/filter-effectiveness/?days=${days}&env=${environment}`, {
       signal: controller.signal
     })
       .then((res) => res.json())
@@ -73,7 +76,7 @@ export default function FilterEffectivenessPage() {
       .catch(() => setError("Failed to load filter effectiveness analysis."))
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [days]);
+  }, [days, environment]);
 
   const predictiveFilters = payload?.filterGroups.filter((g) => g.is_predictive) || [];
   const nonPredictiveFilters = payload?.filterGroups.filter((g) => !g.is_predictive) || [];
@@ -84,6 +87,7 @@ export default function FilterEffectivenessPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

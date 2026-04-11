@@ -34,6 +34,7 @@ function deriveResult(profitLoss: number | null, status: string | null) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -60,9 +61,10 @@ export async function GET(request: Request) {
       FROM trade_log
       WHERE is_scalp_trade = true
       AND timestamp >= $1
+      AND environment = $2
       ORDER BY timestamp DESC
       `,
-      [since]
+      [since, env]
     );
 
     const trades = (tradesResult.rows ?? []).map((row) => {
@@ -106,10 +108,11 @@ export async function GET(request: Request) {
       WHERE is_scalp_trade = true
       AND timestamp >= $1
       AND vsl_mae_pips IS NOT NULL
+      AND environment = $2
       GROUP BY symbol
       ORDER BY total_trades DESC
       `,
-      [since]
+      [since, env]
     );
 
     const summary = (summaryResult.rows ?? []).map((row) => {

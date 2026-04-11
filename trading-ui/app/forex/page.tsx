@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "./_components/ForexNav";
+import { useEnvironment } from "../../lib/environment";
+import EnvironmentToggle from "../../components/EnvironmentToggle";
 
 type ForexStats = {
   total_trades: number;
@@ -137,6 +139,7 @@ const buildSparklinePoints = (values: number[]) => {
 };
 
 export default function ForexAnalyticsPage() {
+  const { environment } = useEnvironment();
   const [section, setSection] = useState<"overview" | "analysis">("overview");
   const [overviewDays, setOverviewDays] = useState(1);
   const [overviewRefreshKey, setOverviewRefreshKey] = useState(0);
@@ -152,7 +155,7 @@ export default function ForexAnalyticsPage() {
     const controller = new AbortController();
     setLoadingOverview(true);
     setOverviewError(null);
-    fetch(`/trading/api/forex/overview/?days=${overviewDays}`, {
+    fetch(`/trading/api/forex/overview/?days=${overviewDays}&env=${environment}`, {
       signal: controller.signal
     })
       .then((res) => res.json())
@@ -164,13 +167,13 @@ export default function ForexAnalyticsPage() {
       })
       .finally(() => setLoadingOverview(false));
     return () => controller.abort();
-  }, [overviewDays, overviewRefreshKey]);
+  }, [overviewDays, overviewRefreshKey, environment]);
 
   useEffect(() => {
     const controller = new AbortController();
     setLoadingAnalysis(true);
     setAnalysisError(null);
-    fetch(`/trading/api/forex/analysis/?days=${analysisDays}`, {
+    fetch(`/trading/api/forex/analysis/?days=${analysisDays}&env=${environment}`, {
       signal: controller.signal
     })
       .then((res) => res.json())
@@ -182,7 +185,7 @@ export default function ForexAnalyticsPage() {
       })
       .finally(() => setLoadingAnalysis(false));
     return () => controller.abort();
-  }, [analysisDays]);
+  }, [analysisDays, environment]);
 
   const pnlSeries = useMemo(() => {
     if (!overview?.daily_pnl?.length) return [];
@@ -224,6 +227,7 @@ export default function ForexAnalyticsPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

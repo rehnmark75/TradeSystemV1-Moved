@@ -28,6 +28,7 @@ async function getMarketIntelligenceColumns() {
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
+  const env = searchParams.get("env") || "demo";
   const source = (searchParams.get("source") || "comprehensive").toLowerCase();
   const startParam = parseDate(searchParams.get("start"));
   const endParam = parseDate(searchParams.get("end"));
@@ -108,9 +109,10 @@ export async function GET(request: Request) {
           AND a.alert_timestamp <= $2
           AND a.strategy_metadata IS NOT NULL
           AND (a.strategy_metadata::json->'market_intelligence') IS NOT NULL
+          AND a.environment = $3
         ORDER BY a.alert_timestamp DESC
         `,
-        [start, end]
+        [start, end, env]
       );
       signalData = result.rows ?? [];
     }

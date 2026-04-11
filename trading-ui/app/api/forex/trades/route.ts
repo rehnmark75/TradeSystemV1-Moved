@@ -48,6 +48,7 @@ function deriveTradeResult(value: number | null, status: string) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -67,9 +68,10 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.alert_id = a.id
       WHERE t.timestamp >= $1
+        AND t.environment = $2
       ORDER BY t.timestamp DESC
       `,
-      [since]
+      [since, env]
     );
 
     const trades = (result.rows ?? []).map((row) => {

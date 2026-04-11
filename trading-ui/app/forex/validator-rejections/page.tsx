@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -153,6 +155,7 @@ function DirBadge({ dir }: { dir: string | null }) {
 // ─── Page ────────────────────────────────────────────────────────────────────
 
 export default function ValidatorRejectionsPage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(7);
   const [step, setStep] = useState("All");
   const [pair, setPair] = useState("All");
@@ -167,11 +170,11 @@ export default function ValidatorRejectionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/trading/api/forex/validator-rejections/options/")
+    fetch(`/trading/api/forex/validator-rejections/options/?env=${environment}`)
       .then((r) => r.json())
       .then(setOptions)
       .catch(() => setOptions(null));
-  }, []);
+  }, [environment]);
 
   const loadData = () => {
     setLoading(true);
@@ -179,9 +182,9 @@ export default function ValidatorRejectionsPage() {
     const params = new URLSearchParams({ days: String(days), step, pair, signal_type: signalType });
 
     Promise.all([
-      fetch(`/trading/api/forex/validator-rejections/stats/?days=${days}`).then((r) => r.json()),
-      fetch(`/trading/api/forex/validator-rejections/list/?${params}`).then((r) => r.json()),
-      fetch(`/trading/api/forex/validator-rejections/lpf/?days=${days}`).then((r) => r.json())
+      fetch(`/trading/api/forex/validator-rejections/stats/?days=${days}&env=${environment}`).then((r) => r.json()),
+      fetch(`/trading/api/forex/validator-rejections/list/?${params}&env=${environment}`).then((r) => r.json()),
+      fetch(`/trading/api/forex/validator-rejections/lpf/?days=${days}&env=${environment}`).then((r) => r.json())
     ])
       .then(([s, l, lpfData]) => {
         setStats(s);
@@ -273,6 +276,7 @@ export default function ValidatorRejectionsPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">Trading Hub</Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

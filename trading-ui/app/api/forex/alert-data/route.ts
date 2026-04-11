@@ -17,6 +17,7 @@ function parseHours(value: string | null) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const hours = parseHours(searchParams.get("hours"));
+  const env = searchParams.get("env") || "demo";
 
   try {
     const result = await forexPool.query(
@@ -24,9 +25,10 @@ export async function GET(request: Request) {
       SELECT *
       FROM alert_history
       WHERE alert_timestamp >= NOW() - ($1::int || ' hours')::interval
+        AND environment = $2
       ORDER BY alert_timestamp DESC
       `,
-      [hours]
+      [hours, env]
     );
 
     return NextResponse.json({

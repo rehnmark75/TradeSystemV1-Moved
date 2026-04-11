@@ -64,6 +64,35 @@ a {
   color: #5b4a3a;
 }
 
+/* Environment toggle (live/demo) */
+.env-toggle {
+  display: inline-flex;
+  border: 1px solid #d5c8b4;
+  border-radius: 6px;
+  overflow: hidden;
+  margin-left: 12px;
+}
+.env-btn {
+  padding: 4px 12px;
+  font-size: 0.75rem;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  border: none;
+  background: transparent;
+  color: #8a7a6a;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+.env-btn:hover { background: #f5f0e8; }
+.env-active.env-demo {
+  background: #e8f5e9;
+  color: #2e7d32;
+}
+.env-active.env-live {
+  background: #fce4ec;
+  color: #c62828;
+}
+
 .hero {
   background: #fff;
   border: 1px solid #efe2cc;

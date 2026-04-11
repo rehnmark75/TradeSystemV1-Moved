@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type FilterOptions = {
   stages: string[];
@@ -112,6 +114,7 @@ const formatPercent = (value: number, total: number) => {
 };
 
 export default function SMCRejectionsPage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(7);
   const [stage, setStage] = useState("All");
   const [pair, setPair] = useState("All");
@@ -130,11 +133,11 @@ export default function SMCRejectionsPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    fetch("/trading/api/forex/smc-rejections/options/")
+    fetch(`/trading/api/forex/smc-rejections/options/?env=${environment}`)
       .then((res) => res.json())
       .then((data) => setOptions(data))
       .catch(() => setOptions(null));
-  }, []);
+  }, [environment]);
 
   const loadData = () => {
     setLoading(true);
@@ -147,14 +150,14 @@ export default function SMCRejectionsPage() {
     });
 
     Promise.all([
-      fetch(`/trading/api/forex/smc-rejections/stats/?days=${days}`).then((res) => res.json()),
-      fetch(`/trading/api/forex/smc-rejections/list/?${params.toString()}`).then((res) =>
+      fetch(`/trading/api/forex/smc-rejections/stats/?days=${days}&env=${environment}`).then((res) => res.json()),
+      fetch(`/trading/api/forex/smc-rejections/list/?${params.toString()}&env=${environment}`).then((res) =>
         res.json()
       ),
-      fetch(`/trading/api/forex/smc-rejections/conflicts/?days=${days}`).then((res) =>
+      fetch(`/trading/api/forex/smc-rejections/conflicts/?days=${days}&env=${environment}`).then((res) =>
         res.json()
       ),
-      fetch(`/trading/api/forex/smc-rejections/outcomes/?days=${days}`).then((res) =>
+      fetch(`/trading/api/forex/smc-rejections/outcomes/?days=${days}&env=${environment}`).then((res) =>
         res.json()
       )
     ])
@@ -557,6 +560,7 @@ export default function SMCRejectionsPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

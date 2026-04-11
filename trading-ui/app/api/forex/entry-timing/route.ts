@@ -42,6 +42,7 @@ function parseNumeric(value: unknown) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -84,9 +85,10 @@ export async function GET(request: Request) {
       LEFT JOIN alert_history a ON t.alert_id = a.id
       WHERE t.timestamp >= $1
       AND t.status IN ('closed', 'tracking', 'expired')
+      AND t.environment = $2
       ORDER BY t.timestamp DESC
       `,
-      [since]
+      [since, env]
     );
 
     const trades = (tradesResult.rows ?? []).map((row) => {
@@ -153,10 +155,11 @@ export async function GET(request: Request) {
       WHERE t.timestamp >= $1
       AND t.status IN ('closed', 'expired')
       AND t.profit_loss IS NOT NULL
+      AND t.environment = $2
       GROUP BY a.strategy_indicators->'tier3_entry'->>'entry_type'
       ORDER BY total_trades DESC
       `,
-      [since]
+      [since, env]
     );
 
     const summary = (summaryResult.rows ?? []).map((row) => {
@@ -199,10 +202,11 @@ export async function GET(request: Request) {
       WHERE t.timestamp >= $1
       AND t.status IN ('closed', 'expired')
       AND t.profit_loss IS NOT NULL
+      AND t.environment = $2
       GROUP BY a.signal_trigger, a.strategy_indicators->'tier3_entry'->>'entry_type'
       ORDER BY total_trades DESC
       `,
-      [since]
+      [since, env]
     );
 
     const by_trigger = (triggerResult.rows ?? []).map((row) => {

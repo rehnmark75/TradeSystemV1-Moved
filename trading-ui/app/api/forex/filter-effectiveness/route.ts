@@ -34,6 +34,7 @@ type FilterGroup = {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -52,10 +53,10 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY COALESCE(a.performance_metrics->>'market_regime', 'Unknown')
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 2. Volatility State effectiveness (from performance_metrics)
@@ -72,10 +73,10 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY COALESCE(a.performance_metrics->>'volatility_state', 'Unknown')
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 3. Market Structure Bias effectiveness
@@ -92,10 +93,10 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY COALESCE(a.market_structure_analysis->>'current_bias', 'Unknown')
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 4. Structure Alignment (direction vs bias) effectiveness
@@ -119,7 +120,7 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY CASE
           WHEN a.market_structure_analysis->>'current_bias' = 'RANGING' THEN 'RANGING'
           WHEN (t.direction = 'BUY' AND a.market_structure_analysis->>'current_bias' = 'BULLISH')
@@ -129,7 +130,7 @@ export async function GET(request: Request) {
           ELSE 'COUNTER'
         END
       ORDER BY win_rate DESC NULLS LAST`,
-      [since]
+      [since, env]
     );
 
     // 5. Order Flow Bias alignment (from order_flow_analysis)
@@ -152,7 +153,7 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY CASE
           WHEN (t.direction = 'BUY' AND a.order_flow_analysis->>'order_flow_bias' = 'BULLISH')
             OR (t.direction = 'SELL' AND a.order_flow_analysis->>'order_flow_bias' = 'BEARISH')
@@ -161,7 +162,7 @@ export async function GET(request: Request) {
           ELSE 'CONFLICTING'
         END
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 6. Entry Quality Score buckets (from performance_metrics)
@@ -184,7 +185,7 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY CASE
           WHEN (a.performance_metrics->>'entry_quality_score')::float >= 0.7 THEN 'High (>=0.7)'
           WHEN (a.performance_metrics->>'entry_quality_score')::float >= 0.5 THEN 'Medium (0.5-0.7)'
@@ -206,7 +207,7 @@ export async function GET(request: Request) {
           WHEN 'Very Low (<0.3)' THEN 4
           ELSE 5
         END`,
-      [since]
+      [since, env]
     );
 
     // 7. Efficiency Ratio buckets (from performance_metrics)
@@ -227,7 +228,7 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
         AND a.performance_metrics->>'efficiency_ratio' IS NOT NULL
       GROUP BY CASE
           WHEN (a.performance_metrics->>'efficiency_ratio')::float >= 0.5 THEN 'High (>=0.5)'
@@ -235,7 +236,7 @@ export async function GET(request: Request) {
           ELSE 'Low (<0.3)'
         END
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 8. MTF Alignment (from performance_metrics)
@@ -255,13 +256,13 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
       GROUP BY CASE
           WHEN (a.performance_metrics->>'all_timeframes_aligned')::boolean = true THEN 'All TFs Aligned'
           ELSE 'Not Aligned'
         END
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 9. MTF Confluence Score buckets (from performance_metrics)
@@ -282,7 +283,7 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.symbol = a.epic
         AND a.alert_timestamp BETWEEN t.timestamp - interval '2 minutes' AND t.timestamp + interval '2 minutes'
-      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed'
+      WHERE t.timestamp >= $1 AND LOWER(t.status) = 'closed' AND t.environment = $2
         AND a.performance_metrics->>'mtf_confluence_score' IS NOT NULL
       GROUP BY CASE
           WHEN (a.performance_metrics->>'mtf_confluence_score')::float >= 0.7 THEN 'High (>=0.7)'
@@ -290,7 +291,7 @@ export async function GET(request: Request) {
           ELSE 'Low (<0.5)'
         END
       ORDER BY trades DESC`,
-      [since]
+      [since, env]
     );
 
     // 10. Overall baseline stats
@@ -303,8 +304,8 @@ export async function GET(request: Request) {
         ROUND(SUM(profit_loss)::numeric, 2) as total_pnl,
         ROUND(AVG(profit_loss)::numeric, 2) as avg_pnl
       FROM trade_log
-      WHERE timestamp >= $1 AND LOWER(status) = 'closed'`,
-      [since]
+      WHERE timestamp >= $1 AND LOWER(status) = 'closed' AND environment = $2`,
+      [since, env]
     );
 
     const baseline = baselineResult.rows[0] || {

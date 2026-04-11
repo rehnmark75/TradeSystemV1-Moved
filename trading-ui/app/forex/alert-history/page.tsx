@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type AlertRow = {
   id: number;
@@ -68,6 +70,7 @@ const resolvePair = (row: AlertRow) => {
 };
 
 export default function ForexAlertHistoryPage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(1);
   const [status, setStatus] = useState("All");
   const [strategy, setStrategy] = useState("All");
@@ -89,7 +92,7 @@ export default function ForexAlertHistoryPage() {
       page: String(page),
       limit: "25"
     });
-    fetch(`/trading/api/forex/alert-history/?${params.toString()}`)
+    fetch(`/trading/api/forex/alert-history/?${params.toString()}&env=${environment}`)
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch(() => setError("Failed to load alert history."))
@@ -98,7 +101,7 @@ export default function ForexAlertHistoryPage() {
 
   useEffect(() => {
     loadAlerts();
-  }, [days, status, strategy, pair, page]);
+  }, [days, status, strategy, pair, page, environment]);
 
   const stats = payload?.stats;
   const alerts = payload?.alerts ?? [];
@@ -110,6 +113,7 @@ export default function ForexAlertHistoryPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type AlertDataResponse = {
   hours: number;
@@ -31,6 +33,7 @@ function getAlertSummary(alert: Record<string, unknown>) {
 }
 
 export default function AlertDataPage() {
+  const { environment } = useEnvironment();
   const [hours, setHours] = useState(1);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +50,7 @@ export default function AlertDataPage() {
       setError(null);
 
       try {
-        const response = await fetch(`/trading/api/forex/alert-data?${query}`);
+        const response = await fetch(`/trading/api/forex/alert-data?${query}&env=${environment}`);
         const data = (await response.json()) as AlertDataResponse;
 
         if (!response.ok) {
@@ -73,7 +76,7 @@ export default function AlertDataPage() {
     return () => {
       isActive = false;
     };
-  }, [query, refreshTick]);
+  }, [query, refreshTick, environment]);
 
   return (
     <div className="page">
@@ -81,6 +84,7 @@ export default function AlertDataPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

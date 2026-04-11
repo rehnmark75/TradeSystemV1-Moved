@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type SnapshotPayload = {
   range: { start: string; end: string };
@@ -30,6 +32,7 @@ type SnapshotPayload = {
 const toDateInput = (value: Date) => value.toISOString().slice(0, 10);
 
 export default function ForexPerformanceSnapshotPage() {
+  const { environment } = useEnvironment();
   const [start, setStart] = useState(toDateInput(new Date(Date.now() - 24 * 3600 * 1000)));
   const [end, setEnd] = useState(toDateInput(new Date()));
   const [payload, setPayload] = useState<SnapshotPayload | null>(null);
@@ -40,7 +43,7 @@ export default function ForexPerformanceSnapshotPage() {
     setLoading(true);
     setError(null);
     fetch(
-      `/trading/api/forex/performance-snapshot/?start=${start}&end=${end}`
+      `/trading/api/forex/performance-snapshot/?start=${start}&end=${end}&env=${environment}`
     )
       .then((res) => res.json())
       .then((data) => setPayload(data))
@@ -66,6 +69,7 @@ export default function ForexPerformanceSnapshotPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>
