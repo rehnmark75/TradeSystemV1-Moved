@@ -70,6 +70,9 @@ type WatchlistRow = {
   bt_ema50_90d_grade?: string | null;
   bt_ema50_90d_confidence?: string | null;
   bt_ema50_90d_supports_signal?: string | null;
+  signal_validated?: boolean | null;
+  signal_validation_reasons?: string | null;
+  bt_stop_method?: string | null;
 };
 
 type WatchlistDetail = WatchlistRow & {
@@ -196,6 +199,7 @@ export default function Page() {
   const [noteEditDraft, setNoteEditDraft] = useState<Record<string, string>>({});
   const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
   const [tradeReadyOnly, setTradeReadyOnly] = useState(false);
+  const [validatedOnly, setValidatedOnly] = useState(false);
   const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade">("signal");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
@@ -238,6 +242,9 @@ export default function Page() {
       if (!CROSSOVER.has(watchlist) && scanDate) {
         params.set("date", scanDate);
       }
+      if (validatedOnly) {
+        params.set("validated", "true");
+      }
       const res = await fetch(`${apiPath("watchlist/results")}?${params.toString()}`);
       const data = await res.json();
       setRows(data.rows || []);
@@ -246,7 +253,7 @@ export default function Page() {
       setLoading(false);
     };
     loadRows();
-  }, [watchlist, scanDate, limit]);
+  }, [watchlist, scanDate, limit, validatedOnly]);
 
   const watchlistInfo = WATCHLIST_DEFINITIONS[watchlist];
 
@@ -255,12 +262,15 @@ export default function Page() {
     if (tradeReadyOnly) {
       data = data.filter((row) => row.trade_ready);
     }
+    if (validatedOnly) {
+      data = data.filter((row) => row.signal_validated);
+    }
     if (filter) {
       const term = filter.toUpperCase();
       data = data.filter((row) => row.ticker?.toUpperCase().includes(term));
     }
     return data;
-  }, [rows, filter, tradeReadyOnly]);
+  }, [rows, filter, tradeReadyOnly, validatedOnly]);
 
   const numberOrNull = (value: unknown) => {
     if (value === null || value === undefined || value === "") {
@@ -849,6 +859,16 @@ export default function Page() {
               Trade Ready Only
             </label>
           </div>
+          <div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }}>
+              <input
+                type="checkbox"
+                checked={validatedOnly}
+                onChange={(e) => setValidatedOnly(e.target.checked)}
+              />
+              Validated Only
+            </label>
+          </div>
         </div>
 
         <div className="summary">
@@ -937,6 +957,11 @@ export default function Page() {
                       <Link className="deep-link" href={`/stocks/${row.ticker}`} title="Open deep dive">
                         ↗
                       </Link>
+                      {row.signal_validated ? (
+                        <span className="pill good" style={{ marginLeft: 4, fontSize: "0.7rem", padding: "1px 5px" }} title="Passes all visual quality filters: EMA slope, EMA stack, volume, RS≥60, TV Strong Buy">
+                          ✓ Valid
+                        </span>
+                      ) : null}
                     </div>
                     <span title={row.trade_ready_score != null ? `Score: ${row.trade_ready_score}` : ""}>
                       {row.trade_ready ? (
@@ -1172,6 +1197,25 @@ export default function Page() {
                                 <div className="detail-item">
                                   Risk: {formatValue(details[row.ticker]?.risk_percent, 1)}%
                                 </div>
+                              </div>
+                              <h4>Signal Validation</h4>
+                              <div className="detail-grid">
+                                <div className="detail-item">
+                                  Status:{" "}
+                                  {row.signal_validated ? (
+                                    <span className="pill good">Validated</span>
+                                  ) : (
+                                    <span className="pill bad">Not Validated</span>
+                                  )}
+                                </div>
+                                <div className="detail-item">
+                                  BT Stops: <strong>{row.bt_stop_method ? row.bt_stop_method.toUpperCase() : "—"}</strong>
+                                </div>
+                                {row.signal_validation_reasons && row.signal_validation_reasons !== "validated" ? (
+                                  <div className="detail-item" style={{ gridColumn: "1 / -1", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                    {row.signal_validation_reasons}
+                                  </div>
+                                ) : null}
                               </div>
                               <h4>EMA50 Backtest (90d)</h4>
                               {(() => {

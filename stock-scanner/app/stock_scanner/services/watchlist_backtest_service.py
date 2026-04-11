@@ -45,6 +45,9 @@ class WatchlistBacktestService:
     MIN_VOLUME = 1_000_000
     DEFAULT_DAYS = 90
     DEFAULT_MAX_HOLD_DAYS = 20
+    SIGNAL_EMA50_SLOPE_MIN = 1.005   # EMA50 must rise ≥0.5% over 5 bars
+    SIGNAL_REL_VOL_MIN = 1.25        # Crossover day volume ≥1.25x 20d average
+    SIGNAL_CLOSE_ABOVE_EMA50_MIN = 1.001  # Close ≥0.1% above EMA50
 
     def __init__(self, db_manager: AsyncDatabaseManager):
         self.db = db_manager
@@ -62,6 +65,7 @@ class WatchlistBacktestService:
                 id,
                 ticker,
                 scan_date,
+                crossover_date,
                 price,
                 suggested_stop_loss,
                 suggested_target_1,
@@ -72,6 +76,9 @@ class WatchlistBacktestService:
             WHERE watchlist_name = 'ema_50_crossover'
               AND scan_date = $1
               AND status = 'active'
+              AND tv_overall_signal = 'STRONG BUY'
+              AND rs_percentile >= 60
+              AND (daq_score < 70 OR daq_score IS NULL)
             ORDER BY ticker
             """,
             scan_date
@@ -94,16 +101,18 @@ class WatchlistBacktestService:
                 logger.debug("Skipping %s (invalid risk/tp pct)", ticker)
                 continue
 
-            summary = await self._backtest_ticker(
+            signal_date = row.get('crossover_date') or scan_date
+            summary, validation = await self._backtest_ticker(
                 ticker=ticker,
                 end_date=scan_date,
                 days=days,
                 risk_pct=risk_pct,
                 tp_pct=tp_pct,
-                max_hold_days=max_hold_days
+                max_hold_days=max_hold_days,
+                signal_date=signal_date
             )
 
-            await self._store_summary(row['id'], scan_date, days, summary)
+            await self._store_summary(row['id'], scan_date, days, summary, validation)
             processed += 1
 
         logger.info("EMA50 watchlist backtest complete: %s tickers", processed)
@@ -222,8 +231,9 @@ class WatchlistBacktestService:
         days: int,
         risk_pct: float,
         tp_pct: float,
-        max_hold_days: int
-    ) -> BacktestSummary:
+        max_hold_days: int,
+        signal_date: Optional[date] = None
+    ) -> Tuple[BacktestSummary, dict]:
         start_date = end_date - timedelta(days=days)
         df = await self.data_provider.get_historical_data(
             ticker=ticker,
@@ -234,14 +244,19 @@ class WatchlistBacktestService:
         )
 
         if df.empty:
-            return BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty = BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty.grade = self.compute_grade(empty)
+            return empty, {'signal_validated': False, 'signal_validation_reasons': 'no_price_data', 'bt_stop_method': None}
 
         df = df.copy()
         df['timestamp'] = pd.to_datetime(df['timestamp'])
 
+        validation = self._validate_signal(df, signal_date or end_date)
         signals = self._find_signals(df, start_date)
         if not signals:
-            return BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty = BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty.grade = self.compute_grade(empty)
+            return empty, validation
 
         wins = 0
         losses = 0
@@ -288,7 +303,7 @@ class WatchlistBacktestService:
             avg_hold_days=avg_hold_days
         )
         summary.grade = self.compute_grade(summary)
-        return summary
+        return summary, validation
 
     def _find_signals(self, df: pd.DataFrame, start_date: date) -> List[int]:
         signals: List[int] = []
@@ -320,14 +335,43 @@ class WatchlistBacktestService:
             if volume_sma is None or pd.isna(volume_sma) or volume_sma < self.MIN_VOLUME:
                 continue
 
+            # --- Visual quality filters (clean crossovers only) ---
+            # 1. EMA50 slope: must be rising ≥0.5% over last 5 bars
+            if i < 5:
+                continue
+            ema_50_5bars = df.iloc[i - 5].get('ema_50')
+            if pd.isna(ema_50_5bars) or float(ema_50) <= float(ema_50_5bars) * self.SIGNAL_EMA50_SLOPE_MIN:
+                continue
+
+            # 2. EMA stack: EMA20 must be above EMA50 at crossover (pullback in uptrend)
+            ema_20 = row.get('ema_20')
+            if pd.isna(ema_20) or float(ema_20) <= float(ema_50):
+                continue
+
+            # 3. Volume confirmation: crossover day must be elevated vs 20d average
+            rel_vol = row.get('relative_volume')
+            if rel_vol is None or pd.isna(rel_vol) or float(rel_vol) < self.SIGNAL_REL_VOL_MIN:
+                continue
+
+            # 4. Close distance: not a marginal tag of EMA50
+            if float(price) < float(ema_50) * self.SIGNAL_CLOSE_ABOVE_EMA50_MIN:
+                continue
+
             signals.append(i)
 
         return signals
 
     def _simulate_trade(self, df: pd.DataFrame, idx: int, risk_pct: float, tp_pct: float, max_hold_days: int) -> dict:
         entry_price = float(df.iloc[idx]['close'])
-        stop_loss = entry_price * (1 - risk_pct)
-        take_profit = entry_price * (1 + tp_pct)
+        atr = df.iloc[idx].get('atr')
+        if atr is not None and not pd.isna(atr) and float(atr) > 0:
+            stop_loss = entry_price - (1.5 * float(atr))
+            take_profit = entry_price + (2.25 * float(atr))
+            stop_method = 'atr'
+        else:
+            stop_loss = entry_price * (1 - risk_pct)
+            take_profit = entry_price * (1 + tp_pct)
+            stop_method = 'pct'
 
         exit_price = entry_price
         hold_days = 0
@@ -366,10 +410,95 @@ class WatchlistBacktestService:
             'exit_price': exit_price,
             'pnl': pnl,
             'hold_days': hold_days,
-            'exit_idx': exit_idx
+            'exit_idx': exit_idx,
+            'bt_stop_method': stop_method
         }
 
-    async def _store_summary(self, row_id: int, scan_date: date, days: int, summary: BacktestSummary) -> None:
+    def _validate_signal(self, df: pd.DataFrame, signal_date: date) -> dict:
+        """
+        Validate the current watchlist signal using the same visual-quality filters
+        applied in _find_signals(). Checks the signal_date bar specifically.
+        """
+        reasons: List[str] = []
+
+        idxs = df.index[df['timestamp'].dt.date == signal_date].tolist()
+        if not idxs:
+            return {'signal_validated': False, 'signal_validation_reasons': f'missing_bar:{signal_date.isoformat()}', 'bt_stop_method': None}
+
+        i = int(idxs[-1])
+        if i <= 0:
+            return {'signal_validated': False, 'signal_validation_reasons': 'insufficient_history', 'bt_stop_method': None}
+
+        row = df.iloc[i]
+        prev = df.iloc[i - 1]
+
+        price = row.get('close')
+        ema_50 = row.get('ema_50')
+        ema_200 = row.get('ema_200')
+        volume_sma = row.get('volume_sma_20')
+        prev_ema_50 = prev.get('ema_50')
+        prev_close = prev.get('close')
+
+        # Guard: missing required indicators
+        required = {'close': price, 'ema_50': ema_50, 'ema_200': ema_200, 'prev_ema_50': prev_ema_50, 'prev_close': prev_close}
+        if any(v is None or pd.isna(v) for v in required.values()):
+            return {'signal_validated': False, 'signal_validation_reasons': 'missing_indicators', 'bt_stop_method': None}
+
+        validated = True
+
+        if float(price) <= float(ema_200):
+            validated = False
+            reasons.append('below_ema200')
+
+        if float(price) <= float(ema_50):
+            validated = False
+            reasons.append('below_ema50')
+
+        if float(prev_close) >= float(prev_ema_50):
+            validated = False
+            reasons.append('no_crossover')
+
+        if volume_sma is None or pd.isna(volume_sma) or float(volume_sma) < self.MIN_VOLUME:
+            validated = False
+            reasons.append('low_avg_volume')
+
+        if i < 5:
+            validated = False
+            reasons.append('insufficient_slope_history')
+        else:
+            ema_50_5bars = df.iloc[i - 5].get('ema_50')
+            if ema_50_5bars is None or pd.isna(ema_50_5bars):
+                validated = False
+                reasons.append('missing_ema50_slope')
+            elif float(ema_50) <= float(ema_50_5bars) * self.SIGNAL_EMA50_SLOPE_MIN:
+                validated = False
+                reasons.append('ema50_flat')
+
+        ema_20 = row.get('ema_20')
+        if ema_20 is None or pd.isna(ema_20) or float(ema_20) <= float(ema_50):
+            validated = False
+            reasons.append('ema_stack')
+
+        rel_vol = row.get('relative_volume')
+        if rel_vol is None or pd.isna(rel_vol) or float(rel_vol) < self.SIGNAL_REL_VOL_MIN:
+            validated = False
+            reasons.append('low_rel_volume')
+
+        if float(price) < float(ema_50) * self.SIGNAL_CLOSE_ABOVE_EMA50_MIN:
+            validated = False
+            reasons.append('marginal_close')
+
+        atr = row.get('atr')
+        bt_stop_method = 'atr' if atr is not None and not pd.isna(atr) and float(atr) > 0 else 'pct'
+
+        reason_text = 'validated' if validated else ('failed:' + ','.join(reasons) if reasons else 'failed')
+        return {
+            'signal_validated': validated,
+            'signal_validation_reasons': reason_text,
+            'bt_stop_method': bt_stop_method
+        }
+
+    async def _store_summary(self, row_id: int, scan_date: date, days: int, summary: BacktestSummary, validation: dict) -> None:
         end_date = scan_date
         start_date = scan_date - timedelta(days=days)
         grade = summary.grade
@@ -392,8 +521,11 @@ class WatchlistBacktestService:
                 bt_ema50_90d_score = $12,
                 bt_ema50_90d_grade = $13,
                 bt_ema50_90d_confidence = $14,
-                bt_ema50_90d_supports_signal = $15
-            WHERE id = $16
+                bt_ema50_90d_supports_signal = $15,
+                signal_validated = $16,
+                signal_validation_reasons = $17,
+                bt_stop_method = $18
+            WHERE id = $19
             """,
             summary.total_signals,
             summary.wins,
@@ -410,5 +542,8 @@ class WatchlistBacktestService:
             grade.grade if grade else None,
             grade.confidence if grade else None,
             grade.supports_signal if grade else None,
+            validation.get('signal_validated'),
+            validation.get('signal_validation_reasons'),
+            validation.get('bt_stop_method'),
             row_id
         )

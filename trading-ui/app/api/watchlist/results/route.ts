@@ -10,6 +10,7 @@ export async function GET(request: Request) {
   const watchlist = searchParams.get("watchlist");
   const scanDate = searchParams.get("date");
   const limit = Number(searchParams.get("limit") || 100);
+  const validatedOnly = searchParams.get("validated") === "true";
 
   if (!watchlist) {
     return NextResponse.json({ error: "watchlist is required" }, { status: 400 });
@@ -81,7 +82,10 @@ export async function GET(request: Request) {
           w.bt_ema50_90d_score,
           w.bt_ema50_90d_grade,
           w.bt_ema50_90d_confidence,
-          w.bt_ema50_90d_supports_signal
+          w.bt_ema50_90d_supports_signal,
+          w.signal_validated,
+          w.signal_validation_reasons,
+          w.bt_stop_method
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -130,6 +134,7 @@ export async function GET(request: Request) {
         ) bt_closed ON TRUE
         WHERE w.watchlist_name = $1
           AND w.status = 'active'
+          ${validatedOnly ? "AND w.signal_validated IS TRUE" : ""}
         ORDER BY w.crossover_date DESC NULLS LAST, w.volume DESC
         LIMIT $2
       `;
@@ -193,7 +198,10 @@ export async function GET(request: Request) {
         w.bt_ema50_90d_avg_pnl,
         w.bt_ema50_90d_total_pnl,
         w.bt_ema50_90d_profit_factor,
-        w.bt_ema50_90d_avg_hold_days
+        w.bt_ema50_90d_avg_hold_days,
+        w.signal_validated,
+        w.signal_validation_reasons,
+        w.bt_stop_method
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -246,6 +254,7 @@ export async function GET(request: Request) {
           FROM stock_watchlist_results
           WHERE watchlist_name = $1
         ))
+        ${validatedOnly ? "AND w.signal_validated IS TRUE" : ""}
       ORDER BY w.scan_date DESC, w.volume DESC
       LIMIT $3
     `;
