@@ -67,7 +67,11 @@ export default function ContainerCard({ container: c, onViewLogs, onRestart }: P
         position: "relative",
       }}>
         {c.is_critical && (
-          <span style={{ position: "absolute", top: "10px", right: "12px", fontSize: "0.7rem", fontWeight: 700, color: "var(--bad)", letterSpacing: "0.05em" }}>CRITICAL</span>
+          hs === "healthy" ? (
+            <span style={{ position: "absolute", top: "10px", right: "12px", fontSize: "0.68rem", fontWeight: 600, color: "var(--muted)", background: "var(--border)", borderRadius: "4px", padding: "1px 6px", letterSpacing: "0.04em" }}>CORE</span>
+          ) : (
+            <span style={{ position: "absolute", top: "10px", right: "12px", fontSize: "0.7rem", fontWeight: 700, color: "var(--bad)", letterSpacing: "0.05em" }}>CRITICAL</span>
+          )
         )}
         <div style={{ display: "flex", alignItems: "center", gap: "8px", paddingRight: "60px" }}>
           <StatusPill state={hs} size="sm" />
