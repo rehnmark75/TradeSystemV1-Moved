@@ -61,6 +61,8 @@ services:
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${PROD_API_KEY}
       - IG_PWD=${PROD_PASSWORD}
+      # Internal API auth (required for write endpoints like position-closer)
+      - INTERNAL_API_TOKEN=${INTERNAL_API_TOKEN}
       # Telegram notifications
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}

@@ -40,6 +40,17 @@ class LossPreventionFilter:
             'postgresql://postgres:postgres@postgres:5432/strategy_config'
         )
         self._config_set = os.getenv('TRADING_CONFIG_SET', 'live')
+        self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
+
+        # Invariant: config_set must match trading environment to prevent
+        # live risk rules from running with demo config (or vice versa).
+        if not backtest_mode and self._config_set != self._trading_env:
+            raise RuntimeError(
+                f"LPF: TRADING_CONFIG_SET ('{self._config_set}') must equal "
+                f"TRADING_ENVIRONMENT ('{self._trading_env}'). "
+                "Refusing to start with mismatched risk rules."
+            )
+
         self._load_config()
 
     @contextmanager
@@ -70,9 +81,12 @@ class LossPreventionFilter:
                     if row:
                         self._config = dict(row)
                     else:
-                        logger.warning(
-                            f"🛡️ LPF: No config found in loss_prevention_config for config_set='{self._config_set}'"
-                        )
+                        msg = f"🛡️ LPF: No config found in loss_prevention_config for config_set='{self._config_set}'"
+                        if self._trading_env == 'live':
+                            raise RuntimeError(
+                                f"{msg} — refusing to start live trading with no LPF config"
+                            )
+                        logger.warning(f"{msg} (demo mode — LPF disabled)")
                         return
 
                     # Load enabled rules (scoped to config_set)
@@ -118,8 +132,14 @@ class LossPreventionFilter:
                         if ref_name not in rule_names:
                             logger.warning(f"🛡️ LPF: Pair config {epic} references unknown rule '{ref_name}' in rule_penalty_overrides")
 
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"🛡️ LPF: Failed to load config: {e}")
+            if self._trading_env == 'live':
+                raise RuntimeError(
+                    f"🛡️ LPF: Config load failed in live mode — refusing to start: {e}"
+                ) from e
             self._loaded = False
 
     @property

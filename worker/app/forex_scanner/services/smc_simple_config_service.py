@@ -1687,6 +1687,7 @@ class SMCSimpleConfigService:
         self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self.enable_hot_reload = enable_hot_reload
         self.config_set = config_set or os.getenv('TRADING_CONFIG_SET', 'live')
+        self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
         # Thread-safe cache
         self._lock = RLock()
@@ -1721,8 +1722,15 @@ class SMCSimpleConfigService:
             self._load_from_database()
             logger.info(f"SMC Simple config service initialized from database (config_set={self.config_set})")
         except Exception as e:
-            logger.warning(f"Failed to load initial config from database: {e}")
-            # Create default config
+            if self._trading_env == 'live':
+                logger.critical(
+                    f"SMC Simple config DB load failed in LIVE mode (config_set={self.config_set}): {e}"
+                )
+                raise RuntimeError(
+                    f"Refusing to start live worker with default SMC config (config_set={self.config_set}): {e}"
+                ) from e
+            # Demo: fall back to defaults so offline experimentation still works
+            logger.warning(f"Failed to load initial config from database (config_set={self.config_set}): {e}")
             self._cached_config = SMCSimpleConfig()
             self._cached_config.source = 'default'
             self._cache_timestamp = datetime.now()
@@ -1743,10 +1751,10 @@ class SMCSimpleConfigService:
                 try:
                     self._load_from_database()
                 except Exception as e:
-                    logger.error(f"Failed to load config from database: {e}")
+                    logger.error(f"Failed to load config from database (config_set={self.config_set}): {e}")
                     # Fall back to last-known-good
                     if self._last_known_good is not None:
-                        logger.warning("Using last-known-good configuration")
+                        logger.warning(f"Using last-known-good configuration (config_set={self.config_set})")
                         self._cached_config = copy.deepcopy(self._last_known_good)
                         self._cached_config.source = 'cache'
                         self._cache_timestamp = datetime.now()

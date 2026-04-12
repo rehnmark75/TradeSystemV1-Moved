@@ -3,12 +3,15 @@ Position Closer Router - Weekend Protection API Endpoints
 Provides endpoints for managing automatic position closure on Fridays.
 """
 
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+import os
+
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List
 import logging
 from datetime import datetime, timezone
 
+from services.internal_auth import require_internal_token
 from services.position_closer import (
     check_and_close_positions,
     manual_close_positions,
@@ -42,7 +45,10 @@ async def get_position_closer_status_endpoint():
 
 
 @router.post("/check-and-close", response_model=Dict[str, Any])
-async def check_and_close_positions_endpoint(background_tasks: BackgroundTasks):
+async def check_and_close_positions_endpoint(
+    background_tasks: BackgroundTasks,
+    _: None = Depends(require_internal_token)
+):
     """
     Check if it's Friday 20:30 UTC and close positions if needed.
     This is the main endpoint called by the scheduler.
@@ -74,14 +80,22 @@ async def check_and_close_positions_endpoint(background_tasks: BackgroundTasks):
 
 
 @router.post("/manual-close-all", response_model=Dict[str, Any])
-async def manual_close_all_positions_endpoint():
+async def manual_close_all_positions_endpoint(_: None = Depends(require_internal_token)):
     """
     Manually close all open positions immediately.
     This bypasses the Friday 20:30 UTC check and is for emergency/testing use.
 
+    Requires X-Internal-Token header AND ENABLE_MANUAL_POSITION_CLOSE=true env flag.
+
     Returns:
         Result of manual position closure
     """
+    if os.getenv('ENABLE_MANUAL_POSITION_CLOSE', '').lower() != 'true':
+        raise HTTPException(
+            status_code=403,
+            detail="Manual position close is disabled. Set ENABLE_MANUAL_POSITION_CLOSE=true to enable."
+        )
+
     try:
         logger.warning("⚠️ Manual position closure requested via API - bypassing time checks")
         result = await manual_close_positions()
