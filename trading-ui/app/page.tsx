@@ -13,7 +13,8 @@ export default function Page() {
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
           <Link href="/forex">Forex Analytics</Link>
-          <Link href="/settings">Settings</Link>
+          <Link href="/infrastructure">Infrastructure</Link>
+          <Link href="/system">System Status</Link>
           <Link href="/settings">Settings</Link>
         </div>
       </div>
@@ -78,6 +79,29 @@ export default function Page() {
             <div>
               <h3>Settings Center</h3>
               <p>Scanner + SMC configuration, overrides, and audit trail.</p>
+            </div>
+          </Link>
+        </div>
+      </section>
+
+      <section className="landing-section">
+        <div className="section-header">
+          <h2>Operations</h2>
+          <p>Infrastructure health, stream monitoring, and log intelligence.</p>
+        </div>
+        <div className="landing-grid">
+          <Link href="/infrastructure" className="landing-card">
+            <div className="landing-icon">🖥️</div>
+            <div>
+              <h3>Infrastructure</h3>
+              <p>Container health, alerts, metrics, and restart actions via system-monitor.</p>
+            </div>
+          </Link>
+          <Link href="/system" className="landing-card">
+            <div className="landing-icon">📡</div>
+            <div>
+              <h3>System Status</h3>
+              <p>Stream health, candle data freshness, operations feed, and log search.</p>
             </div>
           </Link>
         </div>
