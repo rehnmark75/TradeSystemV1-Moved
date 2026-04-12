@@ -3,15 +3,15 @@ Position Closer Router - Weekend Protection API Endpoints
 Provides endpoints for managing automatic position closure on Fridays.
 """
 
+import hmac
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 from typing import Dict, Any, List
 import logging
 from datetime import datetime, timezone
 
-from services.internal_auth import require_internal_token
 from services.position_closer import (
     check_and_close_positions,
     manual_close_positions,
@@ -22,6 +22,17 @@ from services.position_closer import (
 logger = logging.getLogger(__name__)
 
 router = APIRouter()
+
+
+def _check_internal_token(request: Request):
+    """Validate X-Internal-Token header. Raises HTTPException on failure."""
+    expected = os.getenv('INTERNAL_API_TOKEN')
+    if not expected:
+        logger.error("INTERNAL_API_TOKEN not configured — rejecting request")
+        raise HTTPException(status_code=503, detail="INTERNAL_API_TOKEN not configured")
+    token = request.headers.get('x-internal-token') or request.headers.get('X-Internal-Token')
+    if not token or not hmac.compare_digest(token, expected):
+        raise HTTPException(status_code=401, detail="Invalid internal token")
 
 
 @router.get("/status", response_model=Dict[str, Any])
@@ -45,10 +56,7 @@ async def get_position_closer_status_endpoint():
 
 
 @router.post("/check-and-close", response_model=Dict[str, Any])
-async def check_and_close_positions_endpoint(
-    background_tasks: BackgroundTasks,
-    _: None = Depends(require_internal_token)
-):
+async def check_and_close_positions_endpoint(request: Request, background_tasks: BackgroundTasks):
     """
     Check if it's Friday 20:30 UTC and close positions if needed.
     This is the main endpoint called by the scheduler.
@@ -56,6 +64,7 @@ async def check_and_close_positions_endpoint(
     Returns:
         Result of position closure attempt
     """
+    _check_internal_token(request)
     try:
         logger.info("🔍 Position closure check requested via API")
         result = await check_and_close_positions()
@@ -80,7 +89,7 @@ async def check_and_close_positions_endpoint(
 
 
 @router.post("/manual-close-all", response_model=Dict[str, Any])
-async def manual_close_all_positions_endpoint(_: None = Depends(require_internal_token)):
+async def manual_close_all_positions_endpoint(request: Request):
     """
     Manually close all open positions immediately.
     This bypasses the Friday 20:30 UTC check and is for emergency/testing use.
@@ -90,6 +99,7 @@ async def manual_close_all_positions_endpoint(_: None = Depends(require_internal
     Returns:
         Result of manual position closure
     """
+    _check_internal_token(request)
     if os.getenv('ENABLE_MANUAL_POSITION_CLOSE', '').lower() != 'true':
         raise HTTPException(
             status_code=403,

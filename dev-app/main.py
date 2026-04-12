@@ -717,10 +717,15 @@ async def startup_coordinator():
                 async def _call_position_closer():
                     try:
                         logger.info("⏰ Scheduled position closure check triggered")
+                        import os as _os
+                        _token = _os.getenv('INTERNAL_API_TOKEN', '')
                         async with _httpx.AsyncClient() as client:
                             response = await client.post(
                                 "http://localhost:8000/position-closer/check-and-close",
-                                headers={"x-apim-gateway": "verified"},
+                                headers={
+                                    "x-apim-gateway": "verified",
+                                    "X-Internal-Token": _token,
+                                },
                                 timeout=60.0
                             )
                             logger.info(f"Position closer response: {response.status_code}")
