@@ -1746,13 +1746,15 @@ class OrderExecutor:
             cursor = conn.cursor()
 
             # Find alerts that are 'placed' but older than expiry window (10 min safety buffer)
+            # Scope to this worker's environment so demo/live workers don't cross-update
             cursor.execute("""
                 UPDATE alert_history
                 SET order_status = 'expired', updated_at = NOW()
                 WHERE order_status = 'placed'
                   AND alert_timestamp < NOW() - INTERVAL '10 minutes'
+                  AND environment = %s
                 RETURNING id, epic
-            """)
+            """, (os.getenv('TRADING_ENVIRONMENT', 'demo'),))
 
             expired = cursor.fetchall()
             conn.commit()
@@ -1790,7 +1792,7 @@ class OrderExecutor:
             )
             cursor = conn.cursor()
 
-            # Find most recent 'placed' alert for this epic
+            # Find most recent 'placed' alert for this epic (scoped to environment)
             cursor.execute("""
                 UPDATE alert_history
                 SET order_status = 'filled', updated_at = NOW()
@@ -1799,11 +1801,12 @@ class OrderExecutor:
                     WHERE epic = %s
                       AND order_status = 'placed'
                       AND alert_timestamp >= NOW() - INTERVAL '15 minutes'
+                      AND environment = %s
                     ORDER BY alert_timestamp DESC
                     LIMIT 1
                 )
                 RETURNING id
-            """, (epic,))
+            """, (epic, os.getenv('TRADING_ENVIRONMENT', 'demo')))
 
             result = cursor.fetchone()
             conn.commit()

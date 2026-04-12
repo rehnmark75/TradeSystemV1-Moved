@@ -773,8 +773,9 @@ class AlertHistoryManager:
                     FROM alert_history
                     WHERE alert_level = 'REJECTED'
                     AND alert_timestamp >= NOW() - INTERVAL '%s days'
+                    AND environment = %s
                 '''
-                params = [days]
+                params = [days, os.getenv('TRADING_ENVIRONMENT', 'demo')]
 
                 if strategy:
                     query += ' AND strategy = %s'
@@ -821,7 +822,8 @@ class AlertHistoryManager:
                     FROM alert_history
                     WHERE alert_level = 'REJECTED'
                     AND alert_timestamp >= NOW() - INTERVAL '%s days'
-                ''', [days])
+                    AND environment = %s
+                ''', [days, os.getenv('TRADING_ENVIRONMENT', 'demo')])
 
                 row = cursor.fetchone()
                 if row:
@@ -1841,10 +1843,10 @@ class AlertHistoryManager:
         def get_alerts_operation(conn, cursor):
             cutoff_date = datetime.now() - timedelta(days=days)
             
-            # Build WHERE clause
-            where_conditions = ["alert_timestamp > %s"]
-            params = [cutoff_date]
-            
+            # Build WHERE clause (scoped to trading environment)
+            where_conditions = ["alert_timestamp > %s", "environment = %s"]
+            params = [cutoff_date, os.getenv('TRADING_ENVIRONMENT', 'demo')]
+
             if strategy:
                 where_conditions.append("strategy = %s")
                 params.append(strategy)
@@ -1887,10 +1889,11 @@ class AlertHistoryManager:
         """
         def check_operation(conn, cursor):
             cursor.execute("""
-                SELECT id FROM alert_history 
-                WHERE signal_hash = %s 
+                SELECT id FROM alert_history
+                WHERE signal_hash = %s
+                  AND environment = %s
                 LIMIT 1
-            """, (signal_hash,))
+            """, (signal_hash, os.getenv('TRADING_ENVIRONMENT', 'demo')))
             
             result = cursor.fetchone()
             if result:

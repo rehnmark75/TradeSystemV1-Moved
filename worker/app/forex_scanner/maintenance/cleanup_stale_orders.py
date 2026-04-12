@@ -48,7 +48,8 @@ def cleanup_stale_pending_orders(max_age_minutes: int = 30, dry_run: bool = Fals
         # Calculate cutoff time
         cutoff_time = datetime.now() - timedelta(minutes=max_age_minutes)
 
-        # Find stale pending orders
+        # Find stale pending orders (scoped to this worker's trading environment)
+        _env = os.environ.get('TRADING_ENVIRONMENT', 'demo')
         cursor.execute("""
             SELECT
                 id,
@@ -60,8 +61,9 @@ def cleanup_stale_pending_orders(max_age_minutes: int = 30, dry_run: bool = Fals
             FROM alert_history
             WHERE order_status = 'pending'
               AND alert_timestamp < %s
+              AND environment = %s
             ORDER BY alert_timestamp DESC
-        """, (cutoff_time,))
+        """, (cutoff_time, _env))
 
         stale_orders = cursor.fetchall()
 
@@ -83,13 +85,14 @@ def cleanup_stale_pending_orders(max_age_minutes: int = 30, dry_run: bool = Fals
             conn.close()
             return len(stale_orders)
 
-        # Update stale orders to expired
+        # Update stale orders to expired (scoped to trading environment)
         cursor.execute("""
             UPDATE alert_history
             SET order_status = 'expired'
             WHERE order_status = 'pending'
               AND alert_timestamp < %s
-        """, (cutoff_time,))
+              AND environment = %s
+        """, (cutoff_time, _env))
 
         updated_count = cursor.rowcount
         conn.commit()
@@ -125,7 +128,8 @@ def cleanup_all_pairs_stale_orders(max_age_minutes: int = 30):
         # Calculate cutoff time
         cutoff_time = datetime.now() - timedelta(minutes=max_age_minutes)
 
-        # Get summary by pair
+        # Get summary by pair (scoped to this worker's trading environment)
+        _env = os.environ.get('TRADING_ENVIRONMENT', 'demo')
         cursor.execute("""
             SELECT
                 epic,
@@ -135,9 +139,10 @@ def cleanup_all_pairs_stale_orders(max_age_minutes: int = 30):
             FROM alert_history
             WHERE order_status = 'pending'
               AND alert_timestamp < %s
+              AND environment = %s
             GROUP BY epic
             ORDER BY stale_count DESC
-        """, (cutoff_time,))
+        """, (cutoff_time, _env))
 
         summary = cursor.fetchall()
 
