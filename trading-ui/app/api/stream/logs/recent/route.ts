@@ -12,7 +12,9 @@ export async function GET(req: Request) {
       { cache: "no-store", signal: AbortSignal.timeout(5000) }
     );
     const data = await res.json();
-    return NextResponse.json(data, { status: res.status });
+    if (!res.ok) return NextResponse.json(data, { status: res.status });
+    // Upstream returns { logs: [...], total_count, timestamp } — extract the array
+    return NextResponse.json(data.logs ?? data);
   } catch (e) {
     return NextResponse.json({ error: String(e) }, { status: 502 });
   }
