@@ -2,11 +2,11 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import AlertRow, { type AlertItem } from "../../components/ops/AlertRow";
 import ContainerCard, { type ContainerInfo } from "../../components/ops/ContainerCard";
 import ContainerLogsDrawer from "../../components/ops/ContainerLogsDrawer";
-import ConfirmDialog from "../../components/ops/ConfirmDialog";
+
 import HealthCheckGrid, { type HealthCheckItem } from "../../components/ops/HealthCheckGrid";
 import KpiTile from "../../components/ops/KpiTile";
 import LiveBadge from "../../components/ops/LiveBadge";
@@ -76,11 +76,6 @@ function InfraPageInner() {
   const [testingNotif, setTestingNotif] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
   const [activeOnly, setActiveOnly] = useState(false);
-  const searchParams = typeof window !== "undefined"
-    ? new URLSearchParams(window.location.search) : null;
-  const tabFromUrl = searchParams?.get("tab");
-
-  useEffect(() => { if (tabFromUrl) setActiveTab(tabFromUrl); }, [tabFromUrl]);
 
   const { data: status, loading: statusLoading, lastUpdated, refetch } =
     useAutoRefresh<SystemStatus>(`${BASE}/api/infra/status`);
@@ -200,7 +195,7 @@ function InfraPageInner() {
       </div>
 
       {/* Tabs */}
-      <SectionTabs tabs={TABS} />
+      <SectionTabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
       {/* Containers Tab */}
       {activeTab === "containers" && (
@@ -318,9 +313,5 @@ function InfraPageInner() {
 }
 
 export default function InfrastructurePage() {
-  return (
-    <Suspense fallback={<div className="page" style={{ paddingTop: "40px", color: "var(--muted)" }}>Loading…</div>}>
-      <InfraPageInner />
-    </Suspense>
-  );
+  return <InfraPageInner />;
 }

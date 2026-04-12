@@ -2,8 +2,8 @@
 "use client";
 
 import Link from "next/link";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import AlertRow, { type AlertItem } from "../../components/ops/AlertRow";
+import { useCallback, useEffect, useState } from "react";
+
 import KpiTile from "../../components/ops/KpiTile";
 import LiveBadge from "../../components/ops/LiveBadge";
 import SectionTabs from "../../components/ops/SectionTabs";
@@ -588,11 +588,6 @@ function AnalyticsTab() {
 function SystemStatusInner() {
   const [activeTab, setActiveTab] = useState("overview");
 
-  useEffect(() => {
-    const tab = new URLSearchParams(window.location.search).get("tab");
-    if (tab) setActiveTab(tab);
-  }, []);
-
   const { data: streamStatus, lastUpdated, refetch, loading: sl } =
     useAutoRefresh<Record<string, unknown>>(`${BASE}/api/stream/status`);
   const { data: backfill } = useAutoRefresh<BackfillStatus>(`${BASE}/api/stream/backfill/status`);
@@ -651,7 +646,7 @@ function SystemStatusInner() {
       </div>
 
       {/* Tabs */}
-      <SectionTabs tabs={TABS} />
+      <SectionTabs tabs={TABS} active={activeTab} onChange={setActiveTab} />
 
       {/* Tab content */}
       {activeTab === "overview" && <OverviewTab />}
@@ -664,9 +659,5 @@ function SystemStatusInner() {
 }
 
 export default function SystemStatusPage() {
-  return (
-    <Suspense fallback={<div className="page" style={{ paddingTop: "40px", color: "var(--muted)" }}>Loading…</div>}>
-      <SystemStatusInner />
-    </Suspense>
-  );
+  return <SystemStatusInner />;
 }
