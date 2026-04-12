@@ -405,7 +405,7 @@ function LogsTab() {
   const [searchErr, setSearchErr] = useState<string | null>(null);
 
   const { data: recent, loading: rl } = useAutoRefresh<LogLine[]>(
-    `${BASE}/api/stream/logs/recent?limit=100${level ? `&level=${level}` : ""}`
+    `${BASE}/api/stream/logs/recent?limit=100${level ? `&level=${level}` : ""}${service ? `&service=${service}` : ""}`
   );
 
   const doSearch = async () => {
@@ -418,7 +418,7 @@ function LogsTab() {
       if (level) qs.set("level", level);
       if (service) qs.set("service", service);
       qs.set("limit", "300");
-      const res = await fetch(`${BASE}/api/stream/logs/search?${qs}`);
+      const res = await fetch(`${BASE}/api/stream/logs/search/?${qs}`);
       if (!res.ok) throw new Error(`${res.status}`);
       const d = await res.json();
       setResults(d.lines ?? d);
@@ -464,10 +464,12 @@ function LogsTab() {
         <div>
           <label style={{ display: "block", fontSize: "0.75rem", color: "var(--muted)", marginBottom: "4px" }}>Service</label>
           <select value={service} onChange={e => setService(e.target.value)} style={{ minWidth: "110px" }}>
-            <option value="">All</option>
-            <option value="worker">worker</option>
-            <option value="stream">stream</option>
-            <option value="dev">dev</option>
+            <option value="">stream (default)</option>
+            <option value="worker">task-worker</option>
+            <option value="worker-live">task-worker-live</option>
+            <option value="dev">fastapi-dev</option>
+            <option value="live">fastapi-live</option>
+            <option value="scanner">stock-scanner</option>
           </select>
         </div>
         <button
