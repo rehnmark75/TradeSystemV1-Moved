@@ -180,6 +180,8 @@ services:
       - FASTAPI_GENERAL_URL=http://fastapi-general:8008
       - FASTAPI_DEV_URL=http://fastapi-dev:8000
       - FASTAPI_API_KEY=${FASTAPI_API_KEY}
+      - SYSTEM_MONITOR_URL=http://system-monitor:8095
+      - FASTAPI_STREAM_URL=http://fastapi-stream:8003
       - NEXT_PUBLIC_BASE_PATH=/trading
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}

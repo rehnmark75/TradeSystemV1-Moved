@@ -12,6 +12,23 @@
   --good: #1e7e34;
   --warn: #fd7e14;
   --bad: #dc3545;
+  /* Ops palette additions */
+  --info: #1971c2;
+  --critical: #8b1e2b;
+  --surface: #fffdf8;
+  --neutral-50: #faf7f1;
+  --neutral-300: #b8ae99;
+  --neutral-500: #6f6a5c;
+}
+
+@keyframes pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+@keyframes livepin {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.5; transform: scale(0.7); }
 }
 
 * {
