@@ -122,10 +122,12 @@ function severityColor(s?: string) {
 }
 
 function toHealthState(s?: string): HealthState {
-  if (!s) return "unknown";
-  if (/healthy|ok|running|up|true/i.test(String(s))) return "healthy";
-  if (/degraded|warn/i.test(String(s))) return "degraded";
-  if (/down|error|err|stop|false/i.test(String(s))) return "down";
+  if (s == null) return "unknown";
+  const v = String(s).toLowerCase();
+  if (/healthy|ok|running|up/.test(v) || v === "true") return "healthy";
+  // market_closed = intentional idle, not a fault
+  if (/degraded|warn|market_closed|closed|idle|issues/.test(v)) return "degraded";
+  if (/down|error|err|stopped|unavailable/.test(v) || v === "false") return "down";
   return "unknown";
 }
 
@@ -256,12 +258,19 @@ function HealthTab() {
     latency_ms: typeof v === "object" && v !== null ? Number((v as Record<string, unknown>).latency_ms ?? 0) || undefined : undefined,
   }));
 
-  if (streamStatus) {
-    checks.push({
-      service: "stream-service",
-      status: toHealthState(String(streamStatus.running ?? streamStatus.status ?? streamStatus.is_running)),
-    });
-  }
+  // Prefer structured stream_health from the health endpoint; fall back to raw running flag
+  const streamHealthStatus =
+    (health as Record<string, unknown> | null)?.stream_health as Record<string, unknown> | undefined;
+  const streamServiceState = streamHealthStatus?.status
+    ? toHealthState(String(streamHealthStatus.status))
+    : streamStatus != null
+      ? toHealthState(streamStatus.running === true ? "running" : streamStatus.running === false ? "market_closed" : "unknown")
+      : "unknown";
+  checks.push({
+    service: "stream-service",
+    status: streamServiceState,
+    error: streamHealthStatus?.details as string | undefined,
+  });
 
   return (
     <div>
@@ -595,12 +604,11 @@ function SystemStatusInner() {
   const { data: backfill } = useAutoRefresh<BackfillStatus>(`${BASE}/api/stream/backfill/status`);
   const { data: health } = useAutoRefresh<StreamHealth>(`${BASE}/api/stream/health`, 15_000);
 
-  const streamState = toHealthState(
-    String(streamStatus?.running ?? streamStatus?.status ?? streamStatus?.is_running ?? "")
-  );
-  const backfillState = toHealthState(
-    String(backfill?.running ?? backfill?.status ?? "unknown")
-  );
+  const streamHealthStatus = (health as Record<string, unknown> | null)?.stream_health as Record<string, unknown> | undefined;
+  const streamState = streamHealthStatus?.status
+    ? toHealthState(String(streamHealthStatus.status))
+    : toHealthState(streamStatus?.running === true ? "running" : streamStatus?.running === false ? "market_closed" : "unknown");
+  const backfillState = toHealthState(backfill?.status ?? (backfill?.running ? "running" : "unknown"));
   const healthState = toHealthState(health?.status as string);
 
   return (
