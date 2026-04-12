@@ -1018,13 +1018,16 @@ def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dic
     """
     Get trailing stop configuration for specific epic/pair.
 
-    Priority for scalp trades:
-    1. Pair-specific config from SCALP_TRAILING_CONFIGS
-    2. DEFAULT_SCALP_TRAILING_CONFIG fallback
+    DB-backed as of Apr 2026: delegates to TrailingConfigService which reads
+    strategy_config.trailing_pair_config scoped by TRADING_ENVIRONMENT.
+    The legacy PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS dicts below
+    are retained for reference and seed data only — the runtime no longer
+    reads them.
 
-    Priority for regular trades:
-    1. Pair-specific config from PAIR_TRAILING_CONFIGS
-    2. DEFAULT_TRAILING_CONFIG fallback
+    Fallback priority (handled inside the service):
+    1. Pair-specific row for (config_set, epic, is_scalp)
+    2. DEFAULT row for (config_set, is_scalp)
+    3. Empty dict (caller handles)
 
     Note: IG's min_stop_distance_points from trade_log ALWAYS takes priority
     when available. These configs are fallback or can set HIGHER values.
@@ -1036,11 +1039,11 @@ def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dic
     Returns:
         Dictionary with trailing configuration values
     """
-    if is_scalp_trade:
-        config = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_TRAILING_CONFIG.copy())
-    else:
-        config = PAIR_TRAILING_CONFIGS.get(epic, DEFAULT_TRAILING_CONFIG.copy())
-    return config
+    # Import locally to avoid a hard import cycle on module load and keep
+    # callers that import this function before services are initialised
+    # working during startup.
+    from services.trailing_config_service import get_trailing_config_service
+    return get_trailing_config_service().get_config(epic, is_scalp=is_scalp_trade)
 
 
 def get_scalp_trailing_config_for_epic(epic: str) -> dict:
