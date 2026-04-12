@@ -26,12 +26,13 @@ function parseDefaults(raw: Record<string, string | null>) {
   return parsed;
 }
 
-export function useScannerConfig() {
+export function useScannerConfig(configSet?: string) {
   const [conflict, setConflict] = useState<Record<string, unknown> | null>(null);
   const settings = useSettings({
     endpoint: "/api/settings/scanner",
     defaultsEndpoint: "/api/settings/scanner/defaults",
     draftKey: "scanner-settings-draft",
+    configSet,
     onConflict: (current) => setConflict(current),
     parseDefaults
   });

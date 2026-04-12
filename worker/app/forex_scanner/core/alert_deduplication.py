@@ -8,10 +8,14 @@ CRITICAL: Database-driven configuration - NO FALLBACK to config.py
 All settings must come from scanner_global_config table.
 """
 
+import os
 import hashlib
 import json
 import pandas as pd
 from datetime import datetime, timedelta
+
+# Trading environment (live/demo) — scope all dedup/cooldown queries to this worker's env
+TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
 from typing import Dict, List, Optional, Tuple, Any
 import logging
 from dataclasses import dataclass
@@ -264,11 +268,12 @@ class AlertDeduplicationManager:
             cursor = conn.cursor()
             
             cursor.execute("""
-                SELECT COUNT(*) as count 
-                FROM alert_history 
-                WHERE epic = %s 
+                SELECT COUNT(*) as count
+                FROM alert_history
+                WHERE epic = %s
                 AND alert_timestamp >= %s
-            """, (epic, datetime.now() - timedelta(hours=1)))
+                AND environment = %s
+            """, (epic, datetime.now() - timedelta(hours=1), TRADING_ENVIRONMENT))
             
             result = cursor.fetchone()
             epic_count = result[0] if result else 0
@@ -306,8 +311,9 @@ class AlertDeduplicationManager:
                 SELECT id, alert_timestamp FROM alert_history
                 WHERE signal_hash = %s
                 AND alert_timestamp >= %s
+                AND environment = %s
                 LIMIT 1
-            """, (signal_hash, datetime.now() - timedelta(minutes=15)))
+            """, (signal_hash, datetime.now() - timedelta(minutes=15), TRADING_ENVIRONMENT))
 
             result = cursor.fetchone()
             cursor.close()
@@ -351,9 +357,10 @@ class AlertDeduplicationManager:
                 FROM alert_history
                 WHERE cooldown_key = %s
                 AND alert_timestamp >= %s
+                AND environment = %s
                 ORDER BY alert_timestamp DESC
                 LIMIT 1
-            """, (cooldown_key, now - timedelta(minutes=self.config.epic_signal_cooldown_minutes)))
+            """, (cooldown_key, now - timedelta(minutes=self.config.epic_signal_cooldown_minutes), TRADING_ENVIRONMENT))
 
             result = cursor.fetchone()
             cursor.close()
@@ -419,9 +426,10 @@ class AlertDeduplicationManager:
                 FROM trade_log
                 WHERE symbol = %s
                   AND status IN ('pending', 'tracking', 'break_even', 'trailing')
+                  AND environment = %s
                 ORDER BY timestamp DESC
                 LIMIT 1
-            """, (epic,))
+            """, (epic, TRADING_ENVIRONMENT))
 
             active_trade = cursor.fetchone()
 
@@ -450,9 +458,10 @@ class AlertDeduplicationManager:
                 WHERE symbol = %s
                   AND timestamp IS NOT NULL
                   AND timestamp >= %s
+                  AND environment = %s
                 ORDER BY timestamp DESC
                 LIMIT 1
-            """, (epic, cooldown_threshold))
+            """, (epic, cooldown_threshold, TRADING_ENVIRONMENT))
 
             recent_opened = cursor.fetchone()
 
@@ -482,9 +491,10 @@ class AlertDeduplicationManager:
                   AND status IN ('closed', 'expired')
                   AND closed_at IS NOT NULL
                   AND closed_at >= %s
+                  AND environment = %s
                 ORDER BY closed_at DESC
                 LIMIT 1
-            """, (epic, cooldown_threshold))
+            """, (epic, cooldown_threshold, TRADING_ENVIRONMENT))
 
             recent_closed = cursor.fetchone()
 
@@ -679,7 +689,8 @@ class AlertDeduplicationManager:
                     AVG(confidence_score) as avg_confidence_24h
                 FROM alert_history
                 WHERE alert_timestamp >= %s
-            """, (datetime.now() - timedelta(hours=24),))
+                AND environment = %s
+            """, (datetime.now() - timedelta(hours=24), TRADING_ENVIRONMENT))
 
             stats = cursor.fetchone()
             cursor.close()

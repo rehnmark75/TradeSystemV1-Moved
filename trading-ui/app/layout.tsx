@@ -1,5 +1,6 @@
 import "./globals.css";
 import type { ReactNode } from "react";
+import { EnvironmentProvider } from "../lib/environment";
 
 export const metadata = {
   title: "Watchlist Fast",
@@ -9,7 +10,9 @@ export const metadata = {
 export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
-      <body>{children}</body>
+      <body>
+        <EnvironmentProvider>{children}</EnvironmentProvider>
+      </body>
     </html>
   );
 }

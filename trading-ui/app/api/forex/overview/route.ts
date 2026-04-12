@@ -16,6 +16,7 @@ function parseDays(value: string | null) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const since = new Date();
   since.setDate(since.getDate() - days);
 
@@ -34,8 +35,9 @@ export async function GET(request: Request) {
         COALESCE(MIN(profit_loss), 0) as largest_loss
       FROM trade_log
       WHERE timestamp >= $1
+        AND environment = $2
       `,
-      [since]
+      [since, env]
     );
 
     const statsRow = statsResult.rows[0] ?? {};
@@ -63,10 +65,11 @@ export async function GET(request: Request) {
         COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins
       FROM trade_log
       WHERE timestamp >= $1
+        AND environment = $2
       GROUP BY symbol
       ORDER BY total_pnl DESC
       `,
-      [since]
+      [since, env]
     );
 
     const pairs = pairStatsResult.rows ?? [];
@@ -82,10 +85,11 @@ export async function GET(request: Request) {
       FROM trade_log
       WHERE timestamp >= $1
         AND profit_loss IS NOT NULL
+        AND environment = $2
       GROUP BY DATE(timestamp)
       ORDER BY date ASC
       `,
-      [since]
+      [since, env]
     );
 
     const recentTradesResult = await forexPool.query(
@@ -102,10 +106,11 @@ export async function GET(request: Request) {
       FROM trade_log t
       LEFT JOIN alert_history a ON t.alert_id = a.id
       WHERE t.timestamp >= $1
+        AND t.environment = $2
       ORDER BY t.timestamp DESC
       LIMIT 12
       `,
-      [since]
+      [since, env]
     );
 
     return NextResponse.json({

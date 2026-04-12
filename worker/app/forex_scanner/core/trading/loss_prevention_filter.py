@@ -39,6 +39,18 @@ class LossPreventionFilter:
             'STRATEGY_CONFIG_DATABASE_URL',
             'postgresql://postgres:postgres@postgres:5432/strategy_config'
         )
+        self._config_set = os.getenv('TRADING_CONFIG_SET', 'live')
+        self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
+
+        # Invariant: config_set must match trading environment to prevent
+        # live risk rules from running with demo config (or vice versa).
+        if not backtest_mode and self._config_set != self._trading_env:
+            raise RuntimeError(
+                f"LPF: TRADING_CONFIG_SET ('{self._config_set}') must equal "
+                f"TRADING_ENVIRONMENT ('{self._trading_env}'). "
+                "Refusing to start with mismatched risk rules."
+            )
+
         self._load_config()
 
     @contextmanager
@@ -60,22 +72,30 @@ class LossPreventionFilter:
         try:
             with self._get_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # Load global config
-                    cur.execute("SELECT * FROM loss_prevention_config WHERE id = 1")
+                    # Load global config (scoped to this worker's config_set)
+                    cur.execute(
+                        "SELECT * FROM loss_prevention_config WHERE config_set = %s",
+                        (self._config_set,)
+                    )
                     row = cur.fetchone()
                     if row:
                         self._config = dict(row)
                     else:
-                        logger.warning("🛡️ LPF: No config found in loss_prevention_config")
+                        msg = f"🛡️ LPF: No config found in loss_prevention_config for config_set='{self._config_set}'"
+                        if self._trading_env == 'live':
+                            raise RuntimeError(
+                                f"{msg} — refusing to start live trading with no LPF config"
+                            )
+                        logger.warning(f"{msg} (demo mode — LPF disabled)")
                         return
 
-                    # Load enabled rules
+                    # Load enabled rules (scoped to config_set)
                     cur.execute("""
                         SELECT rule_name, category, penalty, condition_config, apply_in_backtest
                         FROM loss_prevention_rules
-                        WHERE is_enabled = TRUE
+                        WHERE is_enabled = TRUE AND config_set = %s
                         ORDER BY category, penalty DESC
-                    """)
+                    """, (self._config_set,))
                     self._rules = [dict(r) for r in cur.fetchall()]
 
                     # Load per-pair LPF config (graceful if table doesn't exist yet)
@@ -84,7 +104,8 @@ class LossPreventionFilter:
                             SELECT epic, is_enabled, block_mode, penalty_threshold,
                                    disabled_rules, rule_penalty_overrides
                             FROM loss_prevention_pair_config
-                        """)
+                            WHERE config_set = %s
+                        """, (self._config_set,))
                         for pair_row in cur.fetchall():
                             self._pair_configs[pair_row['epic']] = dict(pair_row)
                     except Exception:
@@ -95,7 +116,10 @@ class LossPreventionFilter:
             mode = self._config.get('block_mode', 'monitor')
             threshold = self._config.get('penalty_threshold', 0.60)
             pair_count = len(self._pair_configs)
-            logger.info(f"🛡️ LPF: Loaded {len(self._rules)} rules | mode={mode} | threshold={threshold} | pair_configs={pair_count}")
+            logger.info(
+                f"🛡️ LPF: Loaded {len(self._rules)} rules | config_set={self._config_set} | "
+                f"mode={mode} | threshold={threshold} | pair_configs={pair_count}"
+            )
 
             # Warn about stale pair config references
             if self._pair_configs:
@@ -108,8 +132,14 @@ class LossPreventionFilter:
                         if ref_name not in rule_names:
                             logger.warning(f"🛡️ LPF: Pair config {epic} references unknown rule '{ref_name}' in rule_penalty_overrides")
 
+        except RuntimeError:
+            raise
         except Exception as e:
             logger.error(f"🛡️ LPF: Failed to load config: {e}")
+            if self._trading_env == 'live':
+                raise RuntimeError(
+                    f"🛡️ LPF: Config load failed in live mode — refusing to start: {e}"
+                ) from e
             self._loaded = False
 
     @property

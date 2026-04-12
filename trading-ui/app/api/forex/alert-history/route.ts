@@ -35,12 +35,13 @@ type AlertFilters = {
   status: string | null;
   strategy: string | null;
   pair: string | null;
+  env: string;
 };
 
 function buildFilters(filters: AlertFilters) {
-  const clauses = ["alert_timestamp >= NOW() - ($1::int || ' days')::interval"];
-  const params: Array<string | number> = [filters.days];
-  let idx = 2;
+  const clauses = ["alert_timestamp >= NOW() - ($1::int || ' days')::interval", "environment = $2"];
+  const params: Array<string | number> = [filters.days, filters.env];
+  let idx = 3;
 
   if (filters.status === "Approved") {
     clauses.push("(claude_approved = TRUE OR claude_decision = 'APPROVE')");
@@ -71,6 +72,7 @@ function buildFilters(filters: AlertFilters) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
+  const env = searchParams.get("env") || "demo";
   const limit = parseLimit(searchParams.get("limit"));
   const page = parsePage(searchParams.get("page"));
   const status = searchParams.get("status");
@@ -78,7 +80,7 @@ export async function GET(request: Request) {
   const pair = searchParams.get("pair");
   const offset = (page - 1) * limit;
 
-  const { whereSql, params } = buildFilters({ days, status, strategy, pair });
+  const { whereSql, params } = buildFilters({ days, status, strategy, pair, env });
 
   try {
     const [filtersResult, pairsResult, statsResult, countResult, alertsResult] = await Promise.all([

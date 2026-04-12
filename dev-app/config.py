@@ -1,6 +1,12 @@
 # ================================================
-# DEV-APP CONFIGURATION
+# TRADING APP CONFIGURATION
 # ================================================
+# Supports both LIVE and DEMO modes via TRADING_ENVIRONMENT env var.
+# Default: 'demo' (safe — no accidental live trades)
+
+import os
+TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
+IS_LIVE = TRADING_ENVIRONMENT == 'live'
 
 # ================== EPIC MAPPINGS ==================
 # Ticker maps of IG specific ticker names
@@ -58,8 +64,19 @@ DEFAULT_EPICS = {
 }
 
 # ================== API ENDPOINTS ==================
-# IG Markets API
-API_BASE_URL = "https://demo-api.ig.com/gateway/deal"  # or your demo/live base URL
+# IG Markets API — switches based on TRADING_ENVIRONMENT
+if IS_LIVE:
+    API_BASE_URL = "https://api.ig.com/gateway/deal"
+    LIGHTSTREAMER_URL = "https://apd.marketdatasystems.com"
+    IG_USERNAME = "rehnmarkh"
+    IG_API_KEY = "prodapikey"
+    IG_PWD = "prodpwd"
+else:
+    API_BASE_URL = "https://demo-api.ig.com/gateway/deal"
+    LIGHTSTREAMER_URL = "https://demo-apd.marketdatasystems.com"
+    IG_USERNAME = "rehnmarkhdemo"
+    IG_API_KEY = "demoapikey"
+    IG_PWD = "demopwd"
 
 # Internal service URLs
 FASTAPI_DEV_URL = "http://fastapi-dev:8000"
@@ -68,15 +85,15 @@ FASTAPI_STREAM_URL = "http://fastapi-stream:8000"
 # Specific endpoints
 ADJUST_STOP_URL = f"{FASTAPI_DEV_URL}/orders/adjust-stop"
 
-# IG Lightstreamer (for streaming)
-LIGHTSTREAMER_URL = "https://demo-apd.marketdatasystems.com"
-
-# ================== AUTHENTICATION ==================
-# Note: IG_API_KEY and IG_PWD values are now mapped to environment variables
-# by the keyvault.py service. These names are kept for backward compatibility.
-IG_USERNAME = "rehnmarkhdemo"
-IG_API_KEY = "demoapikey"
-IG_PWD = "demopwd"
+# ================== POSITION CLOSER (LIVE ONLY) ==================
+# Weekend protection - automatically close positions on Fridays
+ENABLE_POSITION_CLOSER = IS_LIVE  # Only enabled in live mode
+POSITION_CLOSURE_HOUR_UTC = 20
+POSITION_CLOSURE_MINUTE_UTC = 30
+POSITION_CLOSURE_WEEKDAY = 4  # Friday
+POSITION_CLOSER_TIMEOUT_SECONDS = 60
+POSITION_CLOSER_MAX_RETRY_ATTEMPTS = 3
+POSITION_CLOSER_RETRY_DELAY_SECONDS = 5
 
 # ================== TRADE COOLDOWN CONTROLS ==================
 TRADE_COOLDOWN_ENABLED = True
@@ -1001,13 +1018,16 @@ def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dic
     """
     Get trailing stop configuration for specific epic/pair.
 
-    Priority for scalp trades:
-    1. Pair-specific config from SCALP_TRAILING_CONFIGS
-    2. DEFAULT_SCALP_TRAILING_CONFIG fallback
+    DB-backed as of Apr 2026: delegates to TrailingConfigService which reads
+    strategy_config.trailing_pair_config scoped by TRADING_ENVIRONMENT.
+    The legacy PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS dicts below
+    are retained for reference and seed data only — the runtime no longer
+    reads them.
 
-    Priority for regular trades:
-    1. Pair-specific config from PAIR_TRAILING_CONFIGS
-    2. DEFAULT_TRAILING_CONFIG fallback
+    Fallback priority (handled inside the service):
+    1. Pair-specific row for (config_set, epic, is_scalp)
+    2. DEFAULT row for (config_set, is_scalp)
+    3. Empty dict (caller handles)
 
     Note: IG's min_stop_distance_points from trade_log ALWAYS takes priority
     when available. These configs are fallback or can set HIGHER values.
@@ -1019,11 +1039,11 @@ def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dic
     Returns:
         Dictionary with trailing configuration values
     """
-    if is_scalp_trade:
-        config = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_TRAILING_CONFIG.copy())
-    else:
-        config = PAIR_TRAILING_CONFIGS.get(epic, DEFAULT_TRAILING_CONFIG.copy())
-    return config
+    # Import locally to avoid a hard import cycle on module load and keep
+    # callers that import this function before services are initialised
+    # working during startup.
+    from services.trailing_config_service import get_trailing_config_service
+    return get_trailing_config_service().get_config(epic, is_scalp=is_scalp_trade)
 
 
 def get_scalp_trailing_config_for_epic(epic: str) -> dict:

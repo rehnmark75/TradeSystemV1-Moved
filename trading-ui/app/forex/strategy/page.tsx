@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type StrategyRow = {
   strategy: string;
@@ -52,6 +54,7 @@ const formatPercent = (value: number) =>
   Number.isFinite(value) ? `${value.toFixed(1)}%` : "0%";
 
 export default function ForexStrategyPage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(30);
   const [payload, setPayload] = useState<AnalysisPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -61,7 +64,7 @@ export default function ForexStrategyPage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/trading/api/forex/analysis/?days=${days}`, {
+    fetch(`/trading/api/forex/analysis/?days=${days}&env=${environment}`, {
       signal: controller.signal
     })
       .then((res) => res.json())
@@ -73,7 +76,7 @@ export default function ForexStrategyPage() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [days]);
+  }, [days, environment]);
 
   const maxPnl = useMemo(() => {
     if (!payload?.strategies?.length) return 1;
@@ -89,6 +92,7 @@ export default function ForexStrategyPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

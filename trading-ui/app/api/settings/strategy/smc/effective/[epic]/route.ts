@@ -3,29 +3,32 @@ import { strategyConfigPool } from "../../../../../../../lib/strategyConfigDb";
 
 export const dynamic = "force-dynamic";
 
-async function loadActiveSmcConfig(client?: any) {
+async function loadActiveSmcConfig(configSet: string, client?: any) {
   const executor = client ?? strategyConfigPool;
   const result = await executor.query(
     `
       SELECT *
       FROM smc_simple_global_config
-      WHERE is_active = TRUE
+      WHERE is_active = TRUE AND config_set = $1
       ORDER BY updated_at DESC
       LIMIT 1
-    `
+    `,
+    [configSet]
   );
   return result.rows[0] ?? null;
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { epic: string } }
 ) {
   try {
-    const globalConfig = await loadActiveSmcConfig();
+    const { searchParams } = new URL(request.url);
+    const configSet = searchParams.get("config_set") ?? "demo";
+    const globalConfig = await loadActiveSmcConfig(configSet);
     if (!globalConfig) {
       return NextResponse.json(
-        { error: "No active SMC config found" },
+        { error: `No active SMC config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }

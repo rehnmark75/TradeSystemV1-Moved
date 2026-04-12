@@ -5,6 +5,7 @@ interface UseSettingsOptions<T> {
   endpoint: string;
   defaultsEndpoint?: string;
   draftKey: string;
+  configSet?: string;
   onConflict?: (current: Record<string, unknown>) => void;
   parseDefaults?: (raw: Record<string, string | null>) => Record<string, unknown>;
 }
@@ -13,9 +14,13 @@ export function useSettings<T>({
   endpoint,
   defaultsEndpoint,
   draftKey,
+  configSet,
   onConflict,
   parseDefaults
 }: UseSettingsOptions<T>) {
+  const effectiveConfigSet = configSet ?? "demo";
+  const scopedDraftKey = `${draftKey}-${effectiveConfigSet}`;
+  const fetchUrl = `${endpoint}?config_set=${encodeURIComponent(effectiveConfigSet)}`;
   const [data, setData] = useState<T | null>(null);
   const [defaults, setDefaults] = useState<Record<string, unknown>>({});
   const [loading, setLoading] = useState(true);
@@ -23,7 +28,9 @@ export function useSettings<T>({
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    const stored = localStorage.getItem(draftKey);
+    // Reset in-memory changes when switching environments, then load draft for the new scope
+    setChanges({});
+    const stored = localStorage.getItem(scopedDraftKey);
     if (stored) {
       try {
         const parsed = JSON.parse(stored);
@@ -32,12 +39,12 @@ export function useSettings<T>({
         setChanges({});
       }
     }
-  }, [draftKey]);
+  }, [scopedDraftKey]);
 
   useEffect(() => {
     if (!Object.keys(changes).length) return;
-    localStorage.setItem(draftKey, JSON.stringify({ changes }));
-  }, [changes, draftKey]);
+    localStorage.setItem(scopedDraftKey, JSON.stringify({ changes }));
+  }, [changes, scopedDraftKey]);
 
   useEffect(() => {
     let active = true;
@@ -45,7 +52,7 @@ export function useSettings<T>({
       setLoading(true);
       setError(null);
       try {
-        const response = await fetch(apiUrl(endpoint));
+        const response = await fetch(apiUrl(fetchUrl));
         const payload = await response.json();
         if (!active) return;
         if (!response.ok) throw new Error(payload.error ?? "Failed to load settings");
@@ -62,7 +69,7 @@ export function useSettings<T>({
     return () => {
       active = false;
     };
-  }, [endpoint]);
+  }, [fetchUrl]);
 
   useEffect(() => {
     if (!defaultsEndpoint) return;
@@ -95,7 +102,7 @@ export function useSettings<T>({
 
   const resetChanges = () => {
     setChanges({});
-    localStorage.removeItem(draftKey);
+    localStorage.removeItem(scopedDraftKey);
   };
 
   const saveChanges = async (
@@ -115,14 +122,15 @@ export function useSettings<T>({
     }
 
     try {
-      const response = await fetch(apiUrl(endpoint), {
+      const response = await fetch(apiUrl(fetchUrl), {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
           updates: changesToSend,
           updated_by: payload.updatedBy,
           change_reason: payload.changeReason,
-          updated_at: overrideUpdatedAt ?? (data as any).updated_at
+          updated_at: overrideUpdatedAt ?? (data as any).updated_at,
+          config_set: effectiveConfigSet
         })
       });
       const payloadResponse = await response.json();

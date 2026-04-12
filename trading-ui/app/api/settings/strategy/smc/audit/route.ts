@@ -6,6 +6,7 @@ export const dynamic = "force-dynamic";
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Number(searchParams.get("limit") ?? 50);
+  const configSet = searchParams.get("config_set") ?? "demo";
 
   try {
     const result = await strategyConfigPool.query(
@@ -21,10 +22,13 @@ export async function GET(request: Request) {
           previous_values,
           new_values
         FROM smc_simple_config_audit
+        WHERE config_id IN (
+          SELECT id FROM smc_simple_global_config WHERE config_set = $1
+        )
         ORDER BY changed_at DESC
-        LIMIT $1
+        LIMIT $2
       `,
-      [limit]
+      [configSet, limit]
     );
 
     return NextResponse.json(result.rows ?? []);

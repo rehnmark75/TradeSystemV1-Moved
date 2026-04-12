@@ -216,11 +216,15 @@ Target Performance (v2.1.0):
     - More signals passing R:R filter due to tighter SL
 """
 
+import os
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
 import logging
 from datetime import datetime, timedelta, timezone
+
+# Trading environment (live/demo) - scope historical performance queries to this worker's env
+_TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
 # HTF Bias Score Calculator (v2.35.0)
 from forex_scanner.core.strategies.helpers.htf_bias_calculator import (
@@ -6279,10 +6283,11 @@ class SMCSimpleStrategy:
                 WHERE epic = %s
                   AND alert_timestamp >= NOW() - INTERVAL '%s hours'
                   AND strategy LIKE '%%SMC%%'
+                  AND environment = %s
                 ORDER BY alert_timestamp DESC
                 LIMIT 1
             """
-            cursor.execute(query, (epic, max_lookback_hours))
+            cursor.execute(query, (epic, max_lookback_hours, _TRADING_ENVIRONMENT))
             row = cursor.fetchone()
             cursor.close()
             conn.close()
@@ -6322,10 +6327,11 @@ class SMCSimpleStrategy:
                 WHERE epic = %s
                   AND alert_timestamp >= NOW() - INTERVAL '4 hours'
                   AND strategy LIKE '%%SMC%%'
+                  AND environment = %s
                 ORDER BY alert_timestamp DESC
                 LIMIT 10
             """
-            cursor.execute(query, (epic,))
+            cursor.execute(query, (epic, _TRADING_ENVIRONMENT))
             rows = cursor.fetchall()
             cursor.close()
             conn.close()
@@ -6382,10 +6388,11 @@ class SMCSimpleStrategy:
                 WHERE symbol = %s
                   AND status = 'closed'
                   AND closed_at IS NOT NULL
+                  AND environment = %s
                 ORDER BY closed_at DESC
                 LIMIT 1
             """
-            cursor.execute(query, (epic,))
+            cursor.execute(query, (epic, _TRADING_ENVIRONMENT))
             row = cursor.fetchone()
             cursor.close()
             conn.close()
@@ -6440,11 +6447,12 @@ class SMCSimpleStrategy:
                       AND status = 'closed'
                       AND closed_at IS NOT NULL
                       AND profit_loss IS NOT NULL
+                      AND environment = %s
                     ORDER BY closed_at DESC
                     LIMIT %s
                 ) recent_trades
             """
-            cursor.execute(query, (epic, self.win_rate_lookback_trades))
+            cursor.execute(query, (epic, _TRADING_ENVIRONMENT, self.win_rate_lookback_trades))
             row = cursor.fetchone()
             cursor.close()
             conn.close()
@@ -6645,9 +6653,10 @@ class SMCSimpleStrategy:
                           AND status = 'closed'
                           AND closed_at IS NOT NULL
                           AND profit_loss IS NOT NULL
+                          AND environment = %s
                         ORDER BY closed_at DESC
                         LIMIT %s
-                    """, (epic, window_size))
+                    """, (epic, _TRADING_ENVIRONMENT, window_size))
                     rows = cur.fetchall()
             finally:
                 conn.close()

@@ -10,16 +10,17 @@ function normalizeTimestamp(value: unknown) {
   return date.toISOString();
 }
 
-async function loadActiveSmcConfigId(client?: any) {
+async function loadActiveSmcConfigId(configSet: string, client?: any) {
   const executor = client ?? strategyConfigPool;
   const result = await executor.query(
     `
       SELECT id
       FROM smc_simple_global_config
-      WHERE is_active = TRUE
+      WHERE is_active = TRUE AND config_set = $1
       ORDER BY updated_at DESC
       LIMIT 1
-    `
+    `,
+    [configSet]
   );
   return result.rows[0]?.id ?? null;
 }
@@ -37,14 +38,16 @@ async function getOverrideColumns(client?: any) {
 }
 
 export async function GET(
-  _request: Request,
+  request: Request,
   { params }: { params: { epic: string } }
 ) {
   try {
-    const configId = await loadActiveSmcConfigId();
+    const { searchParams } = new URL(request.url);
+    const configSet = searchParams.get("config_set") ?? "demo";
+    const configId = await loadActiveSmcConfigId(configSet);
     if (!configId) {
       return NextResponse.json(
-        { error: "No active SMC config found" },
+        { error: `No active SMC config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }
@@ -82,12 +85,15 @@ export async function PUT(
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { updates, updated_by, change_reason, updated_at } = body as {
+  const { updates, updated_by, change_reason, updated_at, config_set } = body as {
     updates?: Record<string, unknown>;
     updated_by?: string;
     change_reason?: string;
     updated_at?: string;
+    config_set?: string;
   };
+
+  const configSet = config_set ?? "demo";
 
   if (!updates || typeof updates !== "object") {
     return NextResponse.json({ error: "Missing updates payload" }, { status: 400 });
@@ -108,11 +114,11 @@ export async function PUT(
   const client = await strategyConfigPool.connect();
   try {
     await client.query("BEGIN");
-    const configId = await loadActiveSmcConfigId(client);
+    const configId = await loadActiveSmcConfigId(configSet, client);
     if (!configId) {
       await client.query("ROLLBACK");
       return NextResponse.json(
-        { error: "No active SMC config found" },
+        { error: `No active SMC config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }
@@ -249,6 +255,7 @@ export async function DELETE(
   const body = await request.json().catch(() => null);
   const updated_by = body?.updated_by;
   const change_reason = body?.change_reason;
+  const configSet = body?.config_set ?? "demo";
 
   if (!updated_by || !change_reason) {
     return NextResponse.json(
@@ -260,11 +267,11 @@ export async function DELETE(
   const client = await strategyConfigPool.connect();
   try {
     await client.query("BEGIN");
-    const configId = await loadActiveSmcConfigId(client);
+    const configId = await loadActiveSmcConfigId(configSet, client);
     if (!configId) {
       await client.query("ROLLBACK");
       return NextResponse.json(
-        { error: "No active SMC config found" },
+        { error: `No active SMC config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }

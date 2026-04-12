@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type MaeTrade = {
   id: number;
@@ -65,6 +67,7 @@ const formatDateTime = (value: string) => {
 };
 
 export default function ForexMaeAnalysisPage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(7);
   const [payload, setPayload] = useState<MaePayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -76,7 +79,7 @@ export default function ForexMaeAnalysisPage() {
   const loadMae = () => {
     setLoading(true);
     setError(null);
-    fetch(`/trading/api/forex/mae-analysis/?days=${days}`)
+    fetch(`/trading/api/forex/mae-analysis/?days=${days}&env=${environment}`)
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch(() => setError("Failed to load MAE analysis."))
@@ -85,7 +88,7 @@ export default function ForexMaeAnalysisPage() {
 
   useEffect(() => {
     loadMae();
-  }, [days]);
+  }, [days, environment]);
 
   const trades = payload?.trades ?? [];
   const summary = payload?.summary ?? [];
@@ -118,6 +121,7 @@ export default function ForexMaeAnalysisPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

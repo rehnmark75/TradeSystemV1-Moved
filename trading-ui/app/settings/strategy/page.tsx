@@ -14,6 +14,7 @@ import { useSettingsSearch } from "../../../hooks/settings/useSettingsSearch";
 import { usePairOverrides } from "../../../hooks/settings/usePairOverrides";
 import { apiUrl } from "../../../lib/settings/api";
 import { logTelemetry } from "../../../lib/settings/telemetry";
+import { useEnvironment } from "../../../lib/environment";
 import type { SmcParameterMetadata } from "../../../types/settings";
 
 type EffectivePayload = {
@@ -67,6 +68,8 @@ function hasKey(obj: Record<string, unknown>, key: string) {
 }
 
 export default function UnifiedStrategySettings() {
+  const { environment } = useEnvironment();
+
   // Mode
   const [mode, setMode] = useState<SettingsMode>("global");
 
@@ -82,7 +85,7 @@ export default function UnifiedStrategySettings() {
     conflict,
     setConflict,
     setChanges,
-  } = useSmcConfig();
+  } = useSmcConfig(environment);
 
   // Metadata
   const { metadata, loading: metadataLoading } = useSmcMetadata();
@@ -96,7 +99,7 @@ export default function UnifiedStrategySettings() {
     saveOverride,
     createOverride,
     reload: reloadOverrides,
-  } = usePairOverrides();
+  } = usePairOverrides(environment);
 
   // Pair state
   const [selectedEpic, setSelectedEpic] = useState("");
@@ -159,12 +162,15 @@ export default function UnifiedStrategySettings() {
   useEffect(() => {
     if (!selectedEpic) { setEffective(null); return; }
     const controller = new AbortController();
-    fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}`), { signal: controller.signal })
+    fetch(
+      apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`),
+      { signal: controller.signal }
+    )
       .then((r) => r.json())
       .then(setEffective)
       .catch(() => {});
     return () => controller.abort();
-  }, [selectedEpic]);
+  }, [selectedEpic, environment]);
 
   // Sync draft overrides when effective config changes
   useEffect(() => {
@@ -391,7 +397,7 @@ export default function UnifiedStrategySettings() {
           await createOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason });
         }
         await reloadOverrides();
-        const refreshed = await fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}`)).then((r) => r.json());
+        const refreshed = await fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)).then((r) => r.json());
         setEffective(refreshed);
       } finally {
         setPairSaveLoading(false);

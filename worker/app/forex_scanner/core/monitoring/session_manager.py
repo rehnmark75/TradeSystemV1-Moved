@@ -4,6 +4,7 @@ Session Manager - Extracted from IntelligentForexScanner
 Handles scanning sessions, performance tracking, and statistics
 """
 
+import os
 import logging
 from typing import Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
@@ -170,10 +171,12 @@ class SessionManager:
         # Get alert statistics from database if available
         try:
             if hasattr(self, 'db_manager') and self.db_manager:
+                _env = os.getenv('TRADING_ENVIRONMENT', 'demo')
                 session_alerts = self.db_manager.execute_query(f"""
-                    SELECT COUNT(*) as count 
-                    FROM alert_history 
+                    SELECT COUNT(*) as count
+                    FROM alert_history
                     WHERE alert_timestamp >= '{self.start_time.strftime('%Y-%m-%d %H:%M:%S')}'
+                      AND environment = '{_env}'
                 """)
                 alert_count = session_alerts.iloc[0]['count'] if len(session_alerts) > 0 else "Unknown"
             else:

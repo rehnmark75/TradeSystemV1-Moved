@@ -9,7 +9,8 @@ interface PairOverride {
   [key: string]: unknown;
 }
 
-export function usePairOverrides() {
+export function usePairOverrides(configSet?: string) {
+  const effectiveConfigSet = configSet ?? "demo";
   const [overrides, setOverrides] = useState<PairOverride[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -18,7 +19,9 @@ export function usePairOverrides() {
     setLoading(true);
     setError(null);
     try {
-      const response = await fetch(apiUrl("/api/settings/strategy/smc/pairs"));
+      const response = await fetch(
+        apiUrl(`/api/settings/strategy/smc/pairs?config_set=${encodeURIComponent(effectiveConfigSet)}`)
+      );
       const payload = await response.json();
       if (!response.ok) {
         throw new Error(payload.error ?? "Failed to load overrides");
@@ -33,7 +36,8 @@ export function usePairOverrides() {
 
   useEffect(() => {
     loadOverrides();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [effectiveConfigSet]);
 
   const saveOverride = async (epic: string, updates: Record<string, unknown>, meta: {
     updatedBy: string;
@@ -41,7 +45,7 @@ export function usePairOverrides() {
     updatedAt: string;
   }) => {
     const response = await fetch(
-      apiUrl(`/api/settings/strategy/smc/pairs/${epic}`),
+      apiUrl(`/api/settings/strategy/smc/pairs/${epic}?config_set=${encodeURIComponent(effectiveConfigSet)}`),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -49,7 +53,8 @@ export function usePairOverrides() {
           updates,
           updated_by: meta.updatedBy,
           change_reason: meta.changeReason,
-          updated_at: meta.updatedAt
+          updated_at: meta.updatedAt,
+          config_set: effectiveConfigSet
         })
       }
     );
@@ -78,7 +83,8 @@ export function usePairOverrides() {
         epic,
         updates,
         updated_by: meta.updatedBy,
-        change_reason: meta.changeReason
+        change_reason: meta.changeReason,
+        config_set: effectiveConfigSet
       })
     });
     const payload = await response.json();
@@ -97,7 +103,8 @@ export function usePairOverrides() {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
         updated_by: meta.updatedBy,
-        change_reason: meta.changeReason
+        change_reason: meta.changeReason,
+        config_set: effectiveConfigSet
       })
       }
     );
@@ -122,7 +129,8 @@ export function usePairOverrides() {
         epics,
         source_epic: meta.sourceEpic,
         updated_by: meta.updatedBy,
-        change_reason: meta.changeReason
+        change_reason: meta.changeReason,
+        config_set: effectiveConfigSet
       })
     });
     const payload = await response.json();

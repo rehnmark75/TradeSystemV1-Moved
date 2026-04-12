@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type TradeRow = {
   id: number;
@@ -87,6 +89,7 @@ function calculateMetrics(rows: TradeRow[]) {
 }
 
 export default function ForexTradePerformancePage() {
+  const { environment } = useEnvironment();
   const [days, setDays] = useState(30);
   const [payload, setPayload] = useState<TradesPayload | null>(null);
   const [loading, setLoading] = useState(false);
@@ -102,7 +105,7 @@ export default function ForexTradePerformancePage() {
     const controller = new AbortController();
     setLoading(true);
     setError(null);
-    fetch(`/trading/api/forex/trades/?days=${days}`, { signal: controller.signal })
+    fetch(`/trading/api/forex/trades/?days=${days}&env=${environment}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch((err) => {
@@ -112,7 +115,7 @@ export default function ForexTradePerformancePage() {
       })
       .finally(() => setLoading(false));
     return () => controller.abort();
-  }, [days, refreshTick]);
+  }, [days, refreshTick, environment]);
 
   const trades = payload?.trades ?? [];
   const availableResults = useMemo(() => {
@@ -192,6 +195,7 @@ export default function ForexTradePerformancePage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

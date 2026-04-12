@@ -4,6 +4,8 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
+import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
 type TradeItem = {
   id: number;
@@ -122,6 +124,7 @@ const renderKeyGrid = (items: Array<{ key: string; value: unknown }>) => (
 );
 
 export default function ForexTradeAnalysisPage() {
+  const { environment } = useEnvironment();
   const [tradeList, setTradeList] = useState<TradeItem[]>([]);
   const [selectedTrade, setSelectedTrade] = useState<number | null>(null);
   const [activeTab, setActiveTab] = useState<"trailing" | "signal" | "outcome">("trailing");
@@ -142,7 +145,7 @@ export default function ForexTradeAnalysisPage() {
   });
 
   useEffect(() => {
-    fetch("/trading/api/forex/trade-analysis/trades/")
+    fetch(`/trading/api/forex/trade-analysis/trades/?env=${environment}`)
       .then((res) => res.json())
       .then((data: TradeListPayload) => {
         setTradeList(data.trades ?? []);
@@ -151,28 +154,28 @@ export default function ForexTradeAnalysisPage() {
         }
       })
       .catch(() => setTradeList([]));
-  }, []);
+  }, [environment]);
 
   const loadAnalysis = (tradeId: number) => {
     setTrailingState({ loading: true, error: null, data: null });
     setSignalState({ loading: true, error: null, data: null });
     setOutcomeState({ loading: true, error: null, data: null });
 
-    fetch(`/trading/api/forex/trade-analysis/trade/?tradeId=${tradeId}`)
+    fetch(`/trading/api/forex/trade-analysis/trade/?tradeId=${tradeId}&env=${environment}`)
       .then((res) => res.json())
       .then((data) => setTrailingState({ loading: false, error: null, data }))
       .catch(() =>
         setTrailingState({ loading: false, error: "Failed to load trailing analysis.", data: null })
       );
 
-    fetch(`/trading/api/forex/trade-analysis/signal/?tradeId=${tradeId}`)
+    fetch(`/trading/api/forex/trade-analysis/signal/?tradeId=${tradeId}&env=${environment}`)
       .then((res) => res.json())
       .then((data) => setSignalState({ loading: false, error: null, data }))
       .catch(() =>
         setSignalState({ loading: false, error: "Failed to load signal analysis.", data: null })
       );
 
-    fetch(`/trading/api/forex/trade-analysis/outcome/?tradeId=${tradeId}`)
+    fetch(`/trading/api/forex/trade-analysis/outcome/?tradeId=${tradeId}&env=${environment}`)
       .then((res) => res.json())
       .then((data) => setOutcomeState({ loading: false, error: null, data }))
       .catch(() =>
@@ -247,6 +250,7 @@ export default function ForexTradeAnalysisPage() {
         <Link href="/" className="brand">
           Trading Hub
         </Link>
+        <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

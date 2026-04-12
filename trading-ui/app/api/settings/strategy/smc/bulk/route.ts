@@ -3,16 +3,17 @@ import { strategyConfigPool } from "../../../../../../lib/strategyConfigDb";
 
 export const dynamic = "force-dynamic";
 
-async function loadActiveSmcConfig(client?: any) {
+async function loadActiveSmcConfig(configSet: string, client?: any) {
   const executor = client ?? strategyConfigPool;
   const result = await executor.query(
     `
       SELECT *
       FROM smc_simple_global_config
-      WHERE is_active = TRUE
+      WHERE is_active = TRUE AND config_set = $1
       ORDER BY updated_at DESC
       LIMIT 1
-    `
+    `,
+    [configSet]
   );
   return result.rows[0] ?? null;
 }
@@ -47,13 +48,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { action, epics, source_epic, updated_by, change_reason } = body as {
+  const { action, epics, source_epic, updated_by, change_reason, config_set } = body as {
     action?: string;
     epics?: string[];
     source_epic?: string;
     updated_by?: string;
     change_reason?: string;
+    config_set?: string;
   };
+
+  const configSet = config_set ?? "demo";
 
   if (!action || !Array.isArray(epics) || epics.length === 0) {
     return NextResponse.json(
@@ -71,11 +75,11 @@ export async function POST(request: Request) {
   const client = await strategyConfigPool.connect();
   try {
     await client.query("BEGIN");
-    const globalConfig = await loadActiveSmcConfig(client);
+    const globalConfig = await loadActiveSmcConfig(configSet, client);
     if (!globalConfig) {
       await client.query("ROLLBACK");
       return NextResponse.json(
-        { error: "No active SMC config found" },
+        { error: `No active SMC config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }

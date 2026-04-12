@@ -28,6 +28,10 @@ export default function SettingsSidebar() {
         <Link href="/settings/strategy">SMC Settings</Link>
         <Link href="/settings/strategy/effective">Effective View</Link>
       </div>
+      <div className="settings-sidebar-section">
+        <h3>Trailing Stops</h3>
+        <Link href="/settings/trailing">Trailing Settings</Link>
+      </div>
     </nav>
   );
 }

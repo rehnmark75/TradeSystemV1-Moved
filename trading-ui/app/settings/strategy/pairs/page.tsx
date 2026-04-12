@@ -9,6 +9,7 @@ import { useSmcMetadata } from "../../../../hooks/settings/useSmcMetadata";
 import { useSettingsSearch } from "../../../../hooks/settings/useSettingsSearch";
 import { apiUrl } from "../../../../lib/settings/api";
 import { logTelemetry } from "../../../../lib/settings/telemetry";
+import { useEnvironment } from "../../../../lib/environment";
 import type { SmcParameterMetadata } from "../../../../types/settings";
 
 type EffectivePayload = {
@@ -56,6 +57,7 @@ function hasKey(obj: Record<string, unknown>, key: string) {
 }
 
 export default function SmcPairOverridesPage() {
+  const { environment } = useEnvironment();
   const {
     overrides,
     loading,
@@ -65,7 +67,7 @@ export default function SmcPairOverridesPage() {
     saveOverride,
     createOverride,
     reload
-  } = usePairOverrides();
+  } = usePairOverrides(environment);
   const { metadata, loading: metadataLoading } = useSmcMetadata();
   const [selected, setSelected] = useState<string[]>([]);
   const [pairQuery, setPairQuery] = useState("");
@@ -90,11 +92,11 @@ export default function SmcPairOverridesPage() {
   }, []);
 
   useEffect(() => {
-    fetch(apiUrl("/api/settings/strategy/smc"))
+    fetch(apiUrl(`/api/settings/strategy/smc?config_set=${encodeURIComponent(environment)}`))
       .then((res) => res.json())
       .then((payload) => setGlobalConfig(payload))
       .catch(() => setGlobalConfig(null));
-  }, []);
+  }, [environment]);
 
   useEffect(() => {
     fetch(apiUrl("/api/settings/strategy/smc/pairs/columns"))
@@ -130,7 +132,7 @@ export default function SmcPairOverridesPage() {
     const controller = new AbortController();
     setEffectiveLoading(true);
     setEffectiveError(null);
-    fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}`), {
+    fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`), {
       signal: controller.signal
     })
       .then(async (res) => {
@@ -148,7 +150,7 @@ export default function SmcPairOverridesPage() {
       })
       .finally(() => setEffectiveLoading(false));
     return () => controller.abort();
-  }, [selectedEpic]);
+  }, [selectedEpic, environment]);
 
   useEffect(() => {
     if (!effective) {
@@ -462,7 +464,7 @@ export default function SmcPairOverridesPage() {
 
     await reload();
     const refreshed = await fetch(
-      apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}`)
+      apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)
     ).then((res) => res.json());
     setEffective(refreshed);
   };

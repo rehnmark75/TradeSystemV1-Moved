@@ -1680,11 +1680,14 @@ class SMCSimpleConfigService:
         self,
         database_url: str = None,
         cache_ttl_seconds: int = 120,
-        enable_hot_reload: bool = True
+        enable_hot_reload: bool = True,
+        config_set: str = None
     ):
         self.database_url = database_url or self._get_default_database_url()
         self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self.enable_hot_reload = enable_hot_reload
+        self.config_set = config_set or os.getenv('TRADING_CONFIG_SET', 'live')
+        self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
         # Thread-safe cache
         self._lock = RLock()
@@ -1717,10 +1720,17 @@ class SMCSimpleConfigService:
         """Load initial configuration on service startup"""
         try:
             self._load_from_database()
-            logger.info("SMC Simple config service initialized from database")
+            logger.info(f"SMC Simple config service initialized from database (config_set={self.config_set})")
         except Exception as e:
-            logger.warning(f"Failed to load initial config from database: {e}")
-            # Create default config
+            if self._trading_env == 'live':
+                logger.critical(
+                    f"SMC Simple config DB load failed in LIVE mode (config_set={self.config_set}): {e}"
+                )
+                raise RuntimeError(
+                    f"Refusing to start live worker with default SMC config (config_set={self.config_set}): {e}"
+                ) from e
+            # Demo: fall back to defaults so offline experimentation still works
+            logger.warning(f"Failed to load initial config from database (config_set={self.config_set}): {e}")
             self._cached_config = SMCSimpleConfig()
             self._cached_config.source = 'default'
             self._cache_timestamp = datetime.now()
@@ -1741,10 +1751,10 @@ class SMCSimpleConfigService:
                 try:
                     self._load_from_database()
                 except Exception as e:
-                    logger.error(f"Failed to load config from database: {e}")
+                    logger.error(f"Failed to load config from database (config_set={self.config_set}): {e}")
                     # Fall back to last-known-good
                     if self._last_known_good is not None:
-                        logger.warning("Using last-known-good configuration")
+                        logger.warning(f"Using last-known-good configuration (config_set={self.config_set})")
                         self._cached_config = copy.deepcopy(self._last_known_good)
                         self._cached_config.source = 'cache'
                         self._cache_timestamp = datetime.now()
@@ -1771,10 +1781,10 @@ class SMCSimpleConfigService:
                 # Load global config
                 cur.execute("""
                     SELECT * FROM smc_simple_global_config
-                    WHERE is_active = TRUE
+                    WHERE is_active = TRUE AND config_set = %s
                     ORDER BY updated_at DESC
                     LIMIT 1
-                """)
+                """, (self.config_set,))
                 global_row = cur.fetchone()
 
                 if global_row is None:
@@ -2346,7 +2356,8 @@ _service_lock = RLock()
 def get_smc_simple_config_service(
     database_url: str = None,
     cache_ttl_seconds: int = 120,
-    enable_hot_reload: bool = True
+    enable_hot_reload: bool = True,
+    config_set: str = None
 ) -> SMCSimpleConfigService:
     """Get singleton instance of config service"""
     global _service_instance
@@ -2355,7 +2366,8 @@ def get_smc_simple_config_service(
             _service_instance = SMCSimpleConfigService(
                 database_url=database_url,
                 cache_ttl_seconds=cache_ttl_seconds,
-                enable_hot_reload=enable_hot_reload
+                enable_hot_reload=enable_hot_reload,
+                config_set=config_set
             )
         return _service_instance
 

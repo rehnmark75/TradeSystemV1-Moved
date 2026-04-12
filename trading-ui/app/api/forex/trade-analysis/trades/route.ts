@@ -16,6 +16,7 @@ function parseLimit(value: string | null) {
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = parseLimit(searchParams.get("limit"));
+  const env = searchParams.get("env") || "demo";
 
   try {
     const result = await forexPool.query(
@@ -30,10 +31,11 @@ export async function GET(request: Request) {
         pnl_currency
       FROM trade_log
       WHERE status IN ('closed', 'tracking')
+        AND environment = $2
       ORDER BY timestamp DESC
       LIMIT $1
       `,
-      [limit]
+      [limit, env]
     );
 
     const trades = (result.rows ?? []).map((row) => ({

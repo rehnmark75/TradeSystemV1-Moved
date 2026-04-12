@@ -22,6 +22,7 @@ Date: 2025-09-24
 Priority: CRITICAL - Prevents loss of break-even protection
 """
 
+import os
 import logging
 from datetime import datetime, timedelta
 from typing import List, Optional, Set
@@ -32,6 +33,9 @@ import time
 from services.models import TradeLog
 from services.db import SessionLocal
 
+# Environment filter — ensures this monitor only manages its own trades
+TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
+
 class DatabaseMonitoringFix:
     """Enhanced monitoring system to prevent missed trades"""
 
@@ -40,6 +44,20 @@ class DatabaseMonitoringFix:
         self.known_trade_ids: Set[int] = set()
         self.last_discovery_check = datetime.now()
         self.discovery_interval = timedelta(minutes=2)  # Check for new trades every 2 minutes
+
+    def _scope_by_env(self, query):
+        """
+        Apply environment filter to a TradeLog query.
+
+        Raises RuntimeError if the environment column is missing — the monitor
+        must not process cross-environment trades under any failure mode.
+        """
+        if not hasattr(TradeLog, 'environment'):
+            raise RuntimeError(
+                "TradeLog.environment column missing — "
+                "refusing to run unscoped monitor (would process all environments)"
+            )
+        return query.filter(TradeLog.environment == TRADING_ENVIRONMENT)
 
     def get_active_trades_enhanced(self, db: Session) -> List[TradeLog]:
         """
@@ -53,13 +71,11 @@ class DatabaseMonitoringFix:
                           "ema_exit_pending", "profit_protected", "partial_closed",
                           "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]
 
-        # Primary query - the standard approach
+        # Primary query - the standard approach (filtered by environment)
         try:
-            active_trades = (db.query(TradeLog)
-                           .filter(TradeLog.status.in_(active_statuses))
-                           .order_by(TradeLog.id.desc())
-                           .limit(50)
-                           .all())
+            query = db.query(TradeLog).filter(TradeLog.status.in_(active_statuses))
+            query = self._scope_by_env(query)
+            active_trades = query.order_by(TradeLog.id.desc()).limit(50).all()
 
             current_trade_ids = {trade.id for trade in active_trades}
 
@@ -103,14 +119,15 @@ class DatabaseMonitoringFix:
             # Look for trades created in the last 10 minutes that should be active
             recent_cutoff = datetime.now() - timedelta(minutes=10)
 
-            recent_trades = (db.query(TradeLog)
-                           .filter(
-                               TradeLog.timestamp >= recent_cutoff,
-                               TradeLog.status.in_(["pending", "tracking", "break_even", "trailing",
-                                                   "ema_exit_pending", "profit_protected", "partial_closed",
-                                                   "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"])
-                           )
-                           .all())
+            recent_trades = self._scope_by_env(
+                db.query(TradeLog)
+                .filter(
+                    TradeLog.timestamp >= recent_cutoff,
+                    TradeLog.status.in_(["pending", "tracking", "break_even", "trailing",
+                                        "ema_exit_pending", "profit_protected", "partial_closed",
+                                        "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"])
+                )
+            ).all()
 
             current_ids = {t.id for t in current_trades}
             recent_ids = {t.id for t in recent_trades}
@@ -142,10 +159,12 @@ class DatabaseMonitoringFix:
         try:
             self.logger.info("🔄 Using fallback trade query mechanism...")
 
-            # Simple, robust query
-            trades = db.query(TradeLog).filter(
-                TradeLog.closed_at.is_(None),  # Not closed
-                TradeLog.status.in_(active_statuses)
+            # Simple, robust query — still env-scoped
+            trades = self._scope_by_env(
+                db.query(TradeLog).filter(
+                    TradeLog.closed_at.is_(None),  # Not closed
+                    TradeLog.status.in_(active_statuses)
+                )
             ).all()
 
             self.logger.info(f"🔄 Fallback query returned {len(trades)} trades")
@@ -170,19 +189,19 @@ class DatabaseMonitoringFix:
         }
 
         try:
-            # Check current active trades
-            active_trades = (db.query(TradeLog)
-                           .filter(TradeLog.status.in_(
-                               ["pending", "tracking", "break_even", "trailing"]
-                           ))
-                           .all())
+            # Check current active trades (env-scoped)
+            active_trades = self._scope_by_env(
+                db.query(TradeLog).filter(TradeLog.status.in_(
+                    ["pending", "tracking", "break_even", "trailing"]
+                ))
+            ).all()
             report["active_trades_found"] = len(active_trades)
 
-            # Check for recent trades that might have been missed
+            # Check for recent trades that might have been missed (env-scoped)
             recent_cutoff = datetime.now() - timedelta(hours=2)
-            recent_trades = (db.query(TradeLog)
-                           .filter(TradeLog.timestamp >= recent_cutoff)
-                           .all())
+            recent_trades = self._scope_by_env(
+                db.query(TradeLog).filter(TradeLog.timestamp >= recent_cutoff)
+            ).all()
             report["recent_trades_found"] = len(recent_trades)
 
             # Look for potential monitoring gaps
