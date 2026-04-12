@@ -39,6 +39,7 @@ class LossPreventionFilter:
             'STRATEGY_CONFIG_DATABASE_URL',
             'postgresql://postgres:postgres@postgres:5432/strategy_config'
         )
+        self._config_set = os.getenv('TRADING_CONFIG_SET', 'live')
         self._load_config()
 
     @contextmanager
@@ -60,22 +61,27 @@ class LossPreventionFilter:
         try:
             with self._get_connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
-                    # Load global config
-                    cur.execute("SELECT * FROM loss_prevention_config WHERE id = 1")
+                    # Load global config (scoped to this worker's config_set)
+                    cur.execute(
+                        "SELECT * FROM loss_prevention_config WHERE config_set = %s",
+                        (self._config_set,)
+                    )
                     row = cur.fetchone()
                     if row:
                         self._config = dict(row)
                     else:
-                        logger.warning("🛡️ LPF: No config found in loss_prevention_config")
+                        logger.warning(
+                            f"🛡️ LPF: No config found in loss_prevention_config for config_set='{self._config_set}'"
+                        )
                         return
 
-                    # Load enabled rules
+                    # Load enabled rules (scoped to config_set)
                     cur.execute("""
                         SELECT rule_name, category, penalty, condition_config, apply_in_backtest
                         FROM loss_prevention_rules
-                        WHERE is_enabled = TRUE
+                        WHERE is_enabled = TRUE AND config_set = %s
                         ORDER BY category, penalty DESC
-                    """)
+                    """, (self._config_set,))
                     self._rules = [dict(r) for r in cur.fetchall()]
 
                     # Load per-pair LPF config (graceful if table doesn't exist yet)
@@ -84,7 +90,8 @@ class LossPreventionFilter:
                             SELECT epic, is_enabled, block_mode, penalty_threshold,
                                    disabled_rules, rule_penalty_overrides
                             FROM loss_prevention_pair_config
-                        """)
+                            WHERE config_set = %s
+                        """, (self._config_set,))
                         for pair_row in cur.fetchall():
                             self._pair_configs[pair_row['epic']] = dict(pair_row)
                     except Exception:
@@ -95,7 +102,10 @@ class LossPreventionFilter:
             mode = self._config.get('block_mode', 'monitor')
             threshold = self._config.get('penalty_threshold', 0.60)
             pair_count = len(self._pair_configs)
-            logger.info(f"🛡️ LPF: Loaded {len(self._rules)} rules | mode={mode} | threshold={threshold} | pair_configs={pair_count}")
+            logger.info(
+                f"🛡️ LPF: Loaded {len(self._rules)} rules | config_set={self._config_set} | "
+                f"mode={mode} | threshold={threshold} | pair_configs={pair_count}"
+            )
 
             # Warn about stale pair config references
             if self._pair_configs:

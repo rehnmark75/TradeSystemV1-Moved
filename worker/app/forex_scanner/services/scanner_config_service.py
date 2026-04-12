@@ -392,11 +392,13 @@ class ScannerConfigService:
         self,
         database_url: str = None,
         cache_ttl_seconds: int = 120,
-        enable_hot_reload: bool = True
+        enable_hot_reload: bool = True,
+        config_set: str = None
     ):
         self.database_url = database_url or self._get_default_database_url()
         self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self.enable_hot_reload = enable_hot_reload
+        self.config_set = config_set or os.getenv('TRADING_CONFIG_SET', 'live')
 
         self._lock = RLock()
         self._cached_config: Optional[ScannerConfig] = None
@@ -516,15 +518,15 @@ class ScannerConfigService:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute("""
                     SELECT * FROM scanner_global_config
-                    WHERE is_active = TRUE
+                    WHERE is_active = TRUE AND config_set = %s
                     ORDER BY updated_at DESC
                     LIMIT 1
-                """)
+                """, (self.config_set,))
                 row = cur.fetchone()
 
                 if row is None:
                     raise ValueError(
-                        "No active configuration found in scanner_global_config table"
+                        f"No active configuration found in scanner_global_config for config_set='{self.config_set}'"
                     )
 
                 config = self._build_config_from_row(dict(row))
@@ -785,7 +787,8 @@ _service_lock = RLock()
 def get_scanner_config_service(
     database_url: str = None,
     cache_ttl_seconds: int = 120,
-    enable_hot_reload: bool = True
+    enable_hot_reload: bool = True,
+    config_set: str = None
 ) -> ScannerConfigService:
     """
     Get singleton instance of scanner config service.
@@ -794,6 +797,7 @@ def get_scanner_config_service(
         database_url: Optional database URL (uses env var if not provided)
         cache_ttl_seconds: Cache TTL in seconds (default 120)
         enable_hot_reload: Enable automatic cache refresh (default True)
+        config_set: Which config set to load ('live' or 'demo', default from TRADING_CONFIG_SET env)
 
     Returns:
         ScannerConfigService instance
@@ -804,7 +808,8 @@ def get_scanner_config_service(
             _service_instance = ScannerConfigService(
                 database_url=database_url,
                 cache_ttl_seconds=cache_ttl_seconds,
-                enable_hot_reload=enable_hot_reload
+                enable_hot_reload=enable_hot_reload,
+                config_set=config_set
             )
         return _service_instance
 
