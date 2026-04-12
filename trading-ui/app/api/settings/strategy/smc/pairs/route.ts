@@ -3,26 +3,29 @@ import { strategyConfigPool } from "../../../../../../lib/strategyConfigDb";
 
 export const dynamic = "force-dynamic";
 
-async function loadActiveSmcConfigId(client?: any) {
+async function loadActiveSmcConfigId(configSet: string, client?: any) {
   const executor = client ?? strategyConfigPool;
   const result = await executor.query(
     `
       SELECT id
       FROM smc_simple_global_config
-      WHERE is_active = TRUE
+      WHERE is_active = TRUE AND config_set = $1
       ORDER BY updated_at DESC
       LIMIT 1
-    `
+    `,
+    [configSet]
   );
   return result.rows[0]?.id ?? null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const configId = await loadActiveSmcConfigId();
+    const { searchParams } = new URL(request.url);
+    const configSet = searchParams.get("config_set") ?? "demo";
+    const configId = await loadActiveSmcConfigId(configSet);
     if (!configId) {
       return NextResponse.json(
-        { error: "No active SMC config found" },
+        { error: `No active SMC config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }
@@ -53,13 +56,16 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { epic, overrides, updates, updated_by, change_reason } = body as {
+  const { epic, overrides, updates, updated_by, change_reason, config_set } = body as {
     epic?: string;
     overrides?: Record<string, unknown>;
     updates?: Record<string, unknown>;
     updated_by?: string;
     change_reason?: string;
+    config_set?: string;
   };
+
+  const configSet = config_set ?? "demo";
 
   if (!epic) {
     return NextResponse.json({ error: "epic is required" }, { status: 400 });
@@ -71,10 +77,10 @@ export async function POST(request: Request) {
     );
   }
 
-  const configId = await loadActiveSmcConfigId();
+  const configId = await loadActiveSmcConfigId(configSet);
   if (!configId) {
     return NextResponse.json(
-      { error: "No active SMC config found" },
+      { error: `No active SMC config found for config_set='${configSet}'` },
       { status: 404 }
     );
   }

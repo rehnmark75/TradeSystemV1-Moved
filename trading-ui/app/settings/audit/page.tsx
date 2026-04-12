@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { logTelemetry } from "../../../lib/settings/telemetry";
 import { apiUrl } from "../../../lib/settings/api";
+import { useEnvironment } from "../../../lib/environment";
 
 interface AuditEntry {
   id: number;
@@ -15,15 +16,17 @@ interface AuditEntry {
 }
 
 export default function SettingsAuditPage() {
+  const { environment } = useEnvironment();
   const [entries, setEntries] = useState<AuditEntry[]>([]);
 
   useEffect(() => {
     logTelemetry({ event_type: "page_view", page: "/settings/audit" });
     const load = async () => {
       try {
+        const cs = encodeURIComponent(environment);
         const [scannerResponse, smcResponse] = await Promise.all([
-          fetch(apiUrl("/api/settings/scanner/audit?limit=50")),
-          fetch(apiUrl("/api/settings/strategy/smc/audit?limit=50"))
+          fetch(apiUrl(`/api/settings/scanner/audit?limit=50&config_set=${cs}`)),
+          fetch(apiUrl(`/api/settings/strategy/smc/audit?limit=50&config_set=${cs}`))
         ]);
         const scannerPayload = await scannerResponse.json();
         const smcPayload = await smcResponse.json();
@@ -50,7 +53,7 @@ export default function SettingsAuditPage() {
       }
     };
     load();
-  }, []);
+  }, [environment]);
 
   return (
     <div className="settings-panel">

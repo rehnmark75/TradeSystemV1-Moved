@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { logTelemetry } from "../../../../lib/settings/telemetry";
 import { apiUrl } from "../../../../lib/settings/api";
+import { useEnvironment } from "../../../../lib/environment";
 
 interface EffectivePayload {
   epic: string;
@@ -12,6 +13,7 @@ interface EffectivePayload {
 }
 
 export default function EffectiveConfigLanding() {
+  const { environment } = useEnvironment();
   const [epic, setEpic] = useState("");
   const [data, setData] = useState<EffectivePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -25,7 +27,7 @@ export default function EffectiveConfigLanding() {
     const load = async () => {
       try {
         const response = await fetch(
-          apiUrl(`/api/settings/strategy/smc/effective/${epic}`)
+          apiUrl(`/api/settings/strategy/smc/effective/${epic}?config_set=${encodeURIComponent(environment)}`)
         );
         const payload = await response.json();
         if (!response.ok) {
@@ -39,7 +41,7 @@ export default function EffectiveConfigLanding() {
       }
     };
     load();
-  }, [epic]);
+  }, [epic, environment]);
 
   return (
     <div className="settings-panel">

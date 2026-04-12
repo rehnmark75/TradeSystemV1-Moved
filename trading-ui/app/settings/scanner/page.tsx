@@ -8,6 +8,7 @@ import SettingsField from "../../../components/settings/SettingsField";
 import SaveModal from "../../../components/settings/SaveModal";
 import ConflictModal from "../../../components/settings/ConflictModal";
 import { useScannerConfig } from "../../../hooks/settings/useScannerConfig";
+import { useEnvironment } from "../../../lib/environment";
 import {
   SCANNER_ICONS,
   SCANNER_LABELS,
@@ -28,6 +29,7 @@ function matchesQuery(fieldName: string, query: string): boolean {
 }
 
 export default function ScannerSettingsPage() {
+  const { environment } = useEnvironment();
   const {
     effectiveData,
     defaults,
@@ -40,7 +42,7 @@ export default function ScannerSettingsPage() {
     conflict,
     setConflict,
     setChanges,
-  } = useScannerConfig();
+  } = useScannerConfig(environment);
 
   const [query, setQuery] = useState("");
   const [filters, setFilters] = useState<ScannerFilterState>({

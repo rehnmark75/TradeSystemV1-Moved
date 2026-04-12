@@ -11,26 +11,29 @@ function normalizeTimestamp(value: unknown) {
   return date.toISOString();
 }
 
-async function loadActiveScannerConfig(client?: any) {
+async function loadActiveScannerConfig(configSet: string, client?: any) {
   const executor = client ?? strategyConfigPool;
   const result = await executor.query(
     `
       SELECT *
       FROM scanner_global_config
-      WHERE is_active = TRUE
+      WHERE is_active = TRUE AND config_set = $1
       ORDER BY updated_at DESC
       LIMIT 1
-    `
+    `,
+    [configSet]
   );
   return result.rows[0] ?? null;
 }
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const config = await loadActiveScannerConfig();
+    const { searchParams } = new URL(request.url);
+    const configSet = searchParams.get("config_set") ?? "demo";
+    const config = await loadActiveScannerConfig(configSet);
     if (!config) {
       return NextResponse.json(
-        { error: "No active scanner config found" },
+        { error: `No active scanner config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }
@@ -50,13 +53,16 @@ export async function PATCH(request: Request) {
     return NextResponse.json({ error: "Invalid request body" }, { status: 400 });
   }
 
-  const { updates, updated_by, change_reason, updated_at, category } = body as {
+  const { updates, updated_by, change_reason, updated_at, category, config_set } = body as {
     updates: Record<string, unknown>;
     updated_by?: string;
     change_reason?: string;
     updated_at?: string;
     category?: string;
+    config_set?: string;
   };
+
+  const configSet = config_set ?? "demo";
 
   if (!updates || typeof updates !== "object") {
     return NextResponse.json({ error: "Missing updates payload" }, { status: 400 });
@@ -93,11 +99,11 @@ export async function PATCH(request: Request) {
   try {
     await client.query("BEGIN");
 
-    const current = await loadActiveScannerConfig(client);
+    const current = await loadActiveScannerConfig(configSet, client);
     if (!current) {
       await client.query("ROLLBACK");
       return NextResponse.json(
-        { error: "No active scanner config found" },
+        { error: `No active scanner config found for config_set='${configSet}'` },
         { status: 404 }
       );
     }
@@ -142,7 +148,7 @@ export async function PATCH(request: Request) {
     const updateResult = await client.query(updateQuery, values);
     if (updateResult.rowCount === 0) {
       await client.query("ROLLBACK");
-      const latest = await loadActiveScannerConfig(client);
+      const latest = await loadActiveScannerConfig(configSet, client);
       return NextResponse.json(
         {
           error: "conflict",
@@ -177,7 +183,7 @@ export async function PATCH(request: Request) {
       ]
     );
 
-    const updated = await loadActiveScannerConfig(client);
+    const updated = await loadActiveScannerConfig(configSet, client);
     await client.query("COMMIT");
     return NextResponse.json(updated);
   } catch (error) {

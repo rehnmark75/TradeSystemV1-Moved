@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import HealthIndicator from "../../components/settings/HealthIndicator";
 import { logTelemetry } from "../../lib/settings/telemetry";
 import { apiUrl } from "../../lib/settings/api";
+import { useEnvironment } from "../../lib/environment";
 
 interface AuditEntry {
   id: number;
@@ -14,6 +15,7 @@ interface AuditEntry {
 }
 
 export default function SettingsDashboard() {
+  const { environment } = useEnvironment();
   const [audit, setAudit] = useState<AuditEntry[]>([]);
   const [overrideCount, setOverrideCount] = useState<number | null>(null);
 
@@ -21,9 +23,10 @@ export default function SettingsDashboard() {
     logTelemetry({ event_type: "page_view", page: "/settings" });
     const load = async () => {
       try {
+        const cs = encodeURIComponent(environment);
         const [auditResponse, overridesResponse] = await Promise.all([
-          fetch(apiUrl("/api/settings/scanner/audit?limit=10")),
-          fetch(apiUrl("/api/settings/strategy/smc/pairs"))
+          fetch(apiUrl(`/api/settings/scanner/audit?limit=10&config_set=${cs}`)),
+          fetch(apiUrl(`/api/settings/strategy/smc/pairs?config_set=${cs}`))
         ]);
         const auditPayload = await auditResponse.json();
         const overridesPayload = await overridesResponse.json();
@@ -39,7 +42,7 @@ export default function SettingsDashboard() {
       }
     };
     load();
-  }, []);
+  }, [environment]);
 
   return (
     <div className="settings-panel">

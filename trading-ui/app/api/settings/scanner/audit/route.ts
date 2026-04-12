@@ -7,8 +7,19 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Number(searchParams.get("limit") ?? 50);
   const category = searchParams.get("category");
+  const configSet = searchParams.get("config_set") ?? "demo";
 
   try {
+    const whereClauses: string[] = [
+      `config_id IN (SELECT id FROM scanner_global_config WHERE config_set = $1)`
+    ];
+    const params: unknown[] = [configSet];
+    if (category) {
+      whereClauses.push(`category = $${params.length + 1}`);
+      params.push(category);
+    }
+    params.push(limit);
+
     const result = await strategyConfigPool.query(
       `
         SELECT
@@ -22,11 +33,11 @@ export async function GET(request: Request) {
           new_values,
           category
         FROM scanner_config_audit
-        ${category ? "WHERE category = $1" : ""}
+        WHERE ${whereClauses.join(" AND ")}
         ORDER BY changed_at DESC
-        LIMIT ${category ? "$2" : "$1"}
+        LIMIT $${params.length}
       `,
-      category ? [category, limit] : [limit]
+      params
     );
 
     return NextResponse.json(result.rows ?? []);
