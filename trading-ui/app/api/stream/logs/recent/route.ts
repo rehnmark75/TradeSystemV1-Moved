@@ -51,7 +51,7 @@ function parseDockerLine(raw: string, service: string) {
 
 export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
-  const limit   = parseInt(searchParams.get("limit")   ?? "100", 10);
+  const limit   = Math.max(10, parseInt(searchParams.get("limit") ?? "100", 10));
   const level   = searchParams.get("level")   ?? "";
   const service = searchParams.get("service") ?? "";
 
