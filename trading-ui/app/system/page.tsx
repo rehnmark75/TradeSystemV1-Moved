@@ -263,8 +263,8 @@ function HealthTab() {
     (health as Record<string, unknown> | null)?.stream_health as Record<string, unknown> | undefined;
   const streamServiceState = streamHealthStatus?.status
     ? toHealthState(String(streamHealthStatus.status))
-    : streamStatus != null
-      ? toHealthState(streamStatus.running === true ? "running" : streamStatus.running === false ? "market_closed" : "unknown")
+    : health?.status != null
+      ? toHealthState(String(health.status))
       : "unknown";
   checks.push({
     service: "stream-service",
@@ -607,7 +607,9 @@ function SystemStatusInner() {
   const streamHealthStatus = (health as Record<string, unknown> | null)?.stream_health as Record<string, unknown> | undefined;
   const streamState = streamHealthStatus?.status
     ? toHealthState(String(streamHealthStatus.status))
-    : toHealthState(streamStatus?.running === true ? "running" : streamStatus?.running === false ? "market_closed" : "unknown");
+    : health?.status != null
+      ? toHealthState(String(health.status))
+      : "unknown";
   const backfillState = toHealthState(backfill?.status ?? (backfill?.running ? "running" : "unknown"));
   const healthState = toHealthState(health?.status as string);
 
@@ -650,7 +652,7 @@ function SystemStatusInner() {
         fontSize: "0.82rem",
       }}>
         <span style={{ color: "var(--muted)", fontWeight: 600, marginRight: "4px" }}>Services:</span>
-        <StatusPill state={streamState} label={`Stream ${streamStatus?.running ? "running" : "stopped"}`} size="sm" />
+        <StatusPill state={streamState} label={`Stream ${health?.status ?? "unknown"}`} size="sm" />
         <StatusPill state={backfillState} label={`Backfill ${backfill?.running ? "running" : (backfill?.status ?? "unknown")}`} size="sm" />
         <StatusPill state={healthState} label={`Health ${health?.status ?? "unknown"}`} size="sm" />
       </div>
