@@ -566,6 +566,26 @@ class TradeValidator:
             self.logger.debug("⏭️ Skipping Claude validation in backtest mode")
             return True, "Claude validation skipped (backtest mode)", None
 
+        # Skip Claude for disabled pairs and monitor-only pairs (saves API cost).
+        # Mirrors IntegrationManager.analyze_signals_with_claude gate (integration_manager.py:361-392).
+        _epic_check = signal.get('epic', '')
+        if _epic_check:
+            try:
+                from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+                _smc_cfg = get_smc_simple_config()
+                _skip_reason = None
+                if not _smc_cfg.is_pair_enabled(_epic_check):
+                    _skip_reason = 'pair_not_enabled'
+                else:
+                    _pair_ov = _smc_cfg._pair_overrides.get(_epic_check, {})
+                    if _pair_ov.get('parameter_overrides', {}).get('monitor_only', False):
+                        _skip_reason = 'monitor_only'
+                if _skip_reason:
+                    self.logger.info(f"⏭️ Skipping Claude validation for {_epic_check} ({_skip_reason}) — saves API cost")
+                    return True, f"Claude skipped ({_skip_reason})", None
+            except Exception as _e:
+                self.logger.warning(f"⚠️ Could not check enabled/monitor-only status for {_epic_check}: {_e} — proceeding with Claude")
+
         # Get fail-secure setting from instance variable (loaded from database)
         fail_secure = self.claude_fail_secure
 
