@@ -4,7 +4,7 @@ import json
 import asyncio
 import httpx
 # Note: get_secret is imported by callers but not directly used here
-from config import API_BASE_URL
+from config import API_BASE_URL, IG_ACCOUNT_ID
 
 # Separate caches for demo vs production to prevent token collision
 # Key: API URL, Value: token cache dict
@@ -96,6 +96,30 @@ async def ig_login(api_key: str, ig_pwd: str, ig_usr: str, api_url: str = API_BA
                 streaming_url = json_data.get("lightstreamerEndpoint")
 
                 print(f"✅ IG Login successful ({env_type}) - Account: {account_id}")
+
+                # Switch to target account if specified and not already on it
+                if IG_ACCOUNT_ID and account_id != IG_ACCOUNT_ID:
+                    switch_headers = {
+                        "Accept": "application/json; charset=UTF-8",
+                        "Content-Type": "application/json; charset=UTF-8",
+                        "X-IG-API-KEY": api_key,
+                        "Version": "1",
+                        "CST": cst,
+                        "X-SECURITY-TOKEN": xst,
+                    }
+                    switch_payload = {"accountId": IG_ACCOUNT_ID, "defaultAccount": False}
+                    async with httpx.AsyncClient(timeout=LOGIN_TIMEOUT_SECONDS) as switch_client:
+                        switch_response = await switch_client.put(
+                            f"{api_url}/session",
+                            headers=switch_headers,
+                            data=json.dumps(switch_payload)
+                        )
+                        switch_response.raise_for_status()
+                        # IG returns a new X-SECURITY-TOKEN scoped to the target account
+                        new_xst = switch_response.headers.get("X-SECURITY-TOKEN", xst)
+                        xst = new_xst
+                        account_id = IG_ACCOUNT_ID
+                        print(f"✅ Switched to target account: {IG_ACCOUNT_ID}")
 
                 # Store in URL-specific cache
                 cache["CST"] = cst

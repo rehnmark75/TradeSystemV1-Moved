@@ -71,12 +71,14 @@ if IS_LIVE:
     IG_USERNAME = "rehnmarkh"
     IG_API_KEY = "prodapikey"
     IG_PWD = "prodpwd"
+    IG_ACCOUNT_ID = os.getenv('IG_LIVE_ACCOUNT_ID', '')  # Target account (e.g. RU5AS)
 else:
     API_BASE_URL = "https://demo-api.ig.com/gateway/deal"
     LIGHTSTREAMER_URL = "https://demo-apd.marketdatasystems.com"
     IG_USERNAME = "rehnmarkhdemo"
     IG_API_KEY = "demoapikey"
     IG_PWD = "demopwd"
+    IG_ACCOUNT_ID = ''
 
 # Internal service URLs
 FASTAPI_DEV_URL = "http://fastapi-dev:8000"
