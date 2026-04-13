@@ -8,14 +8,15 @@ export async function GET(req: Request) {
   const epic = searchParams.get("epic");
   const from = searchParams.get("from");
   const to = searchParams.get("to");
+  const environment = searchParams.get("environment") ?? "demo";
 
   if (!epic) {
     return NextResponse.json({ error: "epic is required" }, { status: 400 });
   }
 
   try {
-    const params: (string | number)[] = [epic];
-    let where = "WHERE tl.symbol = $1";
+    const params: (string | number)[] = [epic, environment];
+    let where = "WHERE tl.symbol = $1 AND tl.environment = $2";
 
     if (from) {
       params.push(from);

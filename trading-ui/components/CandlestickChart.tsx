@@ -89,7 +89,7 @@ export default function CandlestickChart() {
   const [epics, setEpics] = useState<string[]>([]);
   const [selectedEpic, setSelectedEpic] = useState<string>("");
   const [timeframe, setTimeframe] = useState<"5" | "15">("5");
-  const [configSet, setConfigSet] = useState<"live" | "demo">("live");
+  const [configSet, setConfigSet] = useState<"live" | "demo">("demo");
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tradeCount, setTradeCount] = useState(0);
@@ -232,7 +232,7 @@ export default function CandlestickChart() {
         "";
 
       const tradeRes = await fetch(
-        `/trading/api/chart/trades?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}`
+        `/trading/api/chart/trades?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}&environment=${configSet}`
       );
       if (tradeRes.ok) {
         const tradeData = await tradeRes.json();

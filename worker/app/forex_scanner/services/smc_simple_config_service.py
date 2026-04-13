@@ -1686,7 +1686,7 @@ class SMCSimpleConfigService:
         self.database_url = database_url or self._get_default_database_url()
         self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self.enable_hot_reload = enable_hot_reload
-        self.config_set = config_set or os.getenv('TRADING_CONFIG_SET', 'live')
+        self.config_set = config_set or os.getenv('TRADING_CONFIG_SET', 'demo')
         self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
         # Thread-safe cache
