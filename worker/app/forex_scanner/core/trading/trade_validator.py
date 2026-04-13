@@ -671,8 +671,17 @@ class TradeValidator:
                 self.validation_stats['failed_claude_error'] += 1
                 self.logger.warning(f"⚠️ Claude API call failed for {epic}")
 
+                # Attach chart artifacts to the failure result so _save_claude_rejection
+                # can still upload the chart to MinIO even when the API call failed
+                failure_result = {'error': 'api_failure'}
+                if chart_base64 and self.claude_save_vision_artifacts and not self.backtest_mode:
+                    failure_result['_vision_artifacts'] = {
+                        'chart_base64': chart_base64,
+                        'prompt': prompt
+                    }
+
                 if fail_secure:
-                    return False, "Claude API error - blocking trade (fail-secure mode)", {'error': 'api_failure'}
+                    return False, "Claude API error - blocking trade (fail-secure mode)", failure_result
                 else:
                     return True, "Claude API error (allowing signal)", None
 

@@ -51,7 +51,8 @@ class APIClient:
     # Default model for trade validation
     DEFAULT_MODEL = 'sonnet'
 
-    # Rate limiting
+    # Rate limiting — each container uses its own dedicated API key (demo key vs live key)
+    # so each gets the full quota independently
     MAX_REQUESTS_PER_MINUTE = 50
     MAX_REQUESTS_PER_DAY = 1000
     MIN_CALL_INTERVAL = 1.2  # seconds
@@ -98,6 +99,9 @@ class APIClient:
         self._request_times = []
         self._daily_request_count = 0
         self._daily_reset_date = datetime.now().date()
+
+        # Environment tag for log prefixing (distinguishes demo vs live in combined logs)
+        self._env_tag = os.getenv('TRADING_ENVIRONMENT', 'demo').upper()
 
         # Statistics
         self.stats = {
@@ -157,7 +161,7 @@ class APIClient:
                 self._track_tokens(message.usage)
 
                 self.stats['successful_requests'] += 1
-                logger.debug(f"✅ Claude API call successful - {message.usage.output_tokens} output tokens")
+                logger.debug(f"✅ [{self._env_tag}] Claude API call successful - {message.usage.output_tokens} output tokens")
 
                 return content
 
@@ -171,12 +175,11 @@ class APIClient:
 
             except anthropic.APIStatusError as e:
                 logger.error(f"❌ API status error: {e.status_code} - {e.message}")
-                if e.status_code == 529:  # Overloaded
-                    if attempt < self.max_retries:
-                        delay = self.base_delay * (2 ** attempt)
-                        logger.info(f"🔄 API overloaded, retrying in {delay:.1f}s...")
-                        time.sleep(delay)
-                        continue
+                if e.status_code in (500, 529) and attempt < self.max_retries:  # 500=transient, 529=overloaded
+                    delay = self.base_delay * (2 ** attempt)
+                    logger.info(f"🔄 Retrying in {delay:.1f}s (status {e.status_code})...")
+                    time.sleep(delay)
+                    continue
                 break
 
             except anthropic.APIConnectionError as e:
@@ -268,7 +271,7 @@ class APIClient:
                 tokens_used = message.usage.input_tokens + message.usage.output_tokens
 
                 self.stats['successful_requests'] += 1
-                logger.debug(f"✅ Claude Vision API call successful - {tokens_used} total tokens")
+                logger.debug(f"✅ [{self._env_tag}] Claude Vision API call successful - {tokens_used} total tokens")
 
                 return {
                     'content': content,
@@ -287,8 +290,9 @@ class APIClient:
 
             except anthropic.APIStatusError as e:
                 logger.error(f"❌ API status error (vision): {e.status_code} - {e.message}")
-                if e.status_code == 529 and attempt < self.max_retries:
+                if e.status_code in (500, 529) and attempt < self.max_retries:  # 500=transient, 529=overloaded
                     delay = self.base_delay * (2 ** attempt)
+                    logger.info(f"🔄 Retrying vision in {delay:.1f}s (status {e.status_code})...")
                     time.sleep(delay)
                     continue
                 break
@@ -378,6 +382,12 @@ class APIClient:
             if now - cached_time < self._CONNECTION_TEST_CACHE_DURATION:
                 logger.debug(f"✅ Using cached connection test result (age: {int(now - cached_time)}s)")
                 return cached_result
+
+        # Stagger startup test: live container waits 5s so demo fires first,
+        # preventing both from hitting the API key simultaneously at boot.
+        if not force and os.getenv('TRADING_ENVIRONMENT', 'demo') == 'live':
+            logger.debug("⏱️ [LIVE] Staggering connection test by 5s to avoid simultaneous demo/live startup")
+            time.sleep(5)
 
         try:
             response = self.call_api("Respond with exactly: OK", max_tokens=10)
