@@ -9,7 +9,6 @@ export default function Page() {
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
-          <Link href="/signals">Signals</Link>
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
           <Link href="/chart">Chart</Link>
@@ -17,6 +16,7 @@ export default function Page() {
           <Link href="/infrastructure">Infrastructure</Link>
           <Link href="/system">System Status</Link>
           <Link href="/settings">Settings</Link>
+          <Link href="/signals" style={{ opacity: 0.4, fontSize: "0.8rem" }} title="Scanner debug view">Signals</Link>
         </div>
       </div>
 
@@ -35,14 +35,7 @@ export default function Page() {
             <div className="landing-icon">📋</div>
             <div>
               <h3>Watchlists</h3>
-              <p>Virtualized list with deep technical + DAQ analysis and TradingView charts.</p>
-            </div>
-          </Link>
-          <Link href="/signals" className="landing-card">
-            <div className="landing-icon">📡</div>
-            <div>
-              <h3>Signals</h3>
-              <p>Scanner signals with filters, Claude analysis, and trade plan context.</p>
+              <p>EMA 50 crossover with Claude AI thesis, full-setup backtest (RS+DAQ), and quality filter.</p>
             </div>
           </Link>
           <Link href="/broker" className="landing-card">
@@ -103,6 +96,13 @@ export default function Page() {
             <div>
               <h3>System Status</h3>
               <p>Stream health, candle data freshness, operations feed, and log search.</p>
+            </div>
+          </Link>
+          <Link href="/signals" className="landing-card" style={{ opacity: 0.55 }}>
+            <div className="landing-icon">🔬</div>
+            <div>
+              <h3>Signals Debug</h3>
+              <p>Raw scanner signal output for validation. Thesis and Claude analysis now shown in Watchlists.</p>
             </div>
           </Link>
         </div>
