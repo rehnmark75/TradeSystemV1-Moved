@@ -7,6 +7,7 @@
 
 | ID | Time | T | Title | Read |
 |----|------|---|-------|------|
-| #5831 | 10:36 AM | 🟣 | Chart Trades API Route Implemented | ~278 |
-| #5829 | 10:35 AM | 🟣 | Chart Feature Directory Structure Created | ~211 |
+| #5849 | 10:42 AM | 🔄 | Chart Component Extracted and Added to Forex Navigation | ~269 |
+| #5846 | 10:41 AM | 🟣 | Chart Page Added to Forex Section | ~228 |
+| #5843 | " | ✅ | Chart Page Relocated to Forex Section | ~185 |
 </claude-mem-context>
