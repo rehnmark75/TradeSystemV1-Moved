@@ -13,6 +13,9 @@ from typing import Optional
 import logging
 
 from services.virtual_stop_loss_service import get_vsl_service
+from services.db import SessionLocal
+from services.models import TradeLog
+from config import TRADING_ENVIRONMENT
 
 logger = logging.getLogger(__name__)
 
@@ -188,7 +191,7 @@ async def add_position_manual(trade_id: int):
     # Get trade from database
     try:
         with SessionLocal() as db:
-            trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+            trade = db.query(TradeLog).filter(TradeLog.id == trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
 
             if not trade:
                 raise HTTPException(

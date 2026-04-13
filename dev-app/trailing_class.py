@@ -26,7 +26,7 @@ from sqlalchemy.orm import Session
 from utils import get_point_value, convert_price_to_points, calculate_move_points
 
 # Bulletproof trailing system imports (Jan 2026)
-from config import DB_COMMIT_RECOVERY_ENABLED, TRAILING_ALERT_ENABLED
+from config import DB_COMMIT_RECOVERY_ENABLED, TRAILING_ALERT_ENABLED, TRADING_ENVIRONMENT
 
 
 def normalize_ig_stop_for_db(stop_level: float, epic: str) -> float:
@@ -1851,7 +1851,7 @@ class EnhancedTradeProcessor:
                     # The passed-in trade object may be stale/detached - never trust its partial_close_executed value
                     try:
                         # Get fresh trade with row lock - this is the authoritative source
-                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).with_for_update(nowait=False).first()
+                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id, TradeLog.environment == TRADING_ENVIRONMENT).with_for_update(nowait=False).first()
                         if not refreshed_trade:
                             self.logger.error(f"❌ [PARTIAL CLOSE] Trade {trade.id}: Could not find trade in database")
                             raise Exception("Trade not found in database")
@@ -1969,7 +1969,7 @@ class EnhancedTradeProcessor:
                             # Trade might be detached, re-query it
                             self.logger.warning(f"⚠️ [SESSION REFRESH FAILED] Trade {trade.id}: {refresh_error}, re-querying...")
                             try:
-                                trade = db.query(TradeLog).filter(TradeLog.id == trade.id).first()
+                                trade = db.query(TradeLog).filter(TradeLog.id == trade.id, TradeLog.environment == TRADING_ENVIRONMENT).first()
                                 if trade:
                                     self.logger.info(f"✅ [SESSION FIX] Trade {trade.id}: Re-queried successfully")
                             except Exception as query_error:
@@ -2019,7 +2019,7 @@ class EnhancedTradeProcessor:
                     # ✅ CRITICAL FIX: For profit_protected trades, check if break-even would worsen the position
                     # ✅ FIX: Re-query trade from current session to get fresh data
                     try:
-                        fresh_trade = db.query(TradeLog).filter(TradeLog.id == trade.id).first()
+                        fresh_trade = db.query(TradeLog).filter(TradeLog.id == trade.id, TradeLog.environment == TRADING_ENVIRONMENT).first()
                         if fresh_trade:
                             current_stop = fresh_trade.sl_price or 0.0
                         else:

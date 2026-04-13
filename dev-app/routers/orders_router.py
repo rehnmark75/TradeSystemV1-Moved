@@ -127,7 +127,8 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             .filter(
                 TradeLog.symbol == epic,
                 TradeLog.status.in_(["closed", "expired"]),
-                TradeLog.closed_at.isnot(None)
+                TradeLog.closed_at.isnot(None),
+                TradeLog.environment == TRADING_ENVIRONMENT
             )
             .order_by(TradeLog.closed_at.desc())
             .first()
@@ -138,7 +139,8 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             .filter(
                 TradeLog.symbol == epic,
                 TradeLog.status == "expired",
-                TradeLog.closed_at.is_(None)
+                TradeLog.closed_at.is_(None),
+                TradeLog.environment == TRADING_ENVIRONMENT
             )
             .order_by(TradeLog.timestamp.desc())
             .first()
@@ -183,7 +185,8 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             .filter(
                 TradeLog.symbol == epic,
                 TradeLog.timestamp.isnot(None),
-                ~TradeLog.status.in_(["limit_not_filled", "limit_rejected", "limit_cancelled"])
+                ~TradeLog.status.in_(["limit_not_filled", "limit_rejected", "limit_cancelled"]),
+                TradeLog.environment == TRADING_ENVIRONMENT
             )
             .order_by(TradeLog.timestamp.desc())
             .first()
@@ -1136,7 +1139,8 @@ async def update_stop_price(
         if not match:
             updated = db.query(TradeLog).filter(
                 TradeLog.symbol == epic,
-                TradeLog.status.in_(["pending", "tracking"])
+                TradeLog.status.in_(["pending", "tracking"]),
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).update({TradeLog.status: "closed"})
             db.commit()
             message = f"No open position found for {epic}. Marked {updated} trades as closed."
@@ -1323,7 +1327,8 @@ async def adjust_stop_price(
         if not match:
             updated = db.query(TradeLog).filter(
                 TradeLog.symbol == epic,
-                TradeLog.status.in_(["pending", "tracking", "break_even", "trailing"])  # ✅ FIXED: Include all active statuses
+                TradeLog.status.in_(["pending", "tracking", "break_even", "trailing"]),  # ✅ FIXED: Include all active statuses
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).update({TradeLog.status: "closed"})
             db.commit()
             return {

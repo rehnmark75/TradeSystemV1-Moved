@@ -20,13 +20,12 @@ services:
     environment:
       - PORT=8001
       - TRADING_ENVIRONMENT=demo
+      - TRADING_CONFIG_SET=demo
+      - FASTAPI_SELF_URL=http://fastapi-dev:8000
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${DEMO_API_KEY}
       - IG_PWD=${DEMO_PASSWORD}
-      # Production credentials for VSL streaming (same as stream-app)
-      - PROD_IG_API_KEY=${PROD_API_KEY}
-      - PROD_IG_PWD=${PROD_PASSWORD}
       # Telegram notifications
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
@@ -35,6 +34,7 @@ services:
       disable: true  # Health endpoint always times out - container is functional, disable healthcheck
     networks:
       - lab-net
+      - workers-demo
     depends_on:
       - postgres
 
@@ -57,6 +57,8 @@ services:
     environment:
       - PORT=8002
       - TRADING_ENVIRONMENT=live
+      - TRADING_CONFIG_SET=live
+      - FASTAPI_SELF_URL=http://fastapi-live:8000
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - IG_API_KEY=${PROD_API_KEY}
@@ -72,6 +74,7 @@ services:
       disable: true
     networks:
       - lab-net
+      - workers-live
     depends_on:
       - postgres
   fastapi-stream:
@@ -143,6 +146,8 @@ services:
       - ./postgres:/var/lib/postgresql/data
     networks:
       - lab-net
+      - workers-demo
+      - workers-live
 
   minio:
     image: minio/minio:latest
@@ -159,6 +164,8 @@ services:
     command: server /data --console-address ":9001"
     networks:
       - lab-net
+      - workers-demo
+      - workers-live
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
       interval: 30s
@@ -243,8 +250,6 @@ services:
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
       - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
       - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
-      - IG_API_KEY=${PROD_API_KEY}
-      - IG_PWD=${PROD_PASSWORD}
       - SYSTEM_MONITOR_URL=http://system-monitor:8095
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
@@ -260,7 +265,7 @@ services:
       - ./worker/app/claude_analysis_enhanced:/app/claude_analysis_enhanced:ro  # Vision analysis charts (fallback)
       - ./worker/app/forex_scanner:/app/forex_scanner:ro  # Strategy config files
       - ./dev-app/config.py:/app/trailing_config.py:ro  # Trailing stop config (source of truth from fastapi-dev)
-      - /var/run/docker.sock:/var/run/docker.sock  # Docker socket for running backtests
+      - /var/run/docker.sock:/var/run/docker.sock:ro  # Docker socket for running backtests (read-only)
     working_dir: /app
     networks:
       - lab-net
@@ -286,8 +291,8 @@ services:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
       - ORDER_API_URL=http://fastapi-dev:8000/orders/place-order
-      - IG_API_KEY=${PROD_API_KEY}
-      - IG_PWD=${PROD_PASSWORD}
+      - IG_API_KEY=${DEMO_API_KEY}
+      - IG_PWD=${DEMO_PASSWORD}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
@@ -299,7 +304,7 @@ services:
       - MINIO_BUCKET_NAME=claude-charts
       - SCAN_OFFSET_SECONDS=0
     networks:
-      - lab-net
+      - workers-demo
     depends_on:
       - postgres
       - fastapi-dev
@@ -331,7 +336,7 @@ services:
       - MINIO_BUCKET_NAME=claude-charts
       - SCAN_OFFSET_SECONDS=60
     networks:
-      - lab-net
+      - workers-live
     depends_on:
       - postgres
       - fastapi-live
@@ -465,3 +470,7 @@ volumes:
 
 networks:
   lab-net:
+  workers-demo:
+    internal: true
+  workers-live:
+    internal: true

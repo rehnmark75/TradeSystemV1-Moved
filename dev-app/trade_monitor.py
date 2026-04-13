@@ -11,7 +11,7 @@ from decimal import Decimal, ROUND_DOWN
 from dataclasses import dataclass
 from typing import Optional, Dict, Tuple, List
 from logging.handlers import RotatingFileHandler
-from config import API_BASE_URL
+from config import API_BASE_URL, TRADING_ENVIRONMENT
 
 from sqlalchemy.orm import Session
 from services.db import SessionLocal
@@ -360,7 +360,7 @@ class OrderSender:
         """Get trade record by deal ID - ADDED MISSING HELPER METHOD"""
         try:
             with SessionLocal() as db:
-                return db.query(TradeLog).filter(TradeLog.deal_id == deal_id).first()
+                return db.query(TradeLog).filter(TradeLog.deal_id == deal_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
         except Exception as e:
             self.logger.error(f"Error getting trade by deal_id {deal_id}: {e}")
             return None
@@ -418,7 +418,7 @@ class OrderSender:
                 # Update trade record with new stop price
                 try:
                     with SessionLocal() as db:
-                        db_trade = db.query(TradeLog).filter(TradeLog.deal_id == deal_id).with_for_update().first()
+                        db_trade = db.query(TradeLog).filter(TradeLog.deal_id == deal_id, TradeLog.environment == TRADING_ENVIRONMENT).with_for_update().first()
                         if db_trade:
                             db_trade.sl_price = new_stop_price
                             db.commit()
@@ -448,6 +448,7 @@ class OrderSender:
                     # ✅ PREFERRED: Mark specific trade by deal_id
                     updated_count = (db.query(TradeLog)
                                 .filter(TradeLog.deal_id == deal_id,
+                                        TradeLog.environment == TRADING_ENVIRONMENT,
                                         TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed",
                                                             "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]))
                                 .update({
@@ -463,7 +464,8 @@ class OrderSender:
                         
                         # Check if trade exists but in different status
                         existing_trade = (db.query(TradeLog)
-                                        .filter(TradeLog.deal_id == deal_id)
+                                        .filter(TradeLog.deal_id == deal_id,
+                                                TradeLog.environment == TRADING_ENVIRONMENT)
                                         .first())
                         
                         if existing_trade:
@@ -477,6 +479,7 @@ class OrderSender:
                     
                     updated_count = (db.query(TradeLog)
                                 .filter(TradeLog.symbol == epic,
+                                        TradeLog.environment == TRADING_ENVIRONMENT,
                                         TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "partial_closed",
                                                             "stage1_profit_lock", "stage2_profit_lock", "stage3_trailing"]))
                                 .update({
@@ -887,7 +890,7 @@ class TradeMonitor:
                 # The trade object passed in was loaded from a different session that's now closed,
                 # so it's in a "detached" state. Changes to detached objects don't get committed.
                 trade_id = trade.id
-                trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+                trade = db.query(TradeLog).filter(TradeLog.id == trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
                 if not trade:
                     self.logger.error(f"❌ Trade {trade_id} not found when reloading for processing")
                     return False

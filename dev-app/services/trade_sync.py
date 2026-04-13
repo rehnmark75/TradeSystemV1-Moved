@@ -21,7 +21,7 @@ from services.db import SessionLocal
 from services.models import TradeLog
 from dependencies import get_ig_auth_headers
 import httpx
-from config import API_BASE_URL
+from config import API_BASE_URL, TRADING_ENVIRONMENT
 
 logger = logging.getLogger("trade_sync")
 logger.setLevel(logging.INFO)
@@ -293,7 +293,8 @@ class EnhancedTradeStatusManager:
             # Get all trades marked as missing
             missing_trades = db.query(TradeLog).filter(
                 TradeLog.status == "missing_on_ig",
-                TradeLog.endpoint.in_(["dev", "dev-limit"])  # Include limit orders
+                TradeLog.endpoint.in_(["dev", "dev-limit"]),  # Include limit orders
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).all()
             
             if not missing_trades:
@@ -727,7 +728,8 @@ async def sync_trades_with_ig():
             open_trades = db.query(TradeLog).filter(
                 TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "ema_exit_pending", "profit_protected", "partial_closed"]),
                 TradeLog.deal_id.isnot(None),  # Only trades with deal_ids
-                TradeLog.endpoint.in_(["dev", "dev-limit"])  # Include limit orders that have filled
+                TradeLog.endpoint.in_(["dev", "dev-limit"]),  # Include limit orders that have filled
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).all()
             
             if not open_trades:
@@ -823,7 +825,8 @@ async def test_sync_logic():
         with SessionLocal() as db:
             # Get some sample trades
             sample_trades = db.query(TradeLog).filter(
-                TradeLog.deal_id.isnot(None)
+                TradeLog.deal_id.isnot(None),
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).limit(5).all()
             
             if not sample_trades:
@@ -873,7 +876,8 @@ async def test_enhanced_verification():
         with SessionLocal() as db:
             # Get some sample trades that might be missing
             missing_trades = db.query(TradeLog).filter(
-                TradeLog.status == "missing_on_ig"
+                TradeLog.status == "missing_on_ig",
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).limit(3).all()
             
             if not missing_trades:

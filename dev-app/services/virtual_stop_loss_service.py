@@ -26,6 +26,7 @@ from services.db import SessionLocal
 from services.models import TradeLog
 from services.ig_orders import partial_close_position, get_point_value
 from services.market_price_stream import MarketPriceStreamManager, MarketPrice
+from config import TRADING_ENVIRONMENT
 from config_virtual_stop import (
     VIRTUAL_STOP_LOSS_ENABLED,
     POSITION_SYNC_INTERVAL_SECONDS,
@@ -662,7 +663,7 @@ class VirtualStopLossService:
         """
         try:
             with SessionLocal() as db:
-                trade = db.query(TradeLog).filter(TradeLog.id == position.trade_id).first()
+                trade = db.query(TradeLog).filter(TradeLog.id == position.trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
                 if trade:
                     trade.vsl_stage = position.current_stage
                     trade.vsl_breakeven_triggered = position.breakeven_triggered
@@ -741,7 +742,7 @@ class VirtualStopLossService:
         """
         try:
             with SessionLocal() as db:
-                trade = db.query(TradeLog).filter(TradeLog.id == position.trade_id).first()
+                trade = db.query(TradeLog).filter(TradeLog.id == position.trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
                 if trade:
                     trade.status = "closed"
                     trade.closed_at = datetime.utcnow()
@@ -810,7 +811,8 @@ class VirtualStopLossService:
                 # Get active scalp trades
                 scalp_trades = db.query(TradeLog).filter(
                     TradeLog.is_scalp_trade == True,
-                    TradeLog.status.in_(['pending', 'tracking', 'break_even', 'trailing'])
+                    TradeLog.status.in_(['pending', 'tracking', 'break_even', 'trailing']),
+                    TradeLog.environment == TRADING_ENVIRONMENT
                 ).all()
 
                 # Track which trades we found

@@ -4207,7 +4207,10 @@ class SMCSimpleStrategy:
                     'trigger_details': trigger_details,
                     'pattern_confirmation': pattern_data,
                     'rsi_divergence': rsi_divergence_data,
-                }
+                },
+
+                # Environment tag for auditability (demo vs live)
+                'environment': os.getenv('TRADING_ENVIRONMENT', 'demo'),
             }
 
             self.logger.info(f"\n📋 Signal Summary:")

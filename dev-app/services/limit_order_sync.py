@@ -22,7 +22,7 @@ from sqlalchemy import text
 from services.db import SessionLocal
 from services.models import TradeLog
 from services.ig_orders import get_working_orders
-from config import API_BASE_URL
+from config import API_BASE_URL, TRADING_ENVIRONMENT
 
 import httpx
 
@@ -82,7 +82,8 @@ class LimitOrderSyncService:
             with SessionLocal() as db:
                 # Get all pending_limit orders
                 pending_orders = db.query(TradeLog).filter(
-                    TradeLog.status == "pending_limit"
+                    TradeLog.status == "pending_limit",
+                    TradeLog.environment == TRADING_ENVIRONMENT
                 ).all()
 
                 stats["checked"] = len(pending_orders)
@@ -468,7 +469,8 @@ if __name__ == "__main__":
         # For now, just test the database query part
         with SessionLocal() as db:
             pending = db.query(TradeLog).filter(
-                TradeLog.status == "pending_limit"
+                TradeLog.status == "pending_limit",
+                TradeLog.environment == TRADING_ENVIRONMENT
             ).all()
 
             print(f"📋 Found {len(pending)} pending_limit orders:")

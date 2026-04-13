@@ -146,6 +146,31 @@ except ImportError:
         print(f"⚠️ Scanner config service not available: {e}")
         print("⚠️ This is expected on first run - will use legacy config.py values")
 
+# ====================================================================
+# STARTUP ENVIRONMENT VALIDATION
+# Mirrors the invariant check in LossPreventionFilter.
+# Refuse to start if env vars are missing or mismatched — prevents
+# silent demo/live configuration cross-contamination.
+# ====================================================================
+_startup_trading_env = os.getenv('TRADING_ENVIRONMENT')
+_startup_config_set = os.getenv('TRADING_CONFIG_SET')
+
+if _startup_trading_env is None or _startup_config_set is None:
+    raise RuntimeError(
+        f"STARTUP ABORTED: Missing required environment variables. "
+        f"TRADING_ENVIRONMENT={_startup_trading_env!r}, "
+        f"TRADING_CONFIG_SET={_startup_config_set!r}. "
+        "Both must be set to either 'demo' or 'live'."
+    )
+if _startup_trading_env != _startup_config_set:
+    raise RuntimeError(
+        f"STARTUP ABORTED: Environment variable mismatch — "
+        f"TRADING_ENVIRONMENT='{_startup_trading_env}' != "
+        f"TRADING_CONFIG_SET='{_startup_config_set}'. "
+        "These must match to prevent demo/live config cross-contamination."
+    )
+print(f"✅ Environment validation passed: TRADING_ENVIRONMENT='{_startup_trading_env}', TRADING_CONFIG_SET='{_startup_config_set}'")
+
 
 class TradingSystem:
     """

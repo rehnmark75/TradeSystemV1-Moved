@@ -403,6 +403,15 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         3. Continue with normal trailing logic
         """
         try:
+            from config import TRADING_ENVIRONMENT
+            # Guard: ensure we only process trades belonging to this environment
+            if hasattr(trade, 'environment') and trade.environment != TRADING_ENVIRONMENT:
+                self.logger.error(
+                    f"❌ Environment mismatch: trade {trade.id} has environment={trade.environment!r} "
+                    f"but this container is TRADING_ENVIRONMENT={TRADING_ENVIRONMENT!r}. Skipping."
+                )
+                return
+
             # ✅ STEP 0: DYNAMIC CONFIG SELECTION (Jan 2026 - Scalp mode support)
             # v3.2.0: Pass db for ATR-adaptive trailing config lookup
             trade_config = self.get_config_for_trade(trade, db=db)

@@ -6,6 +6,7 @@ from fastapi import APIRouter, HTTPException, Depends
 from sqlalchemy.orm import Session
 from services.db import get_db
 from services.models import TradeLog, AlertHistory, IGCandle
+from config import TRADING_ENVIRONMENT
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 import re
@@ -385,7 +386,7 @@ async def get_trade_analysis(trade_id: int, db: Session = Depends(get_db)):
         - Performance metrics
     """
     # Get trade from database
-    trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+    trade = db.query(TradeLog).filter(TradeLog.id == trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
 
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
@@ -481,7 +482,7 @@ async def get_trade_timeline(trade_id: int, db: Session = Depends(get_db)):
 
     Returns a chronological list of all events
     """
-    trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+    trade = db.query(TradeLog).filter(TradeLog.id == trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
 
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
@@ -573,7 +574,7 @@ async def get_signal_analysis(trade_id: int, db: Session = Depends(get_db)):
         Detailed signal analysis with all SMC and technical data
     """
     # Get trade from database
-    trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+    trade = db.query(TradeLog).filter(TradeLog.id == trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
 
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
@@ -1007,7 +1008,7 @@ async def get_trade_outcome_analysis(trade_id: int, db: Session = Depends(get_db
         Comprehensive outcome analysis with actionable insights
     """
     # Get trade from database
-    trade = db.query(TradeLog).filter(TradeLog.id == trade_id).first()
+    trade = db.query(TradeLog).filter(TradeLog.id == trade_id, TradeLog.environment == TRADING_ENVIRONMENT).first()
 
     if not trade:
         raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")

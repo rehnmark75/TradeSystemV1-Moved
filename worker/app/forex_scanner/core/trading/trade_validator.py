@@ -802,8 +802,9 @@ class TradeValidator:
                     (epic, pair, signal_type, strategy, confidence_score, step, rejection_reason,
                      entry_price, risk_pips, reward_pips, rr_ratio,
                      market_regime, market_session,
-                     lpf_penalty, lpf_would_block, lpf_triggered_rules)
-                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+                     lpf_penalty, lpf_would_block, lpf_triggered_rules,
+                     environment)
+                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
             """
             params = (
                 epic,
@@ -822,6 +823,7 @@ class TradeValidator:
                 signal.get('lpf_penalty'),
                 signal.get('lpf_would_block', False) if step == 'LPF' else None,
                 _json.dumps(lpf_rules) if lpf_rules else None,
+                os.getenv('TRADING_ENVIRONMENT', 'demo'),
             )
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
@@ -960,9 +962,10 @@ class TradeValidator:
                 insert_sql = """
                     INSERT INTO smc_simple_rejections (
                         scan_timestamp, epic, pair, rejection_stage, rejection_reason,
-                        rejection_details, attempted_direction, current_price
+                        rejection_details, attempted_direction, current_price,
+                        environment
                     ) VALUES (
-                        %s, %s, %s, %s, %s, %s, %s, %s
+                        %s, %s, %s, %s, %s, %s, %s, %s, %s
                     )
                 """
 
@@ -976,7 +979,8 @@ class TradeValidator:
                         rejection_reason,
                         json.dumps(rejection_details),
                         signal.get('signal_type', 'unknown'),
-                        signal.get('price', 0)
+                        signal.get('price', 0),
+                        os.getenv('TRADING_ENVIRONMENT', 'demo'),
                     ),
                     fetch=False
                 )

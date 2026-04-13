@@ -81,7 +81,7 @@ else:
     IG_ACCOUNT_ID = ''
 
 # Internal service URLs
-FASTAPI_DEV_URL = "http://fastapi-dev:8000"
+FASTAPI_DEV_URL = os.getenv('FASTAPI_SELF_URL', 'http://fastapi-dev:8000')
 FASTAPI_STREAM_URL = "http://fastapi-stream:8000"
 
 # Specific endpoints

@@ -30,8 +30,18 @@ MINIO_CHART_RETENTION_DAYS = int(os.getenv('MINIO_CHART_RETENTION_DAYS', '30'))
 MINIO_PUBLIC_URL = os.getenv('MINIO_PUBLIC_URL', f"http://{MINIO_ENDPOINT}")
 
 # Order Execution API
-ORDER_API_URL = os.getenv('ORDER_API_URL', "http://fastapi-dev:8000/orders/place-order")
-API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "436abe054a074894a0517e5172f0e5b6")
+_order_api_url = os.getenv('ORDER_API_URL')
+if _order_api_url is None:
+    _trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
+    if _trading_env == 'live':
+        raise RuntimeError(
+            "STARTUP ABORTED: ORDER_API_URL env var is required in live mode but not set. "
+            "Set it to http://fastapi-live:8000/orders/place-order in docker-compose."
+        )
+    # Demo: fall back to fastapi-dev safely
+    _order_api_url = "http://fastapi-dev:8000/orders/place-order"
+ORDER_API_URL = _order_api_url
+API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', '')
 
 # =============================================================================
 # TIMEZONE SETTINGS (Infrastructure - used across all modules)
