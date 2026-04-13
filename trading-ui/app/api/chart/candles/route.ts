@@ -17,7 +17,7 @@ export async function GET(req: Request) {
     const result = await forexPool.query(
       `
       SELECT start_time, open, high, low, close
-      FROM ig_candles
+      FROM ig_candles_backtest
       WHERE epic = $1 AND timeframe = $2
       ORDER BY start_time DESC
       LIMIT $3
