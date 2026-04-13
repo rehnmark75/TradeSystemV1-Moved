@@ -3601,6 +3601,85 @@ input {
   font-size: 0.95rem;
 }
 
+/* Pair card footer: badge + override count side by side */
+.pair-card-footer {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Status badges (sidebar) */
+.pair-status-badge {
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 2px 7px;
+  border-radius: 100px;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.pair-status-badge.pair-status-active {
+  background: #e6f4ea;
+  color: #1a6b2e;
+}
+
+.pair-status-badge.pair-status-monitor {
+  background: #fff3cd;
+  color: #7a5a00;
+}
+
+.pair-status-badge.pair-status-disabled {
+  background: #f1f3f4;
+  color: #80868b;
+}
+
+/* Trading status tri-state control (detail panel) */
+.pair-status-control {
+  display: flex;
+  gap: 4px;
+  margin-top: 6px;
+  flex-wrap: wrap;
+}
+
+.pair-status-btn {
+  font-size: 0.78rem;
+  padding: 4px 12px;
+  border-radius: 8px;
+  border: 1px solid var(--border);
+  background: #fff;
+  color: var(--muted);
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.pair-status-btn:hover {
+  border-color: #bbb;
+  color: var(--text);
+}
+
+.pair-status-btn.selected.pair-status-btn-active {
+  background: #e6f4ea;
+  border-color: #1a6b2e;
+  color: #1a6b2e;
+  font-weight: 600;
+}
+
+.pair-status-btn.selected.pair-status-btn-monitor {
+  background: #fff3cd;
+  border-color: #7a5a00;
+  color: #7a5a00;
+  font-weight: 600;
+}
+
+.pair-status-btn.selected.pair-status-btn-disabled {
+  background: #f1f3f4;
+  border-color: #80868b;
+  color: #80868b;
+  font-weight: 600;
+}
+
 .override-grid {
   display: grid;
   gap: 12px;
@@ -3996,6 +4075,28 @@ input {
   flex-direction: column;
   height: 100%;
   min-height: 0;
+}
+
+.pair-status-bar {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 10px 16px;
+  background: #f8fafb;
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+
+.pair-status-bar-label {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.pair-status-bar-hint {
+  font-size: 0.78rem;
+  color: var(--muted);
 }
 
 .strategy-layout {

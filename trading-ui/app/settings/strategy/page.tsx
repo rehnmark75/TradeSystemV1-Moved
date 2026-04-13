@@ -33,6 +33,11 @@ const META_FIELDS = new Set([
   "id", "config_id", "epic", "created_at", "updated_at", "updated_by", "change_reason",
 ]);
 
+const STATUS_FIELDS = new Set(["is_enabled", "monitor_only"]);
+
+type PairStatus = "active" | "monitor" | "disabled";
+const STATUS_LABELS: Record<PairStatus, string> = { active: "Active", monitor: "Monitor", disabled: "Disabled" };
+
 const PREFERRED_ORDER = [
   "Tier 1: 4H Directional Bias",
   "Tier 2: 15m Entry Trigger",
@@ -191,16 +196,17 @@ export default function UnifiedStrategySettings() {
     setBaseParamOverrides(paramOverrides);
   }, [effective, overrideColumns]);
 
-  // Override counts
+  // Override counts (status fields excluded — they're not parameter overrides)
   const overrideCounts = useMemo(() => {
     const counts = new Map<string, number>();
     overrides.forEach((ov) => {
       let count = 0;
       if (ov.parameter_overrides && typeof ov.parameter_overrides === "object") {
-        count += Object.keys(ov.parameter_overrides as Record<string, unknown>).length;
+        count += Object.keys(ov.parameter_overrides as Record<string, unknown>)
+          .filter((k) => !STATUS_FIELDS.has(k)).length;
       }
       Object.entries(ov).forEach(([k, v]) => {
-        if (META_FIELDS.has(k) || k === "parameter_overrides") return;
+        if (META_FIELDS.has(k) || k === "parameter_overrides" || STATUS_FIELDS.has(k)) return;
         if (v !== null && v !== undefined) count++;
       });
       counts.set(ov.epic, count);
@@ -323,6 +329,30 @@ export default function UnifiedStrategySettings() {
       return { category: s.category, fieldCount: allFields.length, modifiedCount, overriddenCount };
     });
   }, [sections, mode, changes, draftOverrides]);
+
+  // Trading status derived from draftOverrides
+  const currentStatus = useMemo((): PairStatus => {
+    if (draftOverrides.is_enabled === false) return "disabled";
+    if (draftOverrides.monitor_only === true || draftOverrides.monitor_only === "true") return "monitor";
+    return "active";
+  }, [draftOverrides]);
+
+  const setStatus = (status: PairStatus) => {
+    setDraftOverrides((prev) => {
+      const copy = { ...prev };
+      if (status === "disabled") {
+        copy.is_enabled = false;
+        delete copy.monitor_only;
+      } else if (status === "monitor") {
+        copy.is_enabled = true;
+        copy.monitor_only = true;
+      } else {
+        copy.is_enabled = true;
+        delete copy.monitor_only;
+      }
+      return copy;
+    });
+  };
 
   // Pending count
   const pendingCount = mode === "global" ? Object.keys(changes).length : dirtyKeys.size;
@@ -501,6 +531,26 @@ export default function UnifiedStrategySettings() {
         onSnapshot={() => setShowSnapshotPanel(true)}
         onDiscard={handleDiscard}
       />
+
+      {mode === "pair" && selectedEpic ? (
+        <div className="pair-status-bar">
+          <span className="pair-status-bar-label">Trading Status</span>
+          <div className="pair-status-control">
+            {(["active", "monitor", "disabled"] as const).map((s) => (
+              <button
+                key={s}
+                className={`pair-status-btn pair-status-btn-${s}${currentStatus === s ? " selected" : ""}`}
+                onClick={() => setStatus(s)}
+              >
+                {STATUS_LABELS[s]}
+              </button>
+            ))}
+          </div>
+          <span className="pair-status-bar-hint">
+            {currentStatus === "monitor" ? "Signals logged but not traded" : currentStatus === "disabled" ? "Pair fully disabled" : "Pair actively traded"}
+          </span>
+        </div>
+      ) : null}
 
       <div className="strategy-layout">
         <CategoryNav
