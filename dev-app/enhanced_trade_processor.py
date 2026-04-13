@@ -405,9 +405,10 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
         try:
             from config import TRADING_ENVIRONMENT
             # Guard: ensure we only process trades belonging to this environment
-            if hasattr(trade, 'environment') and trade.environment != TRADING_ENVIRONMENT:
+            trade_env = getattr(trade, 'environment', None)
+            if trade_env and trade_env != TRADING_ENVIRONMENT:
                 self.logger.error(
-                    f"❌ Environment mismatch: trade {trade.id} has environment={trade.environment!r} "
+                    f"❌ Environment mismatch: trade {trade.id} has environment={trade_env!r} "
                     f"but this container is TRADING_ENVIRONMENT={TRADING_ENVIRONMENT!r}. Skipping."
                 )
                 return

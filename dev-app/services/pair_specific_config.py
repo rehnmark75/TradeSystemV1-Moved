@@ -1,3 +1,4 @@
+import os
 import time
 
 import requests
@@ -7,7 +8,7 @@ import threading
 import logging
 from datetime import datetime, timedelta
 from decimal import Decimal, ROUND_DOWN
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional, Dict, Tuple, List
 from logging.handlers import RotatingFileHandler
 from config import API_BASE_URL, TRADING_ENVIRONMENT
@@ -53,9 +54,9 @@ PAIR_CONFIG_AVAILABLE = False
 
 @dataclass
 class ApiConfig:
-    """Configuration for API calls"""
-    base_url: str = "http://fastapi-dev:8000"
-    subscription_key: str = "436abe054a074894a0517e5172f0e5b6"
+    """Configuration for API calls — routes to the fastapi peer in this environment."""
+    base_url: str = field(default_factory=lambda: os.getenv('FASTAPI_SELF_URL', 'http://fastapi-dev:8000'))
+    subscription_key: str = field(default_factory=lambda: os.getenv('API_SUBSCRIPTION_KEY', ''))
     dry_run: bool = False  # Set to False for live trading
     
     @property

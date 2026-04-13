@@ -136,9 +136,10 @@ class TradeLog(Base):
 
 class AlertHistory(Base):
     __tablename__ = "alert_history"
-    
+
     id = Column(Integer, primary_key=True, index=True)
     alert_timestamp = Column(DateTime, nullable=False, default=datetime.utcnow)
+    environment = Column(String(10), default='demo', index=True)
     epic = Column(String(50), nullable=False, index=True)
     pair = Column(String(10), nullable=False)
     signal_type = Column(String(10), nullable=False, index=True)

@@ -4,7 +4,8 @@ Shared types and configurations to avoid circular imports
 This module contains common classes used by both trade_monitor and pair_specific_config
 """
 
-from dataclasses import dataclass
+import os
+from dataclasses import dataclass, field
 from typing import Optional, Dict, List
 import threading
 import logging
@@ -14,9 +15,9 @@ from logging.handlers import RotatingFileHandler
 
 @dataclass
 class ApiConfig:
-    """Configuration for API calls"""
-    base_url: str = "http://fastapi-dev:8000"  # TODO: Use FASTAPI_DEV_URL from config
-    subscription_key: str = "436abe054a074894a0517e5172f0e5b6"
+    """Configuration for API calls — routes to the fastapi peer in this environment."""
+    base_url: str = field(default_factory=lambda: os.getenv('FASTAPI_SELF_URL', 'http://fastapi-dev:8000'))
+    subscription_key: str = field(default_factory=lambda: os.getenv('API_SUBSCRIPTION_KEY', ''))
     dry_run: bool = False  # Set to False for live trading
     
     @property

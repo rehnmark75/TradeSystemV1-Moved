@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from services.db import SessionLocal
 from services.models import TradeLog
 from dependencies import get_ig_auth_headers
-from config import API_BASE_URL
+from config import API_BASE_URL, TRADING_ENVIRONMENT
 
 # Bulletproof trailing imports
 from services.retry_utils import retry_with_backoff, STOP_UPDATE_MAX_RETRIES, STOP_UPDATE_BACKOFF
@@ -92,6 +92,7 @@ async def adjust_stop_logic(
             with SessionLocal() as db:
                 updated = db.query(TradeLog).filter(
                     TradeLog.symbol == epic,
+                    TradeLog.environment == TRADING_ENVIRONMENT,
                     TradeLog.status.in_(["pending", "tracking", "break_even", "trailing", "stage2_profit_lock", "stage3_trailing"])
                 ).update({TradeLog.status: "closed"})
                 db.commit()
