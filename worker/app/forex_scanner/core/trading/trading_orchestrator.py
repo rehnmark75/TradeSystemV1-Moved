@@ -1480,8 +1480,15 @@ class TradingOrchestrator:
             # FIXED: Skip IntegrationManager Claude if TradeValidator already did Claude analysis
             # This prevents duplicate API calls and wasted tokens
             claude_results = {}
-            # Check from database - NO FALLBACK
-            trade_validator_did_claude = self._scanner_cfg.require_claude_approval
+            # Ask the validator directly — config alone is not proof Claude ran.
+            # Claude init can fail (e.g. API unreachable) and the validator silently
+            # disables filtering; without this guard the orchestrator would also skip
+            # IntegrationManager Claude, leaving signals un-analyzed.
+            trade_validator_did_claude = bool(
+                self.trade_validator
+                and getattr(self.trade_validator, 'enable_claude_filtering', False)
+                and getattr(self.trade_validator, 'claude_analyzer', None) is not None
+            )
 
             if trade_validator_did_claude:
                 # TradeValidator already did Claude analysis - use its results, skip IntegrationManager
