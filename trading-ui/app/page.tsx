@@ -12,6 +12,7 @@ export default function Page() {
           <Link href="/signals">Signals</Link>
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
+          <Link href="/chart">Chart</Link>
           <Link href="/forex">Forex Analytics</Link>
           <Link href="/infrastructure">Infrastructure</Link>
           <Link href="/system">System Status</Link>
