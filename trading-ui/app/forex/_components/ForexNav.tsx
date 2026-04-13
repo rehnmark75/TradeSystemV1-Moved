@@ -12,6 +12,7 @@ type ForexNavProps = {
 
 const DEFAULT_ITEMS: ForexNavItem[] = [
   { href: "/forex", label: "Overview" },
+  { href: "/forex/chart", label: "Chart" },
   { href: "/forex/strategy", label: "Strategy Performance" },
   { href: "/forex/trade-performance", label: "Trade Performance" },
   { href: "/forex/entry-timing", label: "Entry Timing" },
