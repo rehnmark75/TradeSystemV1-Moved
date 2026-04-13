@@ -70,9 +70,26 @@ type WatchlistRow = {
   bt_ema50_90d_grade?: string | null;
   bt_ema50_90d_confidence?: string | null;
   bt_ema50_90d_supports_signal?: string | null;
+  bt_fullsetup_180d_signals?: number | null;
+  bt_fullsetup_180d_win_rate?: number | null;
+  bt_fullsetup_180d_avg_pnl?: number | null;
+  bt_fullsetup_180d_total_pnl?: number | null;
+  bt_fullsetup_180d_profit_factor?: number | null;
+  bt_fullsetup_180d_avg_hold_days?: number | null;
+  bt_fullsetup_180d_score?: number | null;
+  bt_fullsetup_180d_grade?: string | null;
+  bt_fullsetup_180d_confidence?: string | null;
+  bt_fullsetup_180d_supports_signal?: string | null;
+  bt_fullsetup_180d_filtered_count?: number | null;
+  bt_fullsetup_min_rs?: number | null;
+  bt_fullsetup_min_daq?: number | null;
   signal_validated?: boolean | null;
   signal_validation_reasons?: string | null;
   bt_stop_method?: string | null;
+  claude_grade?: string | null;
+  claude_score?: number | null;
+  claude_action?: string | null;
+  claude_analyzed_at?: string | null;
 };
 
 type WatchlistDetail = WatchlistRow & {
@@ -158,6 +175,8 @@ type WatchlistDetail = WatchlistRow & {
   claude_stop_adjustment: string | null;
   claude_time_horizon: string | null;
   claude_analyzed_at: string | null;
+  latest_scanner_name: string | null;
+  latest_scanner_timestamp: string | null;
 };
 
 type NoteEntry = {
@@ -173,7 +192,10 @@ const CROSSOVER = new Set(["ema_50_crossover", "ema_20_crossover", "macd_bullish
 
 export default function Page() {
   const watchlistKeys = Object.keys(WATCHLIST_DEFINITIONS);
-  const [watchlist, setWatchlist] = useState(watchlistKeys[0]);
+  const primaryKeys = watchlistKeys.filter((k) => WATCHLIST_DEFINITIONS[k].tier === "primary");
+  const experimentalKeys = watchlistKeys.filter((k) => WATCHLIST_DEFINITIONS[k].tier === "experimental");
+  const [watchlist, setWatchlist] = useState(primaryKeys[0] ?? watchlistKeys[0]);
+  const [showExperimental, setShowExperimental] = useState(false);
   const [scanDate, setScanDate] = useState<string | null>(null);
   const [limit, setLimit] = useState(200);
   const [filter, setFilter] = useState("");
@@ -200,7 +222,8 @@ export default function Page() {
   const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
   const [tradeReadyOnly, setTradeReadyOnly] = useState(false);
   const [validatedOnly, setValidatedOnly] = useState(false);
-  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade">("signal");
+  const [highQualityOnly, setHighQualityOnly] = useState(true);
+  const [sortKey, setSortKey] = useState<"signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade" | "claude">("signal");
   const [sortDir, setSortDir] = useState<"desc" | "asc">("desc");
 
   // Order form state (keyed by ticker)
@@ -265,12 +288,26 @@ export default function Page() {
     if (validatedOnly) {
       data = data.filter((row) => row.signal_validated);
     }
+    if (highQualityOnly) {
+      data = data.filter((row) => {
+        // Hide if backtest actively contradicts with high confidence
+        if (
+          row.bt_fullsetup_180d_supports_signal === "contradicts" &&
+          row.bt_fullsetup_180d_confidence === "high"
+        ) return false;
+        // Hide if Claude says C/D/F
+        if (row.claude_grade && ["C", "D", "F"].includes(row.claude_grade)) return false;
+        // Hide if DAQ grade is C or D
+        if (row.daq_grade && ["C", "D"].includes(row.daq_grade)) return false;
+        return true;
+      });
+    }
     if (filter) {
       const term = filter.toUpperCase();
       data = data.filter((row) => row.ticker?.toUpperCase().includes(term));
     }
     return data;
-  }, [rows, filter, tradeReadyOnly, validatedOnly]);
+  }, [rows, filter, tradeReadyOnly, validatedOnly, highQualityOnly]);
 
   const numberOrNull = (value: unknown) => {
     if (value === null || value === undefined || value === "") {
@@ -287,6 +324,11 @@ export default function Page() {
     return row.scan_date ? new Date(row.scan_date).getTime() : 0;
   };
 
+  const claudeGradeOrder = (grade: string | null | undefined): number => {
+    const map: Record<string, number> = { "A+": 6, "A": 5, "B": 4, "C": 3, "D": 2, "F": 1 };
+    return grade ? (map[grade] ?? 0) : -1;
+  };
+
   const sortValue = (row: WatchlistRow) => {
     switch (sortKey) {
       case "ready":
@@ -300,7 +342,9 @@ export default function Page() {
       case "days":
         return numberOrNull(row.days_on_list) ?? -Infinity;
       case "bt_grade":
-        return numberOrNull(row.bt_ema50_90d_score) ?? -Infinity;
+        return numberOrNull(row.bt_fullsetup_180d_score) ?? numberOrNull(row.bt_ema50_90d_score) ?? -Infinity;
+      case "claude":
+        return claudeGradeOrder(row.claude_grade);
       case "signal":
       default:
         return getSignalDate(row);
@@ -320,7 +364,7 @@ export default function Page() {
     return data;
   }, [filteredRows, sortKey, sortDir, watchlist]);
 
-  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade") => {
+  const toggleSort = (key: "signal" | "rs" | "daq" | "tv" | "days" | "ready" | "bt_grade" | "claude") => {
     if (sortKey === key) {
       setSortDir(sortDir === "desc" ? "asc" : "desc");
     } else {
@@ -794,11 +838,11 @@ export default function Page() {
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
-          <Link href="/signals">Signals</Link>
           <Link href="/broker">Broker</Link>
           <Link href="/market">Market</Link>
           <Link href="/forex">Forex Analytics</Link>
           <Link href="/settings">Settings</Link>
+          <Link href="/signals" style={{ opacity: 0.45, fontSize: "0.8rem" }} title="Scanner debug view">Signals</Link>
         </div>
       </div>
 
@@ -819,12 +863,28 @@ export default function Page() {
           <div>
             <label>Watchlist</label>
             <select value={watchlist} onChange={(e) => setWatchlist(e.target.value)}>
-              {watchlistKeys.map((key) => (
+              {primaryKeys.map((key) => (
                 <option key={key} value={key}>
                   {WATCHLIST_DEFINITIONS[key].icon} {WATCHLIST_DEFINITIONS[key].name}
                 </option>
               ))}
+              {showExperimental && experimentalKeys.map((key) => (
+                <option key={key} value={key}>
+                  {WATCHLIST_DEFINITIONS[key].icon} {WATCHLIST_DEFINITIONS[key].name} (experimental)
+                </option>
+              ))}
             </select>
+            <button
+              style={{ marginLeft: 6, fontSize: "0.75rem", opacity: 0.6, background: "none", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", padding: "2px 6px" }}
+              onClick={() => {
+                setShowExperimental((v) => !v);
+                if (showExperimental && WATCHLIST_DEFINITIONS[watchlist]?.tier === "experimental") {
+                  setWatchlist(primaryKeys[0] ?? watchlistKeys[0]);
+                }
+              }}
+            >
+              {showExperimental ? "Hide experimental" : "Show experimental"}
+            </button>
           </div>
           <div>
             <label>Event Date</label>
@@ -867,6 +927,16 @@ export default function Page() {
                 onChange={(e) => setValidatedOnly(e.target.checked)}
               />
               Validated Only
+            </label>
+          </div>
+          <div>
+            <label style={{ display: "flex", alignItems: "center", gap: 6, cursor: "pointer" }} title="Hide rows where: backtest contradicts (high confidence), Claude grade C/D/F, or DAQ grade C/D">
+              <input
+                type="checkbox"
+                checked={highQualityOnly}
+                onChange={(e) => setHighQualityOnly(e.target.checked)}
+              />
+              High Quality Only
             </label>
           </div>
         </div>
@@ -918,8 +988,11 @@ export default function Page() {
           <span>1D</span>
           <span>W</span>
           <span>M</span>
-          <button className="sort-btn" onClick={() => toggleSort("bt_grade")}>
+          <button className="sort-btn" onClick={() => toggleSort("bt_grade")} title="Full-setup backtest grade (180d, EMA50+RS+DAQ)">
             BT {sortKey === "bt_grade" ? (sortDir === "desc" ? "▾" : "▴") : ""}
+          </button>
+          <button className="sort-btn" onClick={() => toggleSort("claude")} title="Claude AI analysis grade">
+            Claude {sortKey === "claude" ? (sortDir === "desc" ? "▾" : "▴") : ""}
           </button>
         </div>
 
@@ -1058,25 +1131,54 @@ export default function Page() {
                         ? `${Number(row.perf_1m) >= 0 ? "+" : ""}${Number(row.perf_1m).toFixed(1)}%`
                         : "-"}
                     </span>
-                    <span
-                      className={
-                        row.bt_ema50_90d_grade
-                          ? `pill ${
-                              row.bt_ema50_90d_supports_signal === "supports" ? "good"
-                              : row.bt_ema50_90d_supports_signal === "contradicts" ? "bad"
-                              : row.bt_ema50_90d_supports_signal === "neutral" ? "warn"
-                              : "muted"
-                            }`
-                          : ""
-                      }
-                      title={
-                        row.bt_ema50_90d_grade
-                          ? `Grade: ${row.bt_ema50_90d_grade} | Score: ${row.bt_ema50_90d_score ?? "-"} | WR: ${row.bt_ema50_90d_win_rate != null ? Number(row.bt_ema50_90d_win_rate).toFixed(0) + "%" : "-"} | ${row.bt_ema50_90d_signals ?? 0} signals (${row.bt_ema50_90d_confidence ?? "none"})`
-                          : ""
-                      }
-                    >
-                      {row.bt_ema50_90d_grade ?? "-"}
-                    </span>
+                    {(() => {
+                      const fsGrade = row.bt_fullsetup_180d_grade;
+                      const fsVerdict = row.bt_fullsetup_180d_supports_signal;
+                      const legacyGrade = row.bt_ema50_90d_grade;
+                      const displayGrade = fsGrade ?? legacyGrade;
+                      const displayVerdict = fsGrade ? fsVerdict : row.bt_ema50_90d_supports_signal;
+                      const isFullSetup = !!fsGrade;
+                      return (
+                        <span
+                          className={
+                            displayGrade
+                              ? `pill ${
+                                  displayVerdict === "supports" ? "good"
+                                  : displayVerdict === "contradicts" ? "bad"
+                                  : displayVerdict === "neutral" ? "warn"
+                                  : "muted"
+                                }`
+                              : ""
+                          }
+                          title={
+                            displayGrade
+                              ? `${isFullSetup ? "Full-setup 180d (EMA50+RS+DAQ)" : "Legacy EMA50 90d"}: Grade ${displayGrade} | WR: ${
+                                  isFullSetup
+                                    ? (row.bt_fullsetup_180d_win_rate != null ? Number(row.bt_fullsetup_180d_win_rate).toFixed(0) + "%" : "-")
+                                    : (row.bt_ema50_90d_win_rate != null ? Number(row.bt_ema50_90d_win_rate).toFixed(0) + "%" : "-")
+                                } | ${isFullSetup ? (row.bt_fullsetup_180d_signals ?? 0) : (row.bt_ema50_90d_signals ?? 0)} signals (${
+                                  isFullSetup ? (row.bt_fullsetup_180d_confidence ?? "none") : (row.bt_ema50_90d_confidence ?? "none")
+                                })`
+                              : "No backtest data"
+                          }
+                        >
+                          {displayGrade ?? "-"}
+                        </span>
+                      );
+                    })()}
+                    {(() => {
+                      const grade = row.claude_grade;
+                      if (!grade) return <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>—</span>;
+                      const tone = grade === "A+" || grade === "A" ? "good" : grade === "B" ? "warn" : "bad";
+                      return (
+                        <span
+                          className={`pill ${tone}`}
+                          title={`Claude ${grade}${row.claude_action ? ` — ${row.claude_action}` : ""}${row.claude_analyzed_at ? ` (${new Date(row.claude_analyzed_at).toLocaleDateString()})` : ""}`}
+                        >
+                          {grade}
+                        </span>
+                      );
+                    })()}
                   </div>
 
                   {expandedRow ? (
@@ -1217,18 +1319,31 @@ export default function Page() {
                                   </div>
                                 ) : null}
                               </div>
-                              <h4>EMA50 Backtest (90d)</h4>
                               {(() => {
-                                const grade = row.bt_ema50_90d_grade;
-                                const score = row.bt_ema50_90d_score;
-                                const confidence = row.bt_ema50_90d_confidence;
-                                const verdict = row.bt_ema50_90d_supports_signal;
-                                const signals = row.bt_ema50_90d_signals;
-                                const winRate = row.bt_ema50_90d_win_rate;
-                                const avgPnl = row.bt_ema50_90d_avg_pnl;
-                                const totalPnl = row.bt_ema50_90d_total_pnl;
-                                const pf = row.bt_ema50_90d_profit_factor;
-                                const holdDays = row.bt_ema50_90d_avg_hold_days;
+                                // Prefer full-setup 180d, fall back to legacy 90d
+                                const useFullSetup = !!row.bt_fullsetup_180d_grade;
+                                const grade = useFullSetup ? row.bt_fullsetup_180d_grade : row.bt_ema50_90d_grade;
+                                const score = useFullSetup ? row.bt_fullsetup_180d_score : row.bt_ema50_90d_score;
+                                const confidence = useFullSetup ? row.bt_fullsetup_180d_confidence : row.bt_ema50_90d_confidence;
+                                const verdict = useFullSetup ? row.bt_fullsetup_180d_supports_signal : row.bt_ema50_90d_supports_signal;
+                                const signals = useFullSetup ? row.bt_fullsetup_180d_signals : row.bt_ema50_90d_signals;
+                                const winRate = useFullSetup ? row.bt_fullsetup_180d_win_rate : row.bt_ema50_90d_win_rate;
+                                const avgPnl = useFullSetup ? row.bt_fullsetup_180d_avg_pnl : row.bt_ema50_90d_avg_pnl;
+                                const totalPnl = useFullSetup ? row.bt_fullsetup_180d_total_pnl : row.bt_ema50_90d_total_pnl;
+                                const pf = useFullSetup ? row.bt_fullsetup_180d_profit_factor : row.bt_ema50_90d_profit_factor;
+                                const holdDays = useFullSetup ? row.bt_fullsetup_180d_avg_hold_days : row.bt_ema50_90d_avg_hold_days;
+                                const filteredCount = row.bt_fullsetup_180d_filtered_count;
+                                const minRs = row.bt_fullsetup_min_rs;
+                                const minDaq = row.bt_fullsetup_min_daq;
+                                const lookback = useFullSetup ? "180d" : "90d";
+
+                                const panelTitle = useFullSetup
+                                  ? `Full-Setup Backtest (${lookback})`
+                                  : `EMA50 Backtest (${lookback})`;
+
+                                const tooltipText = useFullSetup
+                                  ? `Backtested EMA50 crossover + RS ≥ ${minRs ?? 60} + DAQ ≥ ${minDaq ?? 50}. ${filteredCount ?? 0} total crossovers found, ${signals ?? 0} passed quality filters. Exit: EMA50 break or 20-day horizon.`
+                                  : `Legacy: EMA50 crossover only, 90d lookback. Upgrade backtest to see full-setup data.`;
 
                                 const verdictIcon = verdict === "supports" ? "✓" : verdict === "contradicts" ? "✗" : verdict === "neutral" ? "~" : "?";
                                 const verdictLabel = verdict === "supports" ? "Backtest Supports Signal"
@@ -1236,16 +1351,19 @@ export default function Page() {
                                   : verdict === "neutral" ? "Backtest Inconclusive"
                                   : "Insufficient Data";
                                 const verdictSub = verdict === "supports"
-                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — history backs this setup`
+                                  ? `${signals} signals passed quality filters, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — history backs this setup`
                                   : verdict === "contradicts"
-                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — history warns against this setup`
+                                  ? `${signals} signals passed quality filters, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — history warns against`
                                   : verdict === "neutral"
-                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — mixed historical results`
-                                  : `Only ${signals ?? 0} signal${(signals ?? 0) === 1 ? "" : "s"} — not enough data to validate`;
+                                  ? `${signals} signals, ${winRate != null ? Number(winRate).toFixed(0) : "-"}% win rate — mixed results`
+                                  : `Only ${signals ?? 0} signal${(signals ?? 0) === 1 ? "" : "s"} passed filters — not enough data`;
                                 const gradeClass = grade === "A+" ? "grade-a-plus" : grade === "A" ? "grade-a" : grade === "B" ? "grade-b" : grade === "C" ? "grade-c" : grade === "D" ? "grade-d" : grade === "F" ? "grade-f" : "grade-na";
 
                                 return (
                                   <>
+                                    <h4 title={tooltipText} style={{ cursor: "help" }}>
+                                      {panelTitle} <span style={{ fontSize: "0.75rem", opacity: 0.5 }}>ⓘ</span>
+                                    </h4>
                                     <div className={`bt-verdict ${verdict ?? "insufficient_data"}`}>
                                       <span className="bt-verdict-icon">{verdictIcon}</span>
                                       <div className="bt-verdict-text">
@@ -1286,13 +1404,18 @@ export default function Page() {
                                       </div>
                                       <div className="bt-stat">
                                         <div className="bt-stat-value">{signals ?? "-"}</div>
-                                        <div className="bt-stat-label">Signals</div>
+                                        <div className="bt-stat-label">{useFullSetup ? "Qualified" : "Signals"}</div>
                                       </div>
                                       <div className="bt-stat">
                                         <div className="bt-stat-value">{holdDays != null ? Number(holdDays).toFixed(1) : "-"}</div>
                                         <div className="bt-stat-label">Avg Hold</div>
                                       </div>
                                     </div>
+                                    {useFullSetup && score != null ? (
+                                      <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                                        Composite score: {score} | {filteredCount ?? 0} crossovers found, {signals ?? 0} passed RS ≥ {minRs ?? 60} + DAQ ≥ {minDaq ?? 50}
+                                      </div>
+                                    ) : null}
                                   </>
                                 );
                               })()}
@@ -1728,7 +1851,7 @@ export default function Page() {
                       <div className="detail-section">
                         <div className="signal-text">
                           <div className="claude-header">
-                            <h4>Claude Analysis</h4>
+                            <h4>Signal Thesis (Claude AI)</h4>
                             <button
                               className="claude-btn"
                               onClick={() => runClaudeAnalysis(row.ticker)}
@@ -1737,19 +1860,38 @@ export default function Page() {
                               {claudeLoading[row.ticker] ? "Analyzing..." : "Analyze with Claude"}
                             </button>
                           </div>
+                          {details[row.ticker]?.latest_scanner_name ? (
+                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 8 }}>
+                              Scanner: <strong>{details[row.ticker]?.latest_scanner_name}</strong>
+                              {details[row.ticker]?.latest_scanner_timestamp ? (
+                                <> &nbsp;·&nbsp; {new Date(details[row.ticker]?.latest_scanner_timestamp!).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })}</>
+                              ) : null}
+                            </div>
+                          ) : null}
                           {details[row.ticker]?.claude_grade ? (
                             <>
-                              <p><strong>{details[row.ticker]?.claude_grade} {details[row.ticker]?.claude_action ?? ""}</strong></p>
-                              {details[row.ticker]?.claude_thesis ? <p>{details[row.ticker]?.claude_thesis}</p> : null}
+                              <p>
+                                <strong style={{ color: details[row.ticker]?.claude_grade === "A+" || details[row.ticker]?.claude_grade === "A" ? "#1e7e34" : details[row.ticker]?.claude_grade === "B" ? "#856404" : "#c0392b" }}>
+                                  {details[row.ticker]?.claude_grade} — {details[row.ticker]?.claude_action ?? ""}
+                                </strong>
+                                {details[row.ticker]?.claude_conviction ? <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}> ({details[row.ticker]?.claude_conviction} conviction)</span> : null}
+                              </p>
+                              {details[row.ticker]?.claude_thesis ? <p style={{ lineHeight: 1.5 }}>{details[row.ticker]?.claude_thesis}</p> : null}
                               {details[row.ticker]?.claude_key_strengths ? (
                                 <p><strong>Strengths:</strong> {formatList(details[row.ticker]?.claude_key_strengths)}</p>
                               ) : null}
                               {details[row.ticker]?.claude_key_risks ? (
                                 <p><strong>Risks:</strong> {formatList(details[row.ticker]?.claude_key_risks)}</p>
                               ) : null}
+                              {details[row.ticker]?.claude_position_rec ? (
+                                <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                  Position: {details[row.ticker]?.claude_position_rec} &nbsp;·&nbsp;
+                                  Horizon: {details[row.ticker]?.claude_time_horizon ?? "-"}
+                                </p>
+                              ) : null}
                             </>
                           ) : (
-                            <p className="footer-note">No Claude analysis yet.</p>
+                            <p className="footer-note">No Claude analysis yet. Click "Analyze with Claude" to generate thesis.</p>
                           )}
                           {claudeMessage[row.ticker] ? <div className="footer-note">{claudeMessage[row.ticker]}</div> : null}
                         </div>

@@ -83,9 +83,26 @@ export async function GET(request: Request) {
           w.bt_ema50_90d_grade,
           w.bt_ema50_90d_confidence,
           w.bt_ema50_90d_supports_signal,
+          w.bt_fullsetup_180d_signals,
+          w.bt_fullsetup_180d_win_rate,
+          w.bt_fullsetup_180d_avg_pnl,
+          w.bt_fullsetup_180d_total_pnl,
+          w.bt_fullsetup_180d_profit_factor,
+          w.bt_fullsetup_180d_avg_hold_days,
+          w.bt_fullsetup_180d_score,
+          w.bt_fullsetup_180d_grade,
+          w.bt_fullsetup_180d_confidence,
+          w.bt_fullsetup_180d_supports_signal,
+          w.bt_fullsetup_180d_filtered_count,
+          w.bt_fullsetup_min_rs,
+          w.bt_fullsetup_min_daq,
           w.signal_validated,
           w.signal_validation_reasons,
-          w.bt_stop_method
+          w.bt_stop_method,
+          COALESCE(cl.claude_grade, cs.claude_grade) AS claude_grade,
+          COALESCE(cl.claude_score, cs.claude_score) AS claude_score,
+          COALESCE(cl.claude_action, cs.claude_action) AS claude_action,
+          COALESCE(cl.claude_analyzed_at, cs.claude_analyzed_at) AS claude_analyzed_at
         FROM stock_watchlist_results w
         LEFT JOIN stock_instruments i ON w.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -132,6 +149,20 @@ export async function GET(request: Request) {
           ORDER BY bt.close_time DESC NULLS LAST
           LIMIT 1
         ) bt_closed ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT claude_grade, claude_score, claude_action, claude_analyzed_at
+          FROM stock_watchlist_claude_analysis
+          WHERE watchlist_name = w.watchlist_name AND ticker = w.ticker
+          ORDER BY claude_analyzed_at DESC
+          LIMIT 1
+        ) cl ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT claude_grade, claude_score, claude_action, claude_analyzed_at
+          FROM stock_scanner_signals
+          WHERE ticker = w.ticker AND claude_analyzed_at IS NOT NULL
+          ORDER BY claude_analyzed_at DESC
+          LIMIT 1
+        ) cs ON TRUE
         WHERE w.watchlist_name = $1
           AND w.status = 'active'
           ${validatedOnly ? "AND w.signal_validated IS TRUE" : ""}
@@ -201,7 +232,11 @@ export async function GET(request: Request) {
         w.bt_ema50_90d_avg_hold_days,
         w.signal_validated,
         w.signal_validation_reasons,
-        w.bt_stop_method
+        w.bt_stop_method,
+        COALESCE(cl.claude_grade, cs.claude_grade) AS claude_grade,
+        COALESCE(cl.claude_score, cs.claude_score) AS claude_score,
+        COALESCE(cl.claude_action, cs.claude_action) AS claude_action,
+        COALESCE(cl.claude_analyzed_at, cs.claude_analyzed_at) AS claude_analyzed_at
       FROM stock_watchlist_results w
       LEFT JOIN stock_instruments i ON w.ticker = i.ticker
       LEFT JOIN stock_screening_metrics m ON w.ticker = m.ticker
@@ -248,6 +283,20 @@ export async function GET(request: Request) {
         ORDER BY bt.close_time DESC NULLS LAST
         LIMIT 1
       ) bt_closed ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT claude_grade, claude_score, claude_action, claude_analyzed_at
+        FROM stock_watchlist_claude_analysis
+        WHERE watchlist_name = w.watchlist_name AND ticker = w.ticker
+        ORDER BY claude_analyzed_at DESC
+        LIMIT 1
+      ) cl ON TRUE
+      LEFT JOIN LATERAL (
+        SELECT claude_grade, claude_score, claude_action, claude_analyzed_at
+        FROM stock_scanner_signals
+        WHERE ticker = w.ticker AND claude_analyzed_at IS NOT NULL
+        ORDER BY claude_analyzed_at DESC
+        LIMIT 1
+      ) cs ON TRUE
       WHERE w.watchlist_name = $1
         AND w.scan_date = COALESCE($2::date, (
           SELECT MAX(scan_date)

@@ -45,6 +45,9 @@ class WatchlistBacktestService:
     MIN_VOLUME = 1_000_000
     DEFAULT_DAYS = 90
     DEFAULT_MAX_HOLD_DAYS = 20
+    FULLSETUP_DAYS = 180
+    FULLSETUP_MIN_RS = 60     # Minimum RS percentile at crossover date
+    FULLSETUP_MIN_DAQ = 50    # Minimum DAQ score at crossover date
     SIGNAL_EMA50_SLOPE_MIN = 1.005   # EMA50 must rise ≥0.5% over 5 bars
     SIGNAL_REL_VOL_MIN = 1.25        # Crossover day volume ≥1.25x 20d average
     SIGNAL_CLOSE_ABOVE_EMA50_MIN = 1.001  # Close ≥0.1% above EMA50
@@ -117,6 +120,344 @@ class WatchlistBacktestService:
 
         logger.info("EMA50 watchlist backtest complete: %s tickers", processed)
         return processed
+
+    async def run_fullsetup_today(
+        self,
+        days: int = FULLSETUP_DAYS,
+        max_hold_days: int = DEFAULT_MAX_HOLD_DAYS,
+        min_rs: int = FULLSETUP_MIN_RS,
+        min_daq: int = FULLSETUP_MIN_DAQ,
+    ) -> int:
+        """
+        Full-setup backtest: EMA50 crossover + RS ≥ min_rs + DAQ ≥ min_daq at crossover date.
+
+        Looks back `days` days (default 180) for each active EMA50 watchlist ticker.
+        RS is pulled from stock_screening_metrics (date-keyed, daily).
+        DAQ is pulled from stock_watchlist_results (date-keyed, populated on scan days).
+        Only simulates trades where BOTH filters pass at the crossover date.
+        """
+        scan_date = await self._get_latest_scan_date()
+        if not scan_date:
+            logger.warning("No scan_date found for ema_50_crossover watchlist (fullsetup)")
+            return 0
+
+        rows = await self.db.fetch(
+            """
+            SELECT
+                id,
+                ticker,
+                scan_date,
+                crossover_date,
+                price,
+                suggested_stop_loss,
+                suggested_target_1,
+                suggested_target_2,
+                risk_reward_ratio,
+                risk_percent,
+                sector
+            FROM stock_watchlist_results
+            WHERE watchlist_name = 'ema_50_crossover'
+              AND scan_date = $1
+              AND status = 'active'
+            ORDER BY ticker
+            """,
+            scan_date
+        )
+
+        if not rows:
+            logger.info("No active ema_50_crossover rows for scan_date %s (fullsetup)", scan_date)
+            return 0
+
+        processed = 0
+        sector_accum: dict = {}  # sector -> {signals, wins, losses, pnl_sum, hold_sum}
+
+        for row in rows:
+            ticker = row['ticker']
+            price = row['price']
+            if price is None or price <= 0:
+                continue
+
+            risk_pct, tp_pct = self._derive_risk_targets(row)
+            if risk_pct <= 0 or tp_pct <= 0:
+                continue
+
+            signal_date = row.get('crossover_date') or scan_date
+            summary, validation, filtered_count = await self._backtest_fullsetup(
+                ticker=ticker,
+                end_date=scan_date,
+                days=days,
+                risk_pct=risk_pct,
+                tp_pct=tp_pct,
+                max_hold_days=max_hold_days,
+                min_rs=min_rs,
+                min_daq=min_daq,
+            )
+
+            await self._store_summary_fullsetup(
+                row_id=row['id'],
+                scan_date=scan_date,
+                days=days,
+                min_rs=min_rs,
+                min_daq=min_daq,
+                summary=summary,
+                filtered_count=filtered_count,
+            )
+
+            # Accumulate for sector stats
+            sector = row.get('sector') or 'Unknown'
+            if summary.total_signals > 0:
+                acc = sector_accum.setdefault(sector, {'signals': 0, 'wins': 0, 'losses': 0, 'pnl_sum': 0.0, 'hold_sum': 0.0})
+                acc['signals'] += summary.total_signals
+                acc['wins'] += summary.wins
+                acc['losses'] += summary.losses
+                acc['pnl_sum'] += summary.total_pnl
+                acc['hold_sum'] += (summary.avg_hold_days or 0) * summary.total_signals
+
+            processed += 1
+
+        # Store sector-wide aggregates
+        await self._store_sector_stats(sector_accum, scan_date, days, min_rs, min_daq)
+
+        logger.info("Full-setup watchlist backtest complete: %s tickers", processed)
+        return processed
+
+    async def _backtest_fullsetup(
+        self,
+        ticker: str,
+        end_date: date,
+        days: int,
+        risk_pct: float,
+        tp_pct: float,
+        max_hold_days: int,
+        min_rs: int,
+        min_daq: int,
+    ) -> tuple:
+        """Run backtest filtering crossovers by RS + DAQ quality at the crossover date."""
+        start_date = end_date - timedelta(days=days)
+        df = await self.data_provider.get_historical_data(
+            ticker=ticker,
+            start_date=start_date,
+            end_date=end_date,
+            timeframe='1d',
+            include_warmup=True
+        )
+
+        if df.empty:
+            empty = BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty.grade = self.compute_grade(empty)
+            return empty, {}, 0
+
+        df = df.copy()
+        df['timestamp'] = pd.to_datetime(df['timestamp'])
+
+        raw_signals = self._find_signals(df, start_date)
+
+        if not raw_signals:
+            empty = BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty.grade = self.compute_grade(empty)
+            return empty, {}, 0
+
+        # For each signal, check RS + DAQ quality at the crossover date
+        filtered_count = 0
+        qualified_signals = []
+        for idx in raw_signals:
+            xover_date = df.iloc[idx]['timestamp'].date()
+            rs_ok = await self._check_rs_at_date(ticker, xover_date, min_rs)
+            daq_ok = await self._check_daq_at_date(ticker, xover_date, min_daq)
+            filtered_count += 1
+            if rs_ok and daq_ok:
+                qualified_signals.append(idx)
+
+        if not qualified_signals:
+            empty = BacktestSummary(0, 0, 0, 0.0, 0.0, 0.0, None, None)
+            empty.grade = self.compute_grade(empty)
+            return empty, {}, filtered_count
+
+        wins = 0
+        losses = 0
+        total_pnl = 0.0
+        win_sum = 0.0
+        loss_sum = 0.0
+        hold_days_sum = 0
+        executed_signals = 0
+        last_exit_idx = -1
+
+        for idx in qualified_signals:
+            if idx <= last_exit_idx:
+                continue
+            result = self._simulate_trade(df, idx, risk_pct, tp_pct, max_hold_days)
+            pnl = result['pnl']
+            total_pnl += pnl
+            hold_days_sum += result['hold_days']
+            last_exit_idx = result['exit_idx']
+            executed_signals += 1
+
+            if pnl > 0:
+                wins += 1
+                win_sum += pnl
+            elif pnl < 0:
+                losses += 1
+                loss_sum += pnl
+
+        total_signals = executed_signals
+        win_rate = round((wins / total_signals) * 100, 2) if total_signals else 0.0
+        avg_pnl = round(total_pnl / total_signals, 4) if total_signals else 0.0
+        profit_factor = None
+        if loss_sum < 0:
+            profit_factor = round(win_sum / abs(loss_sum), 4) if abs(loss_sum) > 0 else None
+        avg_hold_days = round(hold_days_sum / total_signals, 2) if total_signals else None
+
+        summary = BacktestSummary(
+            total_signals=total_signals,
+            wins=wins,
+            losses=losses,
+            win_rate=win_rate,
+            avg_pnl=avg_pnl,
+            total_pnl=round(total_pnl, 4),
+            profit_factor=profit_factor,
+            avg_hold_days=avg_hold_days
+        )
+        summary.grade = self.compute_grade(summary)
+        return summary, {}, filtered_count
+
+    async def _check_rs_at_date(self, ticker: str, check_date: date, min_rs: int) -> bool:
+        """Look up RS percentile from stock_screening_metrics at or near check_date."""
+        row = await self.db.fetchrow(
+            """
+            SELECT rs_percentile
+            FROM stock_screening_metrics
+            WHERE ticker = $1
+              AND calculation_date <= $2
+            ORDER BY calculation_date DESC
+            LIMIT 1
+            """,
+            ticker, check_date
+        )
+        if not row or row['rs_percentile'] is None:
+            return True  # No data → don't penalise (benefit of the doubt)
+        return int(row['rs_percentile']) >= min_rs
+
+    async def _check_daq_at_date(self, ticker: str, check_date: date, min_daq: int) -> bool:
+        """Look up DAQ score from stock_watchlist_results at or near check_date."""
+        row = await self.db.fetchrow(
+            """
+            SELECT daq_score
+            FROM stock_watchlist_results
+            WHERE ticker = $1
+              AND watchlist_name = 'ema_50_crossover'
+              AND scan_date <= $2
+              AND daq_score IS NOT NULL
+            ORDER BY scan_date DESC
+            LIMIT 1
+            """,
+            ticker, check_date
+        )
+        if not row or row['daq_score'] is None:
+            return True  # No history → benefit of the doubt
+        return int(row['daq_score']) >= min_daq
+
+    async def _store_summary_fullsetup(
+        self,
+        row_id: int,
+        scan_date: date,
+        days: int,
+        min_rs: int,
+        min_daq: int,
+        summary: 'BacktestSummary',
+        filtered_count: int,
+    ) -> None:
+        end_date = scan_date
+        start_date = scan_date - timedelta(days=days)
+        grade = summary.grade
+
+        await self.db.execute(
+            """
+            UPDATE stock_watchlist_results
+            SET
+                bt_fullsetup_180d_signals       = $1,
+                bt_fullsetup_180d_wins          = $2,
+                bt_fullsetup_180d_losses        = $3,
+                bt_fullsetup_180d_win_rate      = $4,
+                bt_fullsetup_180d_avg_pnl       = $5,
+                bt_fullsetup_180d_total_pnl     = $6,
+                bt_fullsetup_180d_profit_factor = $7,
+                bt_fullsetup_180d_avg_hold_days = $8,
+                bt_fullsetup_180d_start_date    = $9,
+                bt_fullsetup_180d_end_date      = $10,
+                bt_fullsetup_180d_last_run      = $11,
+                bt_fullsetup_180d_score         = $12,
+                bt_fullsetup_180d_grade         = $13,
+                bt_fullsetup_180d_confidence    = $14,
+                bt_fullsetup_180d_supports_signal = $15,
+                bt_fullsetup_180d_filtered_count = $16,
+                bt_fullsetup_min_rs             = $17,
+                bt_fullsetup_min_daq            = $18
+            WHERE id = $19
+            """,
+            summary.total_signals,
+            summary.wins,
+            summary.losses,
+            summary.win_rate,
+            summary.avg_pnl,
+            summary.total_pnl,
+            summary.profit_factor,
+            summary.avg_hold_days,
+            start_date,
+            end_date,
+            datetime.utcnow(),
+            grade.score if grade else None,
+            grade.grade if grade else None,
+            grade.confidence if grade else None,
+            grade.supports_signal if grade else None,
+            filtered_count,
+            min_rs,
+            min_daq,
+            row_id
+        )
+
+    async def _store_sector_stats(
+        self,
+        sector_accum: dict,
+        stat_date: date,
+        lookback_days: int,
+        min_rs: int,
+        min_daq: int,
+    ) -> None:
+        """Upsert sector-wide backtest aggregates."""
+        for sector, acc in sector_accum.items():
+            total_signals = acc['signals']
+            if total_signals == 0:
+                continue
+            wins = acc['wins']
+            losses = acc['losses']
+            win_rate = round((wins / total_signals) * 100, 2)
+            avg_pnl = round(acc['pnl_sum'] / total_signals, 4)
+            avg_hold = round(acc['hold_sum'] / total_signals, 2)
+            win_pnl = acc['pnl_sum'] if wins else 0.0
+            loss_pnl = abs(acc['pnl_sum'] - win_pnl) if losses else 0.0
+            profit_factor = round(win_pnl / loss_pnl, 4) if loss_pnl > 0 else None
+
+            await self.db.execute(
+                """
+                INSERT INTO stock_backtest_sector_stats
+                    (sector, watchlist_name, stat_date, lookback_days, min_rs, min_daq,
+                     total_signals, total_wins, total_losses,
+                     win_rate, avg_pnl, profit_factor, avg_hold_days)
+                VALUES ($1, 'ema_50_crossover', $2, $3, $4, $5,
+                        $6, $7, $8, $9, $10, $11, $12)
+                ON CONFLICT (sector, watchlist_name, stat_date, lookback_days, min_rs, min_daq)
+                DO UPDATE SET
+                    total_signals = EXCLUDED.total_signals,
+                    total_wins    = EXCLUDED.total_wins,
+                    total_losses  = EXCLUDED.total_losses,
+                    win_rate      = EXCLUDED.win_rate,
+                    avg_pnl       = EXCLUDED.avg_pnl,
+                    profit_factor = EXCLUDED.profit_factor,
+                    avg_hold_days = EXCLUDED.avg_hold_days
+                """,
+                sector, stat_date, lookback_days, min_rs, min_daq,
+                total_signals, wins, losses, win_rate, avg_pnl, profit_factor, avg_hold
+            )
 
     @staticmethod
     def compute_grade(summary: 'BacktestSummary') -> BacktestGrade:

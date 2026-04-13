@@ -1696,6 +1696,7 @@ async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[i
         elif task == "watchlist_backtest":
             if scheduler.watchlist_backtest_service:
                 await scheduler.watchlist_backtest_service.run_ema50_today(days=90)
+                await scheduler.watchlist_backtest_service.run_fullsetup_today(days=180)
             else:
                 print("Watchlist Backtest Service not available")
         else:
@@ -1786,7 +1787,7 @@ def main():
         print("  watchlist        - Build watchlist only")
         print("  brokersync       - Sync broker trades to database")
         print("  techwldaq        - Run DAQ analysis for technical watchlists")
-        print("  watchlist_backtest - Backtest EMA50 crossover watchlist (90d)")
+        print("  watchlist_backtest - Backtest EMA50 crossover watchlist (90d legacy + 180d full-setup with RS+DAQ filters)")
 
 
 if __name__ == '__main__':

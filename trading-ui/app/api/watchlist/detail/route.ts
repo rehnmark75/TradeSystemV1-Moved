@@ -160,7 +160,7 @@ export async function GET(request: Request) {
           LIMIT 1
         ) ar ON TRUE
         LEFT JOIN LATERAL (
-          SELECT id as signal_id
+          SELECT id as signal_id, scanner_name as latest_scanner_name, signal_timestamp as latest_scanner_timestamp
           FROM stock_scanner_signals
           WHERE ticker = w.ticker
           ORDER BY signal_timestamp DESC
@@ -348,7 +348,7 @@ export async function GET(request: Request) {
         LIMIT 1
       ) ar ON TRUE
       LEFT JOIN LATERAL (
-        SELECT id as signal_id
+        SELECT id as signal_id, scanner_name as latest_scanner_name, signal_timestamp as latest_scanner_timestamp
         FROM stock_scanner_signals
         WHERE ticker = w.ticker
         ORDER BY signal_timestamp DESC
