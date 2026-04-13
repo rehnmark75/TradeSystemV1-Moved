@@ -7,15 +7,31 @@ export async function GET(req: Request) {
   const { searchParams } = new URL(req.url);
   const epic = searchParams.get("epic");
   const timeframe = parseInt(searchParams.get("timeframe") ?? "5", 10);
-  const limit = parseInt(searchParams.get("limit") ?? "1000", 10);
+  const limit = parseInt(searchParams.get("limit") ?? "5000", 10);
+  const from = searchParams.get("from");
+  const to = searchParams.get("to");
 
   if (!epic) {
     return NextResponse.json({ error: "epic is required" }, { status: 400 });
   }
 
   try {
+    const params: (string | number)[] = [epic, timeframe];
+    let dateFilter = "";
+
+    if (from) {
+      params.push(from);
+      dateFilter += ` AND start_time >= $${params.length}`;
+    }
+    if (to) {
+      params.push(to);
+      dateFilter += ` AND start_time <= $${params.length}`;
+    }
+
     // Synthesize candles from 1m base data (live streaming table)
-    // timeframe=5 → group 1m candles into 5m buckets, etc.
+    params.push(limit);
+    const limitClause = `LIMIT $${params.length}`;
+
     const result = await forexPool.query(
       `
       SELECT
@@ -27,11 +43,12 @@ export async function GET(req: Request) {
         (array_agg(close ORDER BY start_time DESC))[1] AS close
       FROM ig_candles
       WHERE epic = $1 AND timeframe = 1
+        ${dateFilter}
       GROUP BY bucket
       ORDER BY bucket DESC
-      LIMIT $3
+      ${limitClause}
       `,
-      [epic, timeframe, limit]
+      params
     );
 
     const candles = result.rows.reverse().map((r) => ({

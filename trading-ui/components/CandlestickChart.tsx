@@ -93,10 +93,12 @@ export default function CandlestickChart() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [tradeCount, setTradeCount] = useState(0);
+  const [dateFrom, setDateFrom] = useState<string>("");
+  const [dateTo, setDateTo] = useState<string>("");
 
   // Fetch enabled epics when configSet changes
   useEffect(() => {
-    fetch(`/api/chart/epics?config_set=${configSet}`)
+    fetch(`/trading/api/chart/epics?config_set=${configSet}`)
       .then((r) => r.json())
       .then((d) => {
         const list: string[] = d.epics ?? [];
@@ -170,16 +172,22 @@ export default function CandlestickChart() {
     };
   }, []);
 
-  // Load candles + trades whenever epic or timeframe changes
+  // Load candles + trades whenever epic, timeframe, or date range changes
   const loadData = useCallback(async () => {
     if (!selectedEpic || !seriesRef.current) return;
     setLoading(true);
     setError(null);
 
     try {
-      const candleRes = await fetch(
-        `/api/chart/candles?epic=${encodeURIComponent(selectedEpic)}&timeframe=${timeframe}&limit=1000`
-      );
+      const params = new URLSearchParams({
+        epic: selectedEpic,
+        timeframe: timeframe,
+      });
+      if (dateFrom) params.set("from", new Date(dateFrom).toISOString());
+      if (dateTo) params.set("to", new Date(dateTo + "T23:59:59").toISOString());
+      if (!dateFrom && !dateTo) params.set("limit", "1000");
+
+      const candleRes = await fetch(`/trading/api/chart/candles?${params}`);
       if (!candleRes.ok) throw new Error("Candles fetch failed");
       const candleData: RawCandle[] = await candleRes.json();
 
@@ -224,7 +232,7 @@ export default function CandlestickChart() {
         "";
 
       const tradeRes = await fetch(
-        `/api/chart/trades?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}`
+        `/trading/api/chart/trades?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}`
       );
       if (tradeRes.ok) {
         const tradeData = await tradeRes.json();
@@ -237,7 +245,7 @@ export default function CandlestickChart() {
     } finally {
       setLoading(false);
     }
-  }, [selectedEpic, timeframe]);
+  }, [selectedEpic, timeframe, dateFrom, dateTo]);
 
   useEffect(() => {
     const timer = setTimeout(() => loadData(), 50);
@@ -320,6 +328,56 @@ export default function CandlestickChart() {
               {tf}m
             </button>
           ))}
+        </div>
+
+        {/* Date range */}
+        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+          <input
+            type="date"
+            value={dateFrom}
+            onChange={(e) => setDateFrom(e.target.value)}
+            style={{
+              background: "#1e293b",
+              color: "#f1f5f9",
+              border: "1px solid #334155",
+              borderRadius: "4px",
+              padding: "4px 6px",
+              fontSize: "12px",
+              colorScheme: "dark",
+            }}
+          />
+          <span style={{ color: "#475569", fontSize: "12px" }}>—</span>
+          <input
+            type="date"
+            value={dateTo}
+            onChange={(e) => setDateTo(e.target.value)}
+            style={{
+              background: "#1e293b",
+              color: "#f1f5f9",
+              border: "1px solid #334155",
+              borderRadius: "4px",
+              padding: "4px 6px",
+              fontSize: "12px",
+              colorScheme: "dark",
+            }}
+          />
+          {(dateFrom || dateTo) && (
+            <button
+              onClick={() => { setDateFrom(""); setDateTo(""); }}
+              style={{
+                padding: "3px 7px",
+                borderRadius: "4px",
+                border: "1px solid #334155",
+                background: "transparent",
+                color: "#64748b",
+                cursor: "pointer",
+                fontSize: "11px",
+              }}
+              title="Clear date range"
+            >
+              ✕
+            </button>
+          )}
         </div>
 
         {/* Refresh */}
