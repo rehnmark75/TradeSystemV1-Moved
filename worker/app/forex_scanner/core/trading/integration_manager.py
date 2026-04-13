@@ -41,6 +41,14 @@ except ImportError:
         def is_market_hours():
             return True
 
+# SMC config for enabled-pair and monitor-only checks (optional — fail-safe if unavailable)
+_get_smc_config = None
+try:
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config as _get_smc_config  # type: ignore[assignment]
+    _SMC_CONFIG_AVAILABLE = True
+except ImportError:
+    _SMC_CONFIG_AVAILABLE = False
+
 
 class IntegrationManager:
     """
@@ -349,25 +357,58 @@ class IntegrationManager:
         if not is_market_hours():
             self.logger.info("🚫 Market closed - skipping Claude analysis to save API costs")
             return signals
-        
+
+        # Guard: Skip Claude for disabled pairs and monitor-only pairs (saves API cost)
+        enabled_signals = []
+        skipped_signals = []
+        if _SMC_CONFIG_AVAILABLE:
+            try:
+                smc_cfg = _get_smc_config()
+                for sig in signals:
+                    epic = sig.get('epic', '')
+                    skip_reason = None
+                    if epic and not smc_cfg.is_pair_enabled(epic):
+                        skip_reason = 'pair_not_enabled'
+                    elif epic:
+                        pair_overrides = smc_cfg._pair_overrides.get(epic, {})
+                        if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
+                            skip_reason = 'monitor_only'
+                    if skip_reason:
+                        skipped_sig = sig.copy()
+                        skipped_sig.update({'claude_analyzed': False, 'claude_skip_reason': skip_reason})
+                        skipped_signals.append(skipped_sig)
+                    else:
+                        enabled_signals.append(sig)
+                if skipped_signals:
+                    skipped_epics = [s.get('epic', '?') for s in skipped_signals]
+                    self.logger.info(f"⏭️ Skipping Claude for {len(skipped_signals)} signal(s) "
+                                     f"(disabled/monitor-only): {skipped_epics}")
+                if not enabled_signals:
+                    return skipped_signals
+            except Exception as e:
+                self.logger.warning(f"⚠️ Could not check enabled/monitor-only status: {e} — sending all signals to Claude")
+                enabled_signals = signals
+        else:
+            enabled_signals = signals
+
         analyzed_signals = []
         successful_analyses = 0
-        
-        self.logger.info(f"🤖 Starting enhanced Claude analysis of {len(signals)} signals...")
+
+        self.logger.info(f"🤖 Starting enhanced Claude analysis of {len(enabled_signals)} signals...")
         self.logger.info(f"   Analysis level: {self.claude_analysis_level}")
         self.logger.info(f"   Advanced prompts: {self.use_advanced_prompts}")
-        
+
         # ENHANCED: Try batch analysis if available
-        if hasattr(self.claude_analyzer, 'batch_analyze_signals_minimal') and len(signals) > 1:
-            return self._analyze_signals_batch(signals)
+        if hasattr(self.claude_analyzer, 'batch_analyze_signals_minimal') and len(enabled_signals) > 1:
+            return self._analyze_signals_batch(enabled_signals) + skipped_signals
         
         # Single signal analysis
-        for i, signal in enumerate(signals, 1):
+        for i, signal in enumerate(enabled_signals, 1):
             epic = signal.get('epic', 'Unknown')
             signal_type = signal.get('signal_type', 'Unknown')
-            
+
             try:
-                self.logger.debug(f"📊 Analyzing signal {i}/{len(signals)}: {epic} {signal_type}")
+                self.logger.debug(f"📊 Analyzing signal {i}/{len(enabled_signals)}: {epic} {signal_type}")
                 
                 # ENHANCED: Use advanced analysis method
                 analysis = self._perform_enhanced_claude_analysis(signal)
@@ -438,9 +479,9 @@ class IntegrationManager:
         # Update status
         self.integration_status['claude']['last_analysis'] = datetime.now()
         
-        self.logger.info(f"🤖 Enhanced Claude analysis complete: {successful_analyses}/{len(signals)} successful")
-        
-        return analyzed_signals
+        self.logger.info(f"🤖 Enhanced Claude analysis complete: {successful_analyses}/{len(enabled_signals)} successful")
+
+        return analyzed_signals + skipped_signals
     
     def _analyze_signals_batch(self, signals: List[Dict]) -> List[Dict]:
         """
