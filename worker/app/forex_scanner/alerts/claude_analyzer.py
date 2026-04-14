@@ -421,7 +421,7 @@ class ClaudeAnalyzer:
 
             # Fetch candles if not provided and data_fetcher is available
             if candles is None and self.data_fetcher:
-                candles = self._fetch_candles_for_chart(epic)
+                candles = self._fetch_candles_for_chart(epic, signal=signal)
 
             # Generate chart if possible
             chart_base64 = None
@@ -566,17 +566,23 @@ class ClaudeAnalyzer:
 
         return False
 
-    def _fetch_candles_for_chart(self, epic: str) -> Optional[Dict[str, pd.DataFrame]]:
+    def _fetch_candles_for_chart(self, epic: str, signal: Dict = None) -> Optional[Dict[str, pd.DataFrame]]:
         """
         Fetch candle data for chart generation.
 
-        Fetches multi-timeframe data: 4H, 15m, and 5m for comprehensive chart.
+        For swing signals: fetches 4H (macro) + 15m (trigger) + 5m (entry).
+        For scalp signals: fetches 4H (macro context) + strategy HTF (1h/15m) +
+            scalp trigger (5m) + scalp entry (1m).
+
+        Strategy timeframes are read directly from signal['strategy_indicators']
+        so we avoid a redundant DB round-trip.
 
         Args:
             epic: Currency pair epic code
+            signal: Signal dictionary — used to detect scalp mode and actual timeframes
 
         Returns:
-            Dict of DataFrames {'4h': df_4h, '15m': df_15m, '5m': df_5m} or None
+            Dict of DataFrames keyed by timeframe string, or None
         """
         if not self.data_fetcher:
             self.logger.warning("No data_fetcher available for candle retrieval")
@@ -586,9 +592,35 @@ class ClaudeAnalyzer:
             # Extract pair name from epic
             pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
 
+            # Determine actual timeframes from signal strategy_indicators.
+            # When scalp_mode_enabled the strategy sets htf_timeframe → scalp_htf_timeframe
+            # (e.g. '1h' or '15m') and entry_timeframe → '1m'.
+            strategy_htf = '4h'   # swing default
+            strategy_trigger = '15m'
+            strategy_entry = '5m'
+            is_scalp = False
+
+            if signal:
+                si = signal.get('strategy_indicators', {})
+                strategy_htf = si.get('tier1_ema', {}).get('timeframe', '4h') or '4h'
+                strategy_trigger = si.get('tier2_swing', {}).get('timeframe', '15m') or '15m'
+                strategy_entry = si.get('tier3_entry', {}).get('timeframe', '5m') or '5m'
+                # Scalp mode: HTF is faster than 4h and entry is 1m
+                is_scalp = strategy_htf != '4h' and strategy_entry == '1m'
+
+            if is_scalp:
+                self.logger.info(
+                    f"📊 [SCALP] Chart timeframes: 4h(macro)+{strategy_htf}(htf)"
+                    f"+{strategy_trigger}(trigger)+{strategy_entry}(entry)"
+                )
+            else:
+                self.logger.debug(
+                    f"📊 [SWING] Chart timeframes: 4h+{strategy_trigger}+{strategy_entry}"
+                )
+
             candles = {}
 
-            # Fetch 4H data (for higher timeframe context)
+            # ── 4H: always fetched as macro trend context ────────────────────
             try:
                 df_4h = self.data_fetcher.get_enhanced_data(
                     epic=epic,
@@ -602,33 +634,78 @@ class ClaudeAnalyzer:
             except Exception as e:
                 self.logger.debug(f"Could not fetch 4H data: {e}")
 
-            # Fetch 15m data (main analysis timeframe)
-            try:
-                df_15m = self.data_fetcher.get_enhanced_data(
-                    epic=epic,
-                    pair=pair,
-                    timeframe='15m',
-                    lookback_hours=100  # ~400 bars
-                )
-                if df_15m is not None and len(df_15m) >= 50:
-                    candles['15m'] = df_15m
-                    self.logger.debug(f"📊 Fetched 15m data: {len(df_15m)} bars")
-            except Exception as e:
-                self.logger.debug(f"Could not fetch 15m data: {e}")
+            if is_scalp:
+                # ── Strategy HTF (1h or 15m per-pair override) ───────────────
+                htf_lookback = 120 if strategy_htf == '1h' else 50
+                try:
+                    df_htf = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=pair,
+                        timeframe=strategy_htf,
+                        lookback_hours=htf_lookback
+                    )
+                    if df_htf is not None and len(df_htf) >= 20:
+                        candles[strategy_htf] = df_htf
+                        self.logger.debug(f"📊 Fetched {strategy_htf} HTF data: {len(df_htf)} bars")
+                except Exception as e:
+                    self.logger.debug(f"Could not fetch {strategy_htf} HTF data: {e}")
 
-            # Fetch 5m data (entry timeframe)
-            try:
-                df_5m = self.data_fetcher.get_enhanced_data(
-                    epic=epic,
-                    pair=pair,
-                    timeframe='5m',
-                    lookback_hours=24  # ~288 bars
-                )
-                if df_5m is not None and len(df_5m) >= 50:
-                    candles['5m'] = df_5m
-                    self.logger.debug(f"📊 Fetched 5m data: {len(df_5m)} bars")
-            except Exception as e:
-                self.logger.debug(f"Could not fetch 5m data: {e}")
+                # ── Scalp trigger (5m) ────────────────────────────────────────
+                try:
+                    df_trigger = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=pair,
+                        timeframe=strategy_trigger,
+                        lookback_hours=24  # ~288 bars
+                    )
+                    if df_trigger is not None and len(df_trigger) >= 50:
+                        candles[strategy_trigger] = df_trigger
+                        self.logger.debug(f"📊 Fetched {strategy_trigger} trigger data: {len(df_trigger)} bars")
+                except Exception as e:
+                    self.logger.debug(f"Could not fetch {strategy_trigger} trigger data: {e}")
+
+                # ── Scalp entry (1m) ──────────────────────────────────────────
+                try:
+                    df_entry = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=pair,
+                        timeframe=strategy_entry,
+                        lookback_hours=2  # ~120 bars of 1m
+                    )
+                    if df_entry is not None and len(df_entry) >= 30:
+                        candles[strategy_entry] = df_entry
+                        self.logger.debug(f"📊 Fetched {strategy_entry} entry data: {len(df_entry)} bars")
+                except Exception as e:
+                    self.logger.debug(f"Could not fetch {strategy_entry} entry data: {e}")
+
+            else:
+                # ── Swing: 15m (primary analysis) ────────────────────────────
+                try:
+                    df_15m = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=pair,
+                        timeframe=strategy_trigger,
+                        lookback_hours=100  # ~400 bars
+                    )
+                    if df_15m is not None and len(df_15m) >= 50:
+                        candles[strategy_trigger] = df_15m
+                        self.logger.debug(f"📊 Fetched {strategy_trigger} data: {len(df_15m)} bars")
+                except Exception as e:
+                    self.logger.debug(f"Could not fetch {strategy_trigger} data: {e}")
+
+                # ── Swing: 5m (entry timeframe) ───────────────────────────────
+                try:
+                    df_5m = self.data_fetcher.get_enhanced_data(
+                        epic=epic,
+                        pair=pair,
+                        timeframe=strategy_entry,
+                        lookback_hours=24  # ~288 bars
+                    )
+                    if df_5m is not None and len(df_5m) >= 50:
+                        candles[strategy_entry] = df_5m
+                        self.logger.debug(f"📊 Fetched {strategy_entry} data: {len(df_5m)} bars")
+                except Exception as e:
+                    self.logger.debug(f"Could not fetch {strategy_entry} data: {e}")
 
             if not candles:
                 self.logger.warning(f"No candle data could be fetched for {epic}")
