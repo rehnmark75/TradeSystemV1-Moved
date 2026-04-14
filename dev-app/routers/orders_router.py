@@ -331,6 +331,7 @@ async def ig_place_order(
 ):
     # BUGFIX: Initialize result variable at the beginning to prevent UnboundLocalError
     result = None
+    trading_environment = os.getenv("TRADING_ENVIRONMENT", TRADING_ENVIRONMENT)
     
     epic = body.epic.strip().upper()
     direction = body.direction.strip().upper()
@@ -459,7 +460,7 @@ async def ig_place_order(
                 from services.models import AlertHistory
                 spread_rejection = AlertHistory(
                     alert_timestamp=datetime.utcnow(),
-                    environment=TRADING_ENVIRONMENT,
+                    environment=trading_environment,
                     epic=symbol,
                     pair=epic,
                     signal_type=direction,
@@ -747,7 +748,7 @@ async def ig_place_order(
                         # Troubleshooting data for IG rejections
                         min_stop_distance_points=min_distance,
                         trigger_distance=trigger_distance_value,
-                        environment=TRADING_ENVIRONMENT,
+                        environment=trading_environment,
                     )
 
                     db.add(trade_log)
@@ -1053,7 +1054,7 @@ async def ig_place_order(
                 # VSL fields deprecated (system disabled)
                 virtual_sl_pips=None,
                 virtual_sl_price=None,
-                environment=TRADING_ENVIRONMENT,
+                environment=trading_environment,
             )
 
             db.add(trade_log)
@@ -1083,9 +1084,14 @@ async def ig_place_order(
                 
         except SQLAlchemyError as e:
             db.rollback()
-            logger.error(f"❌ DB write failed: {str(e)}")
-            # Don't fail the whole request for DB issues
-            
+            logger.error(f"❌ DB write failed after broker confirmation: {str(e)}")
+            logger.error("   Broker order is already open; returning success to avoid duplicate retry.")
+        except Exception as e:
+            db.rollback()
+            logger.error(f"❌ Post-confirmation persistence failed: {str(e)}")
+            logger.error("   Broker order is already open; returning success to avoid duplicate retry.")
+            logger.error(f"❌ Persistence traceback: {traceback.format_exc()}")
+
         finally:
             db.close()
 
@@ -1097,7 +1103,8 @@ async def ig_place_order(
             "entry_price": entry_price,
             "stop_price": actual_stop_price,
             "limit_price": actual_limit_price,
-            "alert_id": alert_id
+            "alert_id": alert_id,
+            "environment": trading_environment,
         }
         
     except HTTPException:
