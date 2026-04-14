@@ -129,6 +129,7 @@ export async function PUT(
         FROM smc_simple_pair_overrides
         WHERE config_id = $1 AND epic = $2
         LIMIT 1
+        FOR UPDATE
       `,
       [configId, params.epic]
     );
@@ -189,12 +190,11 @@ export async function PUT(
     values.push(updated_by);
     values.push(change_reason);
     values.push(current.id);
-    values.push(updated_at);
 
     const updateQuery = `
       UPDATE smc_simple_pair_overrides
       SET ${updateFields.join(", ")}
-      WHERE id = $${keys.length + 3} AND updated_at = $${keys.length + 4}
+      WHERE id = $${keys.length + 3}
       RETURNING *
     `;
 

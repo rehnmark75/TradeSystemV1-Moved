@@ -128,6 +128,7 @@ export default function UnifiedStrategySettings() {
   const [showSnapshotPanel, setShowSnapshotPanel] = useState(false);
   const [changeReason, setChangeReason] = useState("");
   const [pairSaveLoading, setPairSaveLoading] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Refs for section scrolling
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -393,47 +394,61 @@ export default function UnifiedStrategySettings() {
   };
 
   // Save handlers
-  const handleSave = () => setShowSaveModal(true);
+  const handleSave = () => {
+    setSaveError(null);
+    setShowSaveModal(true);
+  };
 
   const handleConfirmSave = async (reason: string) => {
+    setSaveError(null);
+
     if (mode === "global") {
-      await saveChanges({ updatedBy: "admin", changeReason: reason });
-    } else {
-      if (!selectedEpic) return;
-      const columnSet = new Set(overrideColumns.filter((k) => k !== "parameter_overrides"));
-      const nextParamOverrides = { ...baseParamOverrides };
-      const updates: Record<string, unknown> = {};
-      let paramChanged = false;
-
-      dirtyKeys.forEach((key) => {
-        const hasDraft = hasKey(draftOverrides, key);
-        const nextValue = hasDraft ? draftOverrides[key] : null;
-        if (columnSet.has(key)) {
-          updates[key] = nextValue;
-        } else {
-          if (hasDraft) nextParamOverrides[key] = nextValue;
-          else delete nextParamOverrides[key];
-          paramChanged = true;
-        }
-      });
-      if (paramChanged) updates.parameter_overrides = nextParamOverrides;
-
-      setPairSaveLoading(true);
-      try {
-        const activePairOverride = overrides.find((o) => o.epic === selectedEpic);
-        if (activePairOverride && effective?.override?.updated_at) {
-          await saveOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason, updatedAt: String(effective.override.updated_at) });
-        } else {
-          await createOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason });
-        }
-        await reloadOverrides();
-        const refreshed = await fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)).then((r) => r.json());
-        setEffective(refreshed);
-      } finally {
-        setPairSaveLoading(false);
+      const result = await saveChanges({ updatedBy: "admin", changeReason: reason });
+      if (!result.success) {
+        setSaveError("Failed to save global settings. Check the latest error on the page and try again.");
+        return;
       }
+      setShowSaveModal(false);
+      return;
     }
-    setShowSaveModal(false);
+
+    if (!selectedEpic) return;
+    const columnSet = new Set(overrideColumns.filter((k) => k !== "parameter_overrides"));
+    const nextParamOverrides = { ...baseParamOverrides };
+    const updates: Record<string, unknown> = {};
+    let paramChanged = false;
+
+    dirtyKeys.forEach((key) => {
+      const hasDraft = hasKey(draftOverrides, key);
+      const nextValue = hasDraft ? draftOverrides[key] : null;
+      if (columnSet.has(key)) {
+        updates[key] = nextValue;
+      } else {
+        if (hasDraft) nextParamOverrides[key] = nextValue;
+        else delete nextParamOverrides[key];
+        paramChanged = true;
+      }
+    });
+    if (paramChanged) updates.parameter_overrides = nextParamOverrides;
+
+    setPairSaveLoading(true);
+    try {
+      const activePairOverride = overrides.find((o) => o.epic === selectedEpic);
+      if (activePairOverride && effective?.override?.updated_at) {
+        await saveOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason, updatedAt: String(effective.override.updated_at) });
+      } else {
+        await createOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason });
+      }
+      await reloadOverrides();
+      const refreshed = await fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)).then((r) => r.json());
+      setEffective(refreshed);
+      setShowSaveModal(false);
+    } catch (error) {
+      setSaveError(error instanceof Error ? error.message : "Failed to save pair override.");
+      return;
+    } finally {
+      setPairSaveLoading(false);
+    }
   };
 
   const handleDiscard = () => {
@@ -630,7 +645,13 @@ export default function UnifiedStrategySettings() {
           changes={mode === "global" ? (changes as Record<string, unknown>) : Object.fromEntries([...dirtyKeys].map((k) => [k, draftOverrides[k]]))}
           originalValues={originalValues as Record<string, unknown>}
           onConfirm={handleConfirmSave}
-          onCancel={() => setShowSaveModal(false)}
+          onCancel={() => {
+            if (pairSaveLoading) return;
+            setSaveError(null);
+            setShowSaveModal(false);
+          }}
+          saving={pairSaveLoading}
+          error={saveError}
         />
       ) : null}
 

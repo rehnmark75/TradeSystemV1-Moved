@@ -6,8 +6,10 @@ import { getParamRiskLevel } from "../../lib/settings/riskClassification";
 interface SaveModalProps {
   changes: Record<string, unknown>;
   originalValues: Record<string, unknown>;
-  onConfirm: (changeReason: string) => void;
+  onConfirm: (changeReason: string) => Promise<void> | void;
   onCancel: () => void;
+  saving?: boolean;
+  error?: string | null;
 }
 
 function formatVal(value: unknown): string {
@@ -26,6 +28,8 @@ export default function SaveModal({
   originalValues,
   onConfirm,
   onCancel,
+  saving = false,
+  error = null,
 }: SaveModalProps) {
   const [reason, setReason] = useState("");
 
@@ -38,9 +42,9 @@ export default function SaveModal({
   );
   const hasCritical = criticalFields.length > 0;
 
-  const handleConfirm = () => {
-    if (!reason.trim()) return;
-    onConfirm(reason.trim());
+  const handleConfirm = async () => {
+    if (!reason.trim() || saving) return;
+    await onConfirm(reason.trim());
   };
 
   return (
@@ -61,6 +65,12 @@ export default function SaveModal({
         ) : highFields.length > 0 ? (
           <div className="save-modal-alert save-modal-alert--warn">
             {highFields.length} high-impact parameter{highFields.length > 1 ? "s" : ""} modified.
+          </div>
+        ) : null}
+
+        {error ? (
+          <div className="save-modal-alert save-modal-alert--critical">
+            {error}
           </div>
         ) : null}
 
@@ -104,11 +114,11 @@ export default function SaveModal({
           </button>
           <button
             type="button"
-            className={`btn-primary ${!reason.trim() ? "disabled" : hasCritical ? "danger" : ""}`}
+            className={`btn-primary ${!reason.trim() || saving ? "disabled" : hasCritical ? "danger" : ""}`}
             onClick={handleConfirm}
-            disabled={!reason.trim()}
+            disabled={!reason.trim() || saving}
           >
-            {hasCritical ? "⚠ Confirm & Save" : "Save changes"}
+            {saving ? "Saving..." : hasCritical ? "⚠ Confirm & Save" : "Save changes"}
           </button>
         </div>
       </div>

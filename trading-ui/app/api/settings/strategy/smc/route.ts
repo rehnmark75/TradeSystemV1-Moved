@@ -26,6 +26,21 @@ async function loadActiveSmcConfig(configSet: string, client?: any) {
   return result.rows[0] ?? null;
 }
 
+async function loadActiveSmcConfigForUpdate(configSet: string, client: any) {
+  const result = await client.query(
+    `
+      SELECT *
+      FROM smc_simple_global_config
+      WHERE is_active = TRUE AND config_set = $1
+      ORDER BY updated_at DESC
+      LIMIT 1
+      FOR UPDATE
+    `,
+    [configSet]
+  );
+  return result.rows[0] ?? null;
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -98,7 +113,7 @@ export async function PATCH(request: Request) {
   try {
     await client.query("BEGIN");
 
-    const current = await loadActiveSmcConfig(configSet, client);
+    const current = await loadActiveSmcConfigForUpdate(configSet, client);
     if (!current) {
       await client.query("ROLLBACK");
       return NextResponse.json(
@@ -136,12 +151,11 @@ export async function PATCH(request: Request) {
     values.push(change_reason);
 
     values.push(current.id);
-    values.push(updated_at);
 
     const updateQuery = `
       UPDATE smc_simple_global_config
       SET ${updateFields.join(", ")}
-      WHERE id = $${keys.length + 3} AND updated_at = $${keys.length + 4}
+      WHERE id = $${keys.length + 3}
     `;
 
     const updateResult = await client.query(updateQuery, values);
