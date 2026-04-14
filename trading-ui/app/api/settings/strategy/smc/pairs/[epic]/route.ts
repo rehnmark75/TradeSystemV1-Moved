@@ -218,6 +218,31 @@ export async function PUT(
       previousValues[key] = current[key];
     });
 
+    if (Object.prototype.hasOwnProperty.call(updates, "is_enabled")) {
+      const nextEnabled = Boolean(updates.is_enabled);
+      if (nextEnabled) {
+        await client.query(
+          `
+            UPDATE smc_simple_global_config
+            SET enabled_pairs = (
+              SELECT ARRAY(SELECT DISTINCT unnest(COALESCE(enabled_pairs, ARRAY[]::text[]) || ARRAY[$2]::text[]))
+            )
+            WHERE id = $1 AND NOT ($2 = ANY(COALESCE(enabled_pairs, ARRAY[]::text[])))
+          `,
+          [configId, params.epic]
+        );
+      } else {
+        await client.query(
+          `
+            UPDATE smc_simple_global_config
+            SET enabled_pairs = array_remove(COALESCE(enabled_pairs, ARRAY[]::text[]), $2)
+            WHERE id = $1
+          `,
+          [configId, params.epic]
+        );
+      }
+    }
+
     await client.query(
       `
         INSERT INTO smc_simple_config_audit
@@ -297,6 +322,15 @@ export async function DELETE(
         WHERE id = $1
       `,
       [current.id]
+    );
+
+    await client.query(
+      `
+        UPDATE smc_simple_global_config
+        SET enabled_pairs = array_remove(COALESCE(enabled_pairs, ARRAY[]::text[]), $2)
+        WHERE id = $1
+      `,
+      [configId, params.epic]
     );
 
     await client.query(
