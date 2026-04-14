@@ -457,7 +457,6 @@ async def ig_place_order(
             # Log rejection to alert_history database
             try:
                 from services.models import AlertHistory
-                from config import TRADING_ENVIRONMENT
                 spread_rejection = AlertHistory(
                     alert_timestamp=datetime.utcnow(),
                     environment=TRADING_ENVIRONMENT,
