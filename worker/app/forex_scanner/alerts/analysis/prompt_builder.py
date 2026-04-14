@@ -636,11 +636,17 @@ REASON: Analysis error - neutral assessment"""
             ema_distance = tier1_ema.get('distance_pips', signal.get('ema_distance_pips', 0))
             ema_direction = tier1_ema.get('direction', direction)
 
+            # Actual strategy timeframes (populated by smc_simple_strategy._configure_scalp_mode
+            # when scalp_mode_enabled=True; fall back to swing defaults otherwise)
+            strategy_htf = tier1_ema.get('timeframe', '4h') or '4h'
+            is_scalp_mode = strategy_htf != '4h'
+
             # Tier 2 - Swing Break data
             tier2_swing = strategy_indicators.get('tier2_swing', {})
             swing_level = tier2_swing.get('swing_level', signal.get('swing_level', 0))
             body_close_confirmed = tier2_swing.get('body_close_confirmed', True)
             volume_confirmed = tier2_swing.get('volume_confirmed', signal.get('volume_confirmed', False))
+            strategy_trigger = tier2_swing.get('timeframe', '15m') or '15m'
             # Raw volume ratio (break candle volume / 20-bar SMA). "volume_confirmed" is a spike
             # flag (ratio > 1.3x by default), not a "volume exists" flag — show the raw value
             # so Claude can tell "no spike but normal volume" apart from "genuinely quiet candle".
@@ -659,6 +665,7 @@ REASON: Analysis error - neutral assessment"""
 
             # Tier 3 - Entry data
             tier3_entry = strategy_indicators.get('tier3_entry', {})
+            strategy_entry = tier3_entry.get('timeframe', '5m') or '5m'
             entry_type = tier3_entry.get('entry_type', signal.get('entry_type', 'PULLBACK'))
             pullback_depth = tier3_entry.get('pullback_depth', signal.get('pullback_depth', 0))
             fib_zone = tier3_entry.get('fib_zone', 'Unknown')
@@ -757,38 +764,41 @@ This is a MOMENTUM continuation trade (price beyond swing break).
 - Look for: Clean breakout, no immediate reversal signs, volume confirmation
 """
 
-                chart_instruction = f"""
-## CHART ANALYSIS (CRITICAL - EXAMINE CAREFULLY)
-
-The attached chart shows multi-timeframe forex analysis with the following elements:
-
-**Timeframes Displayed:**
+                # Build dynamic chart description based on actual strategy timeframes.
+                # Scalp signals have an extra HTF layer (1h/15m) between the 4H macro
+                # and the trigger/entry, so the chart and checklist must reflect that.
+                if is_scalp_mode:
+                    htf_upper = strategy_htf.upper()
+                    trigger_upper = strategy_trigger.upper()
+                    entry_upper = strategy_entry.upper()
+                    tf_display_section = f"""**Timeframes Displayed (Scalp Mode):**
+- 4H timeframe: Macro trend context — 50 EMA bias (purple line)
+- {htf_upper} timeframe: Strategy HTF bias — EMA used for trade direction decisions
+- {trigger_upper} timeframe: PRIMARY ANALYSIS — swing break, EMAs 9/21, S/R levels, entry/SL/TP
+- {entry_upper} timeframe: Entry precision — entry zone, Fibonacci levels, entry type annotation"""
+                    primary_markers_label = f"{trigger_upper} chart (PRIMARY)"
+                    entry_markers_label = f"{entry_upper} chart"
+                    checklist_items = f"""1. ✓ **4H MACRO STRUCTURE (HIGHEST PRIORITY):** Look at 4H candles — HH/HL (bullish) or LH/LL (bearish)? A BUY in a 4H downtrend or SELL in a 4H uptrend must score ≤4.
+2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number? For SELL — near a swing LOW, support zone, or round number? Within 10 pips = HIGH-RISK. Buying AT resistance or selling AT support = score ≤4.
+3. ✓ **POSITION IN RANGE:** For BUY: entry should be near the BOTTOM of a local range. For SELL: near the TOP. Entry at the TOP of a recovery in a downtrend = buying into supply. REJECT.
+4. ✓ Is price clearly respecting the {htf_upper} EMA trend direction? (This is the EMA the strategy used for bias — CRITICAL for scalp quality.)
+5. ✓ Is the swing break on the {trigger_upper} chart clean and confirmed (full candle close)?
+6. ✓ Are EMA 9/21 aligned with the trade direction on the {trigger_upper} chart?
+7. ✓ Is entry clear of nearby S/R obstacles shown on the {trigger_upper} chart?
+8. ✓ For PULLBACK: Is entry within or near the optimal Fibonacci zone ({entry_upper})?
+9. ✓ For MOMENTUM: Is breakout clean with strong directional candles?
+10. ✓ Is stop loss placement below a valid structure low (for longs)?
+11. ✓ Does the price action show clean trend structure?
+12. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
+13. ✓ Does the entry type box ({entry_upper}) show favorable conditions?"""
+                else:
+                    tf_display_section = """**Timeframes Displayed:**
 - 4H timeframe: Shows 50 EMA trend bias (purple line)
 - 15m timeframe: PRIMARY ANALYSIS - Shows swing break, EMAs 9/21, S/R levels, entry/SL/TP
-- 5m timeframe: Shows entry zone with Fibonacci levels and entry type annotation
-
-**Key Visual Markers (on 15m chart - PRIMARY):**
-- GREEN dashed line: Entry price level
-- RED dashed line: Stop loss level (below opposite swing)
-- BLUE dashed line: Take profit target
-- ORANGE line: EMA 9 (fast momentum)
-- BLUE line: EMA 21 (trend confirmation)
-- GREEN horizontal line: Support level with distance in pips
-- RED horizontal line: Resistance level with distance in pips
-- ORANGE horizontal lines: Swing high levels
-- BLUE horizontal lines: Swing low levels
-
-**Key Visual Markers (on 5m chart):**
-- YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
-- Entry Type Box (top-right): Shows PULLBACK/MOMENTUM, depth %, zone status, volume ✓/✗
-- LARGE ARROW MARKER (▲/▼ in circle): Points to the EXACT entry price level - this is where the trade will be entered
-- TRADE SUMMARY BOX (lower-left): Contains key stats - Direction, Entry Type, SL pips, TP pips, R:R ratio, Confidence %
-- GREEN dashed line with "ENTRY" label: Entry price level
-- "NOW" marker: Shows where current price is relative to entry
-{momentum_note}
-**CRITICAL CHART ANALYSIS CHECKLIST (in priority order):**
-
-1. ✓ **4H TREND STRUCTURE (HIGHEST PRIORITY):** Look at the 4H chart candles — is the trend making Higher Highs/Higher Lows (bullish) or Lower Highs/Lower Lows (bearish)? This is MORE important than EMA position alone. A BUY signal in a 4H downtrend (LH/LL) or SELL signal in a 4H uptrend (HH/HL) is COUNTER-TREND and must score ≤4.
+- 5m timeframe: Shows entry zone with Fibonacci levels and entry type annotation"""
+                    primary_markers_label = "15m chart - PRIMARY"
+                    entry_markers_label = "5m chart"
+                    checklist_items = """1. ✓ **4H TREND STRUCTURE (HIGHEST PRIORITY):** Look at the 4H chart candles — is the trend making Higher Highs/Higher Lows (bullish) or Lower Highs/Lower Lows (bearish)? This is MORE important than EMA position alone. A BUY signal in a 4H downtrend (LH/LL) or SELL signal in a 4H uptrend (HH/HL) is COUNTER-TREND and must score ≤4.
 2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number (x.x000, x.x500)? For SELL — is entry near a recent swing LOW, support zone, or round number? If within 10 pips of a major level, this is a HIGH-RISK entry. Buying AT resistance or selling AT support = score ≤4.
 3. ✓ **POSITION IN RANGE:** Is entry at a favorable location? For BUY: entry should be near the BOTTOM of a local range (at demand/support). For SELL: entry should be near the TOP of a local range (at supply/resistance). Entry at the TOP of a recovery in a downtrend = buying the worst location.
 4. ✓ Is price clearly respecting the 4H EMA trend direction?
@@ -800,7 +810,37 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 10. ✓ Is stop loss placement below a valid structure low (for longs)?
 11. ✓ Does the price action show clean trend structure?
 12. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
-13. ✓ Does the entry type box (5m) show favorable conditions?
+13. ✓ Does the entry type box (5m) show favorable conditions?"""
+
+                chart_instruction = f"""
+## CHART ANALYSIS (CRITICAL - EXAMINE CAREFULLY)
+
+The attached chart shows multi-timeframe forex analysis with the following elements:
+
+{tf_display_section}
+
+**Key Visual Markers (on {primary_markers_label}):**
+- GREEN dashed line: Entry price level
+- RED dashed line: Stop loss level (below opposite swing)
+- BLUE dashed line: Take profit target
+- ORANGE line: EMA 9 (fast momentum)
+- BLUE line: EMA 21 (trend confirmation)
+- GREEN horizontal line: Support level with distance in pips
+- RED horizontal line: Resistance level with distance in pips
+- ORANGE horizontal lines: Swing high levels
+- BLUE horizontal lines: Swing low levels
+
+**Key Visual Markers (on {entry_markers_label}):**
+- YELLOW shaded zone: Fibonacci optimal entry zone (38.2%-61.8%)
+- Entry Type Box (top-right): Shows PULLBACK/MOMENTUM, depth %, zone status, volume ✓/✗
+- LARGE ARROW MARKER (▲/▼ in circle): Points to the EXACT entry price level - this is where the trade will be entered
+- TRADE SUMMARY BOX (lower-left): Contains key stats - Direction, Entry Type, SL pips, TP pips, R:R ratio, Confidence %
+- GREEN dashed line with "ENTRY" label: Entry price level
+- "NOW" marker: Shows where current price is relative to entry
+{momentum_note}
+**CRITICAL CHART ANALYSIS CHECKLIST (in priority order):**
+
+{checklist_items}
 """
 
             # v2.3.0: Enhanced entry type explanation
