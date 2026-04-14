@@ -637,9 +637,14 @@ REASON: Analysis error - neutral assessment"""
             ema_direction = tier1_ema.get('direction', direction)
 
             # Actual strategy timeframes (populated by smc_simple_strategy._configure_scalp_mode
-            # when scalp_mode_enabled=True; fall back to swing defaults otherwise)
+            # when scalp_mode_enabled=True; fall back to swing defaults otherwise).
+            # Prefer the explicit scalp_mode flag; fall back to TF inference for
+            # legacy signals that predate the flag.
             strategy_htf = tier1_ema.get('timeframe', '4h') or '4h'
-            is_scalp_mode = strategy_htf != '4h'
+            if 'scalp_mode' in signal:
+                is_scalp_mode = bool(signal.get('scalp_mode'))
+            else:
+                is_scalp_mode = strategy_htf != '4h'
 
             # Tier 2 - Swing Break data
             tier2_swing = strategy_indicators.get('tier2_swing', {})

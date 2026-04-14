@@ -4095,6 +4095,11 @@ class SMCSimpleStrategy:
                     'reversal_override_reason': reversal_override_reason,
                 },
 
+                # Authoritative scalp-mode flag — consumed by claude_analyzer
+                # and prompt_builder to pick correct chart timeframes/prompt copy
+                # without re-deriving from tier1/tier3 timeframe strings.
+                'scalp_mode': bool(self.scalp_mode_enabled),
+
                 # Strategy indicators (for alert_history compatibility)
                 'strategy_indicators': {
                     'tier1_ema': {

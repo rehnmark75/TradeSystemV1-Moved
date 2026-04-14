@@ -605,8 +605,13 @@ class ClaudeAnalyzer:
                 strategy_htf = si.get('tier1_ema', {}).get('timeframe', '4h') or '4h'
                 strategy_trigger = si.get('tier2_swing', {}).get('timeframe', '15m') or '15m'
                 strategy_entry = si.get('tier3_entry', {}).get('timeframe', '5m') or '5m'
-                # Scalp mode: HTF is faster than 4h and entry is 1m
-                is_scalp = strategy_htf != '4h' and strategy_entry == '1m'
+                # Prefer the explicit scalp_mode flag from the strategy. Fall
+                # back to timeframe inference only for legacy signals that
+                # predate the flag (tier1 HTF faster than 4h AND entry is 1m).
+                if 'scalp_mode' in signal:
+                    is_scalp = bool(signal.get('scalp_mode'))
+                else:
+                    is_scalp = strategy_htf != '4h' and strategy_entry == '1m'
 
             if is_scalp:
                 self.logger.info(

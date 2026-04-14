@@ -136,8 +136,38 @@ class ForexChartGenerator:
             logger.warning(f"No candle data provided for {epic}")
             return None
 
-        # Get available timeframes
-        available_tfs = [tf for tf in ['4h', '15m', '5m'] if tf in candles and candles[tf] is not None and len(candles[tf]) >= 10]
+        # Map each timeframe present in `candles` to a semantic role using
+        # strategy_indicators. Roles (macro/htf/trigger/entry) are what the
+        # overlays are actually keyed to — using hardcoded '4h'/'15m'/'5m'
+        # broke scalp charts where the real timeframes are '1h'/'5m'/'1m'.
+        strategy_indicators = signal.get('strategy_indicators', {}) if signal else {}
+        htf_tf = (strategy_indicators.get('tier1_ema', {}) or {}).get('timeframe') or '4h'
+        trigger_tf = (strategy_indicators.get('tier2_swing', {}) or {}).get('timeframe') or '15m'
+        entry_tf = (strategy_indicators.get('tier3_entry', {}) or {}).get('timeframe') or '5m'
+
+        # Build role map: prefer the most specific role if a TF is reused
+        # (e.g. swing mode where htf_tf == '4h' == macro). Precedence:
+        # entry > trigger > htf > macro so entry overlays always land on
+        # the correct panel.
+        role_for_tf: Dict[str, str] = {}
+        if '4h' in candles:
+            role_for_tf['4h'] = 'macro'
+        role_for_tf[htf_tf] = 'htf'
+        role_for_tf[trigger_tf] = 'trigger'
+        role_for_tf[entry_tf] = 'entry'
+
+        # Display order: macro → htf → trigger → entry (slowest → fastest).
+        # Deduplicate while preserving order (swing mode has htf == macro).
+        ordered_roles = ['macro', 'htf', 'trigger', 'entry']
+        tf_for_role = {role: tf for tf, role in role_for_tf.items()}
+        ordered_tfs: List[str] = []
+        seen = set()
+        for role in ordered_roles:
+            tf = tf_for_role.get(role)
+            if tf and tf not in seen and tf in candles and candles[tf] is not None and len(candles[tf]) >= 10:
+                ordered_tfs.append(tf)
+                seen.add(tf)
+        available_tfs = ordered_tfs
 
         if not available_tfs:
             logger.warning(f"Insufficient candle data for {epic}")
@@ -173,63 +203,62 @@ class ForexChartGenerator:
                     continue
 
                 ax = axes[i]
+                role = role_for_tf.get(tf, 'macro')
+                is_trigger_or_entry = role in ('trigger', 'entry')
 
                 # Plot candlesticks manually (since we're using regular matplotlib)
                 self._plot_candlesticks(ax, df, tf)
 
-                # Extract strategy_indicators for enhanced charting
-                strategy_indicators = signal.get('strategy_indicators', {}) if signal else {}
-
-                # Add EMA 50 on 4H
-                if tf == '4h' and len(df) >= 50:
+                # EMA 50 on the macro/HTF panels (whichever represents bias)
+                if role in ('macro', 'htf') and len(df) >= 50:
                     df['EMA50'] = df['Close'].ewm(span=50, adjust=False).mean()
                     ax.plot(range(len(df)), df['EMA50'].values, color=self.COLORS['ema_50'],
                            linewidth=1.5, label='EMA 50', alpha=0.9)
 
-                # Add EMA 9/21 on 15m and 5m for swing break context and micro-structure
-                if tf in ['15m', '5m'] and len(df) >= 21:
+                # EMA 9/21 on trigger + entry panels for swing break context and micro-structure
+                if is_trigger_or_entry and len(df) >= 21:
                     self._add_ema_stack(ax, df, strategy_indicators)
 
-                # Add Support/Resistance levels on 15m (swing break timeframe)
-                if tf == '15m' and strategy_indicators:
+                # Support/Resistance levels on trigger panel (where swing break lives)
+                if role == 'trigger' and strategy_indicators:
                     self._add_support_resistance_levels(ax, df, strategy_indicators)
 
-                # Add FVG zones on 15m and 5m (institutional imbalances)
-                if tf in ['15m', '5m'] and signal:
+                # FVG zones on trigger + entry panels
+                if is_trigger_or_entry and signal:
                     self._add_fvg_zones(ax, df, signal, tf)
 
-                # Add Order Block zones on 15m and 5m (institutional order areas)
-                if tf in ['15m', '5m'] and signal:
+                # Order Block zones on trigger + entry panels
+                if is_trigger_or_entry and signal:
                     self._add_order_block_zones(ax, df, signal, tf)
 
-                # Add entry type annotation on 5m (entry timeframe)
-                if tf == '5m' and signal:
+                # Entry-specific overlays: type annotation, price markers, arrow, summary, Fib zone
+                if role == 'entry' and signal:
                     self._add_entry_type_annotation(ax, df, signal, strategy_indicators)
-
-                # [CHART_IMPROVE_V1] Add entry price and current price markers on 5m
-                if tf == '5m' and signal:
                     self._add_entry_price_marker(ax, df, signal)
                     self._add_current_price_marker(ax, df)
-
-                # [CHART_IMPROVE_V2] Add entry arrow marker and trade summary box on 5m
-                if tf == '5m' and signal:
                     self._add_entry_arrow_marker(ax, df, signal)
                     self._add_trade_summary_box(ax, df, signal)
-
-                # [CHART_IMPROVE_V1] Add swing break level on 15m and 5m (always, not just when smc_data present)
-                if tf in ['15m', '5m'] and signal:
-                    self._add_swing_break_level(ax, df, signal, tf)
-
-                # Add SMC annotations (swing levels, BOS)
-                if smc_data and tf in ['15m', '5m']:
-                    self._add_smc_annotations(ax, df, signal, smc_data, tf)
-
-                # Add Fibonacci zone on 5m
-                if tf == '5m' and signal:
                     self._add_fib_zone(ax, df, signal)
 
-                # Set labels and title
-                ax.set_title(f"{tf.upper()} Timeframe", fontsize=11, fontweight='bold', loc='left')
+                # Swing break level on trigger + entry panels
+                if is_trigger_or_entry and signal:
+                    self._add_swing_break_level(ax, df, signal, tf)
+
+                # SMC annotations (swing levels, BOS) on trigger + entry panels
+                if smc_data and is_trigger_or_entry:
+                    self._add_smc_annotations(ax, df, signal, smc_data, tf, role=role)
+
+                # Set labels and title — append role label so scalp charts are self-describing
+                role_label = {
+                    'macro': 'Macro',
+                    'htf': 'HTF Bias',
+                    'trigger': 'Trigger',
+                    'entry': 'Entry',
+                }.get(role, '')
+                title = f"{tf.upper()} Timeframe"
+                if role_label:
+                    title = f"{title} ({role_label})"
+                ax.set_title(title, fontsize=11, fontweight='bold', loc='left')
                 ax.set_ylabel('Price', fontsize=9)
                 ax.grid(True, alpha=0.3, linestyle='-', linewidth=0.5)
                 ax.tick_params(axis='both', labelsize=8)
@@ -467,7 +496,8 @@ class ForexChartGenerator:
         df: pd.DataFrame,
         signal: Dict[str, Any],
         smc_data: Dict[str, Any],
-        timeframe: str
+        timeframe: str,
+        role: str = 'trigger'
     ) -> None:
         """Add SMC-related annotations (swing levels, BOS, etc.)"""
         try:
@@ -483,9 +513,9 @@ class ForexChartGenerator:
                            fontsize=8, color=self.COLORS['swing_high'],
                            fontweight='bold', alpha=0.9)
 
-            # Opposite swing (for SL placement)
+            # Opposite swing (for SL placement) — show on the entry panel
             opposite_swing = signal.get('opposite_swing')
-            if opposite_swing and timeframe == '5m':
+            if opposite_swing and role == 'entry':
                 ax.axhline(y=opposite_swing, color=self.COLORS['swing_low'],
                           linestyle=':', linewidth=1.5, alpha=0.8)
                 ax.annotate(f'Opposite Swing: {opposite_swing:.5f}',
@@ -493,12 +523,13 @@ class ForexChartGenerator:
                            fontsize=8, color=self.COLORS['swing_low'],
                            fontweight='bold', alpha=0.9)
 
-            # EMA value on 4H (from signal data)
+            # HTF EMA reference line — overlay on the trigger panel so the
+            # reader can see how trigger-TF price relates to HTF bias
             ema_value = signal.get('ema_value')
-            if ema_value and timeframe == '15m':
+            if ema_value and role == 'trigger':
                 ax.axhline(y=ema_value, color=self.COLORS['ema_50'],
                           linestyle='-', linewidth=1.5, alpha=0.6)
-                ax.annotate(f'4H EMA50: {ema_value:.5f}',
+                ax.annotate(f'HTF EMA: {ema_value:.5f}',
                            xy=(x_max * 0.1, ema_value),
                            fontsize=8, color=self.COLORS['ema_50'],
                            fontweight='bold', alpha=0.9)
