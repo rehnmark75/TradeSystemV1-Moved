@@ -642,6 +642,60 @@ class BrokerTradeSync:
         self.db = db_manager
         self.client = robomarkets_client
 
+    async def _resolve_signal_id(
+        self,
+        broker_ticker: str,
+        side: str,
+        reference_time: Optional[datetime]
+    ) -> Optional[int]:
+        """
+        Resolve the originating signal_id for a broker trade from stock_orders.
+
+        We prefer exact order-to-trade lineage, but the broker trade payload does not
+        currently include our local signal id. The best available source is the most
+        relevant stock_orders row for the same ticker/side nearest the trade open time.
+        """
+        if not broker_ticker:
+            return None
+
+        plain_ticker = broker_ticker.split(".")[0]
+        normalized_side = "buy" if side == "long" else "sell" if side == "short" else None
+        normalized_reference_time = reference_time
+        if normalized_reference_time and normalized_reference_time.tzinfo is not None:
+            normalized_reference_time = normalized_reference_time.replace(tzinfo=None)
+
+        order = await self.db.fetchrow(
+            """
+            SELECT signal_id
+            FROM stock_orders
+            WHERE ticker = $1
+              AND signal_id IS NOT NULL
+              AND ($2::text IS NULL OR side = $2)
+              AND (
+                $3::timestamp IS NULL OR (
+                  created_at >= $3 - INTERVAL '14 days'
+                  AND created_at <= $3 + INTERVAL '6 hours'
+                )
+              )
+            ORDER BY
+              CASE
+                WHEN $3::timestamp IS NULL THEN 0
+                ELSE ABS(EXTRACT(EPOCH FROM ($3 - created_at)))
+              END ASC,
+              id DESC
+            LIMIT 1
+            """,
+            plain_ticker,
+            normalized_side,
+            normalized_reference_time
+        )
+
+        if not order:
+            return None
+
+        signal_id = order.get("signal_id")
+        return int(signal_id) if signal_id is not None else None
+
     async def sync_positions(self) -> Dict[str, int]:
         """
         Sync open positions from broker to database.
@@ -660,6 +714,12 @@ class BrokerTradeSync:
             sl_tp_applied = 0
 
             for p in positions:
+                signal_id = await self._resolve_signal_id(
+                    broker_ticker=p.ticker,
+                    side=p.side,
+                    reference_time=p.opened_at
+                )
+
                 # Check if position exists
                 existing = await self.db.fetchrow(
                     "SELECT id FROM broker_trades WHERE deal_id = $1",
@@ -672,22 +732,24 @@ class BrokerTradeSync:
                         UPDATE broker_trades SET
                             current_price = $1,
                             profit = $2,
+                            signal_id = COALESCE(signal_id, $3),
                             updated_at = NOW()
-                        WHERE deal_id = $3
-                    """, p.current_price, p.unrealized_pnl, p.deal_id)
+                        WHERE deal_id = $4
+                    """, p.current_price, p.unrealized_pnl, signal_id, p.deal_id)
                     updated += 1
                 else:
                     # Insert new position
                     await self.db.execute("""
                         INSERT INTO broker_trades (
-                            deal_id, ticker, side, quantity, open_price,
+                            deal_id, signal_id, ticker, side, quantity, open_price,
                             stop_loss, take_profit, profit, status, open_time
-                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
                         ON CONFLICT (deal_id) DO UPDATE SET
                             profit = EXCLUDED.profit,
+                            signal_id = COALESCE(broker_trades.signal_id, EXCLUDED.signal_id),
                             updated_at = NOW()
                     """,
-                        p.deal_id, p.ticker, p.side, p.quantity, p.entry_price,
+                        p.deal_id, signal_id, p.ticker, p.side, p.quantity, p.entry_price,
                         p.stop_loss, p.take_profit, p.unrealized_pnl, 'open', p.opened_at
                     )
                     inserted += 1
@@ -779,6 +841,12 @@ class BrokerTradeSync:
                 if d.get("status") != "closed" and not d.get("close_time"):
                     continue
 
+                signal_id = await self._resolve_signal_id(
+                    broker_ticker=d["ticker"],
+                    side=d["side"],
+                    reference_time=d.get("open_time")
+                )
+
                 # Calculate duration
                 duration_hours = None
                 if d.get("open_time") and d.get("close_time"):
@@ -787,11 +855,12 @@ class BrokerTradeSync:
                 # Upsert trade
                 result = await self.db.execute("""
                     INSERT INTO broker_trades (
-                        deal_id, ticker, side, quantity, open_price, close_price,
+                        deal_id, signal_id, ticker, side, quantity, open_price, close_price,
                         stop_loss, take_profit, profit, profit_pct, status,
                         open_time, close_time, duration_hours
-                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
+                    ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
                     ON CONFLICT (deal_id) DO UPDATE SET
+                        signal_id = COALESCE(broker_trades.signal_id, EXCLUDED.signal_id),
                         close_price = EXCLUDED.close_price,
                         profit = EXCLUDED.profit,
                         profit_pct = EXCLUDED.profit_pct,
@@ -800,7 +869,7 @@ class BrokerTradeSync:
                         duration_hours = EXCLUDED.duration_hours,
                         updated_at = NOW()
                 """,
-                    d["deal_id"], d["ticker"], d["side"], d["quantity"],
+                    d["deal_id"], signal_id, d["ticker"], d["side"], d["quantity"],
                     d["open_price"], d["close_price"], d["stop_loss"], d["take_profit"],
                     d["profit"], d["profit_pct"], "closed",
                     d["open_time"], d["close_time"], duration_hours
@@ -852,11 +921,12 @@ class BrokerTradeSync:
         try:
             positions_result = await self.sync_positions()
             trades_result = await self.sync_closed_trades(days=days)
+            signal_backfill_result = await self.backfill_signal_ids(days=days)
             balance_result = await self.sync_account_balance()
 
             total_fetched = positions_result["total"] + trades_result["total"] + 1  # +1 for balance
             total_inserted = positions_result["inserted"] + trades_result["inserted"] + 1
-            total_updated = positions_result["updated"] + trades_result["updated"]
+            total_updated = positions_result["updated"] + trades_result["updated"] + signal_backfill_result["updated"]
 
             # Log sync completion
             await self.db.execute("""
@@ -874,6 +944,7 @@ class BrokerTradeSync:
             return {
                 "positions": positions_result,
                 "trades": trades_result,
+                "signal_backfill": signal_backfill_result,
                 "balance": balance_result,
                 "total_fetched": total_fetched,
                 "total_inserted": total_inserted,
@@ -890,6 +961,51 @@ class BrokerTradeSync:
                 WHERE id = $2
             """, str(e), log_id)
             raise
+
+    async def backfill_signal_ids(self, days: int = 90) -> Dict[str, int]:
+        """
+        Backfill signal_id for existing broker_trades rows that predate persistence.
+        """
+        rows = await self.db.fetch(
+            """
+            SELECT deal_id, ticker, side, open_time
+            FROM broker_trades
+            WHERE signal_id IS NULL
+              AND open_time >= NOW() - ($1::text || ' days')::interval
+            ORDER BY open_time DESC
+            """,
+            str(days)
+        )
+
+        updated = 0
+        checked = 0
+
+        for row in rows:
+            checked += 1
+            signal_id = await self._resolve_signal_id(
+                broker_ticker=row["ticker"],
+                side=row["side"],
+                reference_time=row["open_time"]
+            )
+            if signal_id is None:
+                continue
+
+            await self.db.execute(
+                """
+                UPDATE broker_trades
+                SET signal_id = $1, updated_at = NOW()
+                WHERE deal_id = $2
+                  AND signal_id IS NULL
+                """,
+                signal_id,
+                row["deal_id"]
+            )
+            updated += 1
+
+        if updated:
+            logger.info(f"Backfilled signal_id on {updated}/{checked} broker trades")
+
+        return {"checked": checked, "updated": updated}
 
     async def get_trades_from_db(
         self,

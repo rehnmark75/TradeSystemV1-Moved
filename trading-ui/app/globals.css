@@ -2341,6 +2341,11 @@ input {
   grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
   gap: 12px;
   margin-bottom: 16px;
+  align-items: start;
+}
+
+.broker-grid-compact {
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
 }
 
 .broker-card {
@@ -2348,6 +2353,11 @@ input {
   border: 1px solid #efe2cc;
   border-radius: 12px;
   padding: 12px;
+  min-width: 0;
+}
+
+.broker-card-wide {
+  grid-column: 1 / -1;
 }
 
 .broker-card h3 {
@@ -2362,16 +2372,51 @@ input {
   font-size: 0.85rem;
 }
 
+.broker-table-wrap {
+  width: 100%;
+}
+
+.broker-table {
+  min-width: 0;
+}
+
+.broker-table-wide {
+  min-width: 820px;
+}
+
 .broker-card th,
 .broker-card td {
   text-align: left;
   padding: 6px 4px;
   border-bottom: 1px solid #f3ede4;
+  vertical-align: top;
 }
 
 .broker-card th {
   font-size: 0.75rem;
   color: #6e6254;
+}
+
+.broker-snapshot-cell {
+  min-width: 92px;
+}
+
+.broker-snapshot-cell strong,
+.broker-snapshot-cell span {
+  display: block;
+}
+
+.broker-snapshot-cell span {
+  font-size: 0.76rem;
+  color: #6e6254;
+  line-height: 1.2;
+  word-break: break-word;
+}
+
+@media (max-width: 900px) {
+  .broker-table-wide {
+    min-width: 760px;
+  }
 }
 
 .pnl-grid {

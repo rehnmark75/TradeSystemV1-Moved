@@ -60,41 +60,114 @@ export async function GET(request: Request) {
     const lastSync = lastSyncResult.rows[0]?.completed_at || null;
 
     const closedTradesQuery = `
+      WITH closed_trade_base AS (
+        SELECT
+          bt.deal_id,
+          bt.signal_id,
+          bt.ticker,
+          split_part(bt.ticker, '.', 1) AS base_ticker,
+          bt.side,
+          bt.quantity,
+          bt.open_price,
+          bt.close_price,
+          bt.profit,
+          bt.profit_pct,
+          bt.duration_hours,
+          bt.open_time,
+          bt.close_time
+        FROM broker_trades bt
+        WHERE bt.status = 'closed'
+          AND bt.close_time >= NOW() - INTERVAL '${days} days'
+      )
       SELECT
-        deal_id,
-        ticker,
-        side,
-        quantity,
-        open_price,
-        close_price,
-        profit,
-        profit_pct,
-        duration_hours,
-        open_time,
-        close_time
-      FROM broker_trades
-      WHERE status = 'closed'
-        AND close_time >= NOW() - INTERVAL '${days} days'
-      ORDER BY close_time DESC
+        ctb.deal_id,
+        ctb.ticker,
+        ctb.side,
+        ctb.quantity,
+        ctb.open_price,
+        ctb.close_price,
+        ctb.profit,
+        ctb.profit_pct,
+        ctb.duration_hours,
+        ctb.open_time,
+        ctb.close_time,
+        ctb.signal_id,
+        linked_signal.signal_timestamp,
+        signal_metrics.rs_percentile AS rs_at_signal,
+        signal_metrics.rs_trend AS rs_trend_at_signal,
+        da.daq_score AS daq_score_at_signal,
+        da.daq_grade AS daq_grade_at_signal
+      FROM closed_trade_base ctb
+      LEFT JOIN stock_scanner_signals linked_signal
+        ON linked_signal.id = ctb.signal_id
+      LEFT JOIN stock_deep_analysis da
+        ON da.signal_id = ctb.signal_id
+      LEFT JOIN LATERAL (
+        SELECT
+          m.rs_percentile,
+          m.rs_trend
+        FROM stock_screening_metrics m
+        WHERE m.ticker = ctb.base_ticker
+          AND m.calculation_date <= COALESCE(linked_signal.signal_timestamp::date, ctb.open_time::date)
+        ORDER BY m.calculation_date DESC
+        LIMIT 1
+      ) signal_metrics ON TRUE
+      ORDER BY ctb.close_time DESC
     `;
     const closedTradesResult = await client.query(closedTradesQuery);
     const closedTrades = closedTradesResult.rows || [];
 
     const openPositionsQuery = `
+      WITH open_trade_base AS (
+        SELECT
+          bt.deal_id,
+          bt.signal_id,
+          bt.ticker,
+          split_part(bt.ticker, '.', 1) AS base_ticker,
+          bt.side,
+          bt.quantity,
+          bt.open_price,
+          bt.current_price,
+          bt.profit,
+          bt.stop_loss,
+          bt.take_profit,
+          bt.open_time
+        FROM broker_trades bt
+        WHERE bt.status = 'open'
+      )
       SELECT
-        deal_id,
-        ticker,
-        side,
-        quantity,
-        open_price,
-        current_price,
-        profit,
-        stop_loss,
-        take_profit,
-        open_time
-      FROM broker_trades
-      WHERE status = 'open'
-      ORDER BY open_time DESC
+        otb.deal_id,
+        otb.ticker,
+        otb.side,
+        otb.quantity,
+        otb.open_price,
+        otb.current_price,
+        otb.profit,
+        otb.stop_loss,
+        otb.take_profit,
+        otb.open_time,
+        otb.signal_id,
+        linked_signal.signal_timestamp,
+        signal_metrics.rs_percentile AS rs_at_signal,
+        signal_metrics.rs_trend AS rs_trend_at_signal,
+        da.daq_score AS daq_score_at_signal,
+        da.daq_grade AS daq_grade_at_signal
+      FROM open_trade_base otb
+      LEFT JOIN stock_scanner_signals linked_signal
+        ON linked_signal.id = otb.signal_id
+      LEFT JOIN stock_deep_analysis da
+        ON da.signal_id = otb.signal_id
+      LEFT JOIN LATERAL (
+        SELECT
+          m.rs_percentile,
+          m.rs_trend
+        FROM stock_screening_metrics m
+        WHERE m.ticker = otb.base_ticker
+          AND m.calculation_date <= COALESCE(linked_signal.signal_timestamp::date, otb.open_time::date)
+        ORDER BY m.calculation_date DESC
+        LIMIT 1
+      ) signal_metrics ON TRUE
+      ORDER BY otb.open_time DESC
     `;
     const openPositionsResult = await client.query(openPositionsQuery);
     const openPositions = openPositionsResult.rows || [];

@@ -57,6 +57,12 @@ type BrokerOverview = {
     unrealized_pnl: number;
     profit_pct: number;
     open_time: string;
+    signal_id: number | null;
+    signal_timestamp: string | null;
+    rs_at_signal: number | null;
+    rs_trend_at_signal: string | null;
+    daq_score_at_signal: number | null;
+    daq_grade_at_signal: string | null;
   }>;
   closed_trades: Array<{
     deal_id: string;
@@ -70,6 +76,12 @@ type BrokerOverview = {
     duration_hours: string;
     open_time: string;
     close_time: string;
+    signal_id: number | null;
+    signal_timestamp: string | null;
+    rs_at_signal: number | null;
+    rs_trend_at_signal: string | null;
+    daq_score_at_signal: number | null;
+    daq_grade_at_signal: string | null;
   }>;
   by_day: Array<{ date: string; pnl: number; count: number }>;
   by_ticker: Array<{ ticker: string; trades: number; win_rate: number; pnl: number }>;
@@ -78,6 +90,8 @@ type BrokerOverview = {
 
 const formatMoney = (value: number) => `$${value.toFixed(2)}`;
 const formatPct = (value: number) => `${value.toFixed(1)}%`;
+const formatSignalStamp = (value: string | null) =>
+  value ? new Date(value).toLocaleDateString() : "-";
 
 export default function BrokerPage() {
   const [days, setDays] = useState(30);
@@ -202,72 +216,56 @@ export default function BrokerPage() {
             </div>
 
             <div className="broker-grid">
-              <div className="broker-card">
+              <div className="broker-card broker-card-wide">
                 <h3>Open Positions</h3>
                 {overview.open_positions.length ? (
-                  <table>
-                    <thead>
-                      <tr>
-                        <th>Ticker</th>
-                        <th>Side</th>
-                        <th>Qty</th>
-                        <th>Entry</th>
-                        <th>Current</th>
-                        <th>P&L</th>
-                        <th>P&L %</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {overview.open_positions.map((pos) => (
-                        <tr key={pos.deal_id}>
-                          <td>{pos.ticker}</td>
-                          <td>{pos.side}</td>
-                          <td>{Number(pos.quantity).toFixed(2)}</td>
-                          <td>{formatMoney(pos.entry_price)}</td>
-                          <td>{formatMoney(pos.current_price)}</td>
-                          <td className={pos.unrealized_pnl >= 0 ? "positive" : "negative"}>{formatMoney(pos.unrealized_pnl)}</td>
-                          <td className={pos.profit_pct >= 0 ? "positive" : "negative"}>{formatPct(pos.profit_pct)}</td>
+                  <div className="table-scroll broker-table-wrap">
+                    <table className="broker-table broker-table-wide">
+                      <thead>
+                        <tr>
+                          <th>Ticker</th>
+                          <th>Side</th>
+                          <th>Qty</th>
+                          <th>Signal</th>
+                          <th>RS</th>
+                          <th>DAQ</th>
+                          <th>Entry</th>
+                          <th>Current</th>
+                          <th>P&amp;L</th>
+                          <th>P&amp;L %</th>
                         </tr>
-                      ))}
-                    </tbody>
-                  </table>
+                      </thead>
+                      <tbody>
+                        {overview.open_positions.map((pos) => (
+                          <tr key={pos.deal_id}>
+                            <td className="cell-nowrap">{pos.ticker}</td>
+                            <td className="cell-nowrap">{pos.side}</td>
+                            <td className="cell-nowrap">{Number(pos.quantity).toFixed(2)}</td>
+                            <td className="cell-nowrap">{formatSignalStamp(pos.signal_timestamp)}</td>
+                            <td className="broker-snapshot-cell">
+                              <strong>{pos.rs_at_signal == null ? "-" : Math.round(pos.rs_at_signal)}</strong>
+                              <span>{pos.rs_trend_at_signal ?? "-"}</span>
+                            </td>
+                            <td className="broker-snapshot-cell">
+                              <strong>{pos.daq_score_at_signal ?? "-"}</strong>
+                              <span>{pos.daq_grade_at_signal ?? "-"}</span>
+                            </td>
+                            <td className="cell-nowrap">{formatMoney(pos.entry_price)}</td>
+                            <td className="cell-nowrap">{formatMoney(pos.current_price)}</td>
+                            <td className={`cell-nowrap ${pos.unrealized_pnl >= 0 ? "positive" : "negative"}`}>{formatMoney(pos.unrealized_pnl)}</td>
+                            <td className={`cell-nowrap ${pos.profit_pct >= 0 ? "positive" : "negative"}`}>{formatPct(pos.profit_pct)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
                 ) : (
                   <p>No open positions.</p>
                 )}
               </div>
-              <div className="broker-card">
-                <h3>Performance by Side</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Metric</th>
-                      <th>Long</th>
-                      <th>Short</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    <tr>
-                      <td>Trades</td>
-                      <td>{overview.stats.long_trades}</td>
-                      <td>{overview.stats.short_trades}</td>
-                    </tr>
-                    <tr>
-                      <td>Win Rate</td>
-                      <td>{formatPct(overview.stats.long_win_rate)}</td>
-                      <td>{formatPct(overview.stats.short_win_rate)}</td>
-                    </tr>
-                    <tr>
-                      <td>Profit</td>
-                      <td>{formatMoney(overview.stats.long_profit)}</td>
-                      <td>{formatMoney(overview.stats.short_profit)}</td>
-                    </tr>
-                  </tbody>
-                </table>
-                <div className="footer-note">Avg Hold Time: {overview.stats.avg_trade_duration_hours.toFixed(1)} hours</div>
-              </div>
             </div>
 
-            <div className="broker-grid">
+            <div className="broker-grid broker-grid-compact">
               <div className="broker-card">
                 <h3>Equity Curve</h3>
                 {equityPoints ? (
@@ -295,7 +293,8 @@ export default function BrokerPage() {
             <div className="broker-grid">
               <div className="broker-card">
                 <h3>Performance by Ticker</h3>
-                <table>
+                <div className="table-scroll broker-table-wrap">
+                <table className="broker-table">
                   <thead>
                     <tr>
                       <th>Ticker</th>
@@ -307,37 +306,52 @@ export default function BrokerPage() {
                   <tbody>
                     {overview.by_ticker.slice(0, 15).map((row) => (
                       <tr key={row.ticker}>
-                        <td>{row.ticker}</td>
-                        <td>{row.trades}</td>
-                        <td>{formatPct(row.win_rate)}</td>
-                        <td className={row.pnl >= 0 ? "positive" : "negative"}>{formatMoney(row.pnl)}</td>
+                        <td className="cell-nowrap">{row.ticker}</td>
+                        <td className="cell-nowrap">{row.trades}</td>
+                        <td className="cell-nowrap">{formatPct(row.win_rate)}</td>
+                        <td className={`cell-nowrap ${row.pnl >= 0 ? "positive" : "negative"}`}>{formatMoney(row.pnl)}</td>
                       </tr>
                     ))}
                   </tbody>
                 </table>
+                </div>
               </div>
-              <div className="broker-card">
+              <div className="broker-card broker-card-wide">
                 <h3>Recent Closed Trades</h3>
-                <table>
-                  <thead>
-                    <tr>
-                      <th>Ticker</th>
-                      <th>Side</th>
-                      <th>Profit</th>
-                      <th>Close</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {overview.closed_trades.slice(0, 10).map((trade) => (
-                      <tr key={trade.deal_id}>
-                        <td>{trade.ticker}</td>
-                        <td>{trade.side}</td>
-                        <td className={Number(trade.profit) >= 0 ? "positive" : "negative"}>{formatMoney(Number(trade.profit))}</td>
-                        <td>{trade.close_time ? new Date(trade.close_time).toLocaleDateString() : "-"}</td>
+                <div className="table-scroll broker-table-wrap">
+                  <table className="broker-table broker-table-wide">
+                    <thead>
+                      <tr>
+                        <th>Ticker</th>
+                        <th>Side</th>
+                        <th>Signal</th>
+                        <th>RS</th>
+                        <th>DAQ</th>
+                        <th>Profit</th>
+                        <th>Close</th>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
+                    </thead>
+                    <tbody>
+                      {overview.closed_trades.slice(0, 10).map((trade) => (
+                        <tr key={trade.deal_id}>
+                          <td className="cell-nowrap">{trade.ticker}</td>
+                          <td className="cell-nowrap">{trade.side}</td>
+                          <td className="cell-nowrap">{formatSignalStamp(trade.signal_timestamp)}</td>
+                          <td className="broker-snapshot-cell">
+                            <strong>{trade.rs_at_signal == null ? "-" : Math.round(trade.rs_at_signal)}</strong>
+                            <span>{trade.rs_trend_at_signal ?? "-"}</span>
+                          </td>
+                          <td className="broker-snapshot-cell">
+                            <strong>{trade.daq_score_at_signal ?? "-"}</strong>
+                            <span>{trade.daq_grade_at_signal ?? "-"}</span>
+                          </td>
+                          <td className={`cell-nowrap ${Number(trade.profit) >= 0 ? "positive" : "negative"}`}>{formatMoney(Number(trade.profit))}</td>
+                          <td className="cell-nowrap">{trade.close_time ? new Date(trade.close_time).toLocaleDateString() : "-"}</td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
             </div>
           </>

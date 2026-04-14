@@ -6,6 +6,7 @@
 CREATE TABLE IF NOT EXISTS broker_trades (
     id SERIAL PRIMARY KEY,
     deal_id VARCHAR(50) UNIQUE NOT NULL,
+    signal_id BIGINT,
     ticker VARCHAR(20) NOT NULL,
     side VARCHAR(10) NOT NULL,  -- 'long' or 'short'
     quantity DECIMAL(18, 8) NOT NULL,
@@ -26,6 +27,7 @@ CREATE TABLE IF NOT EXISTS broker_trades (
 
 -- Indexes for efficient querying
 CREATE INDEX IF NOT EXISTS idx_broker_trades_ticker ON broker_trades(ticker);
+CREATE INDEX IF NOT EXISTS idx_broker_trades_signal_id ON broker_trades(signal_id);
 CREATE INDEX IF NOT EXISTS idx_broker_trades_status ON broker_trades(status);
 CREATE INDEX IF NOT EXISTS idx_broker_trades_open_time ON broker_trades(open_time);
 CREATE INDEX IF NOT EXISTS idx_broker_trades_close_time ON broker_trades(close_time);
