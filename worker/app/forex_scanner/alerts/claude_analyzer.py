@@ -635,9 +635,11 @@ class ClaudeAnalyzer:
                 )
                 if df_4h is not None and len(df_4h) >= 20:
                     candles['4h'] = df_4h
-                    self.logger.debug(f"📊 Fetched 4H data: {len(df_4h)} bars")
+                    self.logger.info(f"📊 Fetched 4H: {len(df_4h)} bars")
+                else:
+                    self.logger.warning(f"📊 4H fetch failed or thin: {len(df_4h) if df_4h is not None else 'None'} bars")
             except Exception as e:
-                self.logger.debug(f"Could not fetch 4H data: {e}")
+                self.logger.warning(f"📊 Could not fetch 4H data: {e}")
 
             if is_scalp:
                 # ── Strategy HTF (1h or 15m per-pair override) ───────────────
@@ -651,9 +653,11 @@ class ClaudeAnalyzer:
                     )
                     if df_htf is not None and len(df_htf) >= 20:
                         candles[strategy_htf] = df_htf
-                        self.logger.debug(f"📊 Fetched {strategy_htf} HTF data: {len(df_htf)} bars")
+                        self.logger.info(f"📊 Fetched {strategy_htf} HTF: {len(df_htf)} bars")
+                    else:
+                        self.logger.warning(f"📊 {strategy_htf} HTF fetch failed or thin: {len(df_htf) if df_htf is not None else 'None'} bars (need >=20)")
                 except Exception as e:
-                    self.logger.debug(f"Could not fetch {strategy_htf} HTF data: {e}")
+                    self.logger.warning(f"📊 Could not fetch {strategy_htf} HTF data: {e}")
 
                 # ── Scalp trigger (5m) ────────────────────────────────────────
                 try:
@@ -665,9 +669,11 @@ class ClaudeAnalyzer:
                     )
                     if df_trigger is not None and len(df_trigger) >= 50:
                         candles[strategy_trigger] = df_trigger
-                        self.logger.debug(f"📊 Fetched {strategy_trigger} trigger data: {len(df_trigger)} bars")
+                        self.logger.info(f"📊 Fetched {strategy_trigger} trigger: {len(df_trigger)} bars")
+                    else:
+                        self.logger.warning(f"📊 {strategy_trigger} trigger fetch failed or thin: {len(df_trigger) if df_trigger is not None else 'None'} bars (need >=50)")
                 except Exception as e:
-                    self.logger.debug(f"Could not fetch {strategy_trigger} trigger data: {e}")
+                    self.logger.warning(f"📊 Could not fetch {strategy_trigger} trigger data: {e}")
 
                 # ── Scalp entry (1m) ──────────────────────────────────────────
                 try:
@@ -679,12 +685,32 @@ class ClaudeAnalyzer:
                     )
                     if df_entry is not None and len(df_entry) >= 30:
                         candles[strategy_entry] = df_entry
-                        self.logger.debug(f"📊 Fetched {strategy_entry} entry data: {len(df_entry)} bars")
+                        self.logger.info(f"📊 Fetched {strategy_entry} entry: {len(df_entry)} bars")
+                    else:
+                        self.logger.warning(f"📊 {strategy_entry} entry fetch failed or thin: {len(df_entry) if df_entry is not None else 'None'} bars (need >=30)")
                 except Exception as e:
-                    self.logger.debug(f"Could not fetch {strategy_entry} entry data: {e}")
+                    self.logger.warning(f"📊 Could not fetch {strategy_entry} entry data: {e}")
 
             else:
-                # ── Swing: 15m (primary analysis) ────────────────────────────
+                # ── Swing: strategy HTF (when different from 4h macro) ────────
+                if strategy_htf != '4h':
+                    htf_lookback = 120 if strategy_htf == '1h' else 50
+                    try:
+                        df_htf = self.data_fetcher.get_enhanced_data(
+                            epic=epic,
+                            pair=pair,
+                            timeframe=strategy_htf,
+                            lookback_hours=htf_lookback
+                        )
+                        if df_htf is not None and len(df_htf) >= 20:
+                            candles[strategy_htf] = df_htf
+                            self.logger.info(f"📊 Fetched {strategy_htf} HTF: {len(df_htf)} bars")
+                        else:
+                            self.logger.warning(f"📊 {strategy_htf} HTF fetch failed or thin: {len(df_htf) if df_htf is not None else 'None'} bars (need >=20)")
+                    except Exception as e:
+                        self.logger.warning(f"📊 Could not fetch {strategy_htf} HTF data: {e}")
+
+                # ── Swing: trigger (15m primary analysis) ────────────────────
                 try:
                     df_15m = self.data_fetcher.get_enhanced_data(
                         epic=epic,
@@ -694,11 +720,13 @@ class ClaudeAnalyzer:
                     )
                     if df_15m is not None and len(df_15m) >= 50:
                         candles[strategy_trigger] = df_15m
-                        self.logger.debug(f"📊 Fetched {strategy_trigger} data: {len(df_15m)} bars")
+                        self.logger.info(f"📊 Fetched {strategy_trigger} trigger: {len(df_15m)} bars")
+                    else:
+                        self.logger.warning(f"📊 {strategy_trigger} trigger fetch failed or thin: {len(df_15m) if df_15m is not None else 'None'} bars (need >=50)")
                 except Exception as e:
-                    self.logger.debug(f"Could not fetch {strategy_trigger} data: {e}")
+                    self.logger.warning(f"📊 Could not fetch {strategy_trigger} data: {e}")
 
-                # ── Swing: 5m (entry timeframe) ───────────────────────────────
+                # ── Swing: entry timeframe ────────────────────────────────────
                 try:
                     df_5m = self.data_fetcher.get_enhanced_data(
                         epic=epic,
@@ -708,9 +736,11 @@ class ClaudeAnalyzer:
                     )
                     if df_5m is not None and len(df_5m) >= 50:
                         candles[strategy_entry] = df_5m
-                        self.logger.debug(f"📊 Fetched {strategy_entry} data: {len(df_5m)} bars")
+                        self.logger.info(f"📊 Fetched {strategy_entry} entry: {len(df_5m)} bars")
+                    else:
+                        self.logger.warning(f"📊 {strategy_entry} entry fetch failed or thin: {len(df_5m) if df_5m is not None else 'None'} bars (need >=50)")
                 except Exception as e:
-                    self.logger.debug(f"Could not fetch {strategy_entry} data: {e}")
+                    self.logger.warning(f"📊 Could not fetch {strategy_entry} data: {e}")
 
             if not candles:
                 self.logger.warning(f"No candle data could be fetched for {epic}")
