@@ -168,10 +168,11 @@ trade_scan.py (entry point)
 
 ### Strategy System (January 2026 Cleanup)
 
-**Active Strategy:**
-| Strategy | File | Enable |
-|----------|------|--------|
-| SMC Simple | `smc_simple_strategy.py` | `SMC_SIMPLE_STRATEGY = True` (default) |
+**Active Strategies:**
+| Strategy | File | Instrument | Enable |
+|----------|------|------------|--------|
+| SMC Simple | `smc_simple_strategy.py` | FX majors/crosses | `SMC_SIMPLE_STRATEGY = True` (default) |
+| XAU Gold | `xau_gold_strategy.py` | Gold (`CS.D.CFEGOLD.CEE.IP`) | `xau_gold_pair_overrides.is_enabled = true` |
 
 **Adding New Strategies:**
 1. Copy template from `core/strategies/templates/strategy_template.py`
@@ -179,6 +180,81 @@ trade_scan.py (entry point)
 3. Create database migration using `migrations/templates/strategy_config_template.sql`
 4. Enable in database or config.py
 5. See `docs/adding_new_strategy.md` for detailed guide
+
+---
+
+## 📊 XAU Gold Strategy (XAU_GOLD) — Apr 2026
+
+Gold-specific 3-tier SMC strategy for `CS.D.CFEGOLD.CEE.IP`. Runs alongside SMC_SIMPLE (FX pairs keep going to SMC_SIMPLE; gold is routed automatically via `_is_gold_epic()` in `signal_detector.py`).
+
+### Architecture
+
+**3-Tier Signal Logic:**
+| Tier | Timeframe | Role |
+|------|-----------|------|
+| TIER 1 HTF | 4H | EMA(50/200) bias + structure (HH/HL vs LH/LL) |
+| TIER 2 Trigger | 1H | BOS / CHOCH + MACD confirmation |
+| TIER 3 Entry | 15m | Pullback to OB / FVG / 50% fib |
+
+Signal fires only when all 3 tiers align. Scanner evaluates every 5 min.
+
+**Regime Filter:**
+- `TRENDING` (ADX > 25, ATR pct > 40): trend-follow entries — primary edge
+- `RANGING` (ADX < 20): signals blocked (gold ranges are whippy)
+- `EXPANSION` (ATR pct > 80): signals blocked (news-driven spikes, wide spreads)
+
+**Session Filter (UTC):**
+- London 07-10 + NY 13-20: primary windows
+- Asian 23-06: continuations only
+- Rollover 21-22: blocked
+
+### Key Files
+| File | Purpose |
+|------|---------|
+| `worker/app/forex_scanner/core/strategies/xau_gold_strategy.py` | Strategy implementation |
+| `worker/app/forex_scanner/services/xau_gold_config_service.py` | DB-backed config (5-min TTL cache) |
+| `worker/app/forex_scanner/migrations/create_xau_gold_config.sql` | DB schema |
+
+### Configuration (in `strategy_config` database)
+```bash
+# Check current state
+docker exec postgres psql -U postgres -d strategy_config -c "SELECT epic, is_enabled, is_traded, monitor_only FROM xau_gold_pair_overrides;"
+
+# Check global config
+docker exec postgres psql -U postgres -d strategy_config -c "SELECT * FROM xau_gold_global_config WHERE is_active = true;"
+
+# Enable/disable trading
+UPDATE xau_gold_pair_overrides SET monitor_only = false, is_traded = true WHERE epic = 'CS.D.CFEGOLD.CEE.IP';
+UPDATE xau_gold_pair_overrides SET monitor_only = true WHERE epic = 'CS.D.CFEGOLD.CEE.IP';
+```
+
+### Instrument Notes
+- **Pip size**: 0.1 (1 point = $0.1 price movement). `get_point_value()` returns `0.1` for CFEGOLD.
+- **Order size**: 0.1 lots (configured in `dev-app/config.py` → `EPIC_ORDER_SIZES`)
+- **Worker epic map**: `CS.D.CFEGOLD.CEE.IP` → `CFEGOLD.1.CEE` → full epic in dev-app
+- **Min deal size**: 0.1 (confirmed via IG demo API, status `TRADEABLE`)
+
+### Trailing Stops (Gold-Specific)
+Values in `strategy_config.trailing_pair_config` — all figures are pips (1 pip = $0.1):
+
+| Stage | Trigger | Action |
+|-------|---------|--------|
+| Break-even | +30 pips | Move SL to entry |
+| Stage 1 | +50 pips | Lock +25 pips |
+| Stage 2 | +80 pips | Lock +50 pips |
+| Stage 3 | +110 pips | ATR trail (1.5×), min 30 pip distance |
+
+### Backtest
+```bash
+docker exec -it task-worker python /app/forex_scanner/bt.py CS.D.CFEGOLD.CEE.IP 90 XAU_GOLD --timeframe 5m --show-signals
+```
+75-day baseline (Apr 2026): 164 signals, PF 15.43 (avg win 160 pips, avg loss 20 pips).
+Note: High PF reflects fixed SL/TP defaults (80/160 pips); expect lower with tighter ATR-based stops.
+
+### Claude Vision Analysis
+`XAU_GOLD` is listed in `scanner_global_config.claude_vision_strategies`. Chart timeframes `["4h", "1h", "15m"]` align with the 3 strategy tiers.
+
+---
 
 **Archived Strategies** (in `forex_scanner/archive/disabled_strategies/`):
 - EMA, MACD, SMC Structure, Bollinger+Supertrend, Scalping

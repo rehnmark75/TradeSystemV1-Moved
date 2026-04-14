@@ -294,3 +294,15 @@ def _auto_register_smc_simple():
 
 # Run auto-registration when module is imported
 _auto_register_smc_simple()
+
+
+def _auto_register_xau_gold():
+    """Auto-register XAU_GOLD strategy if available"""
+    try:
+        from .xau_gold_strategy import XAUGoldStrategy  # noqa: F401
+        logger.debug("✅ Auto-registered XAU_GOLD strategy")
+    except ImportError as e:
+        logger.warning(f"⚠️ Could not auto-register XAU_GOLD: {e}")
+
+
+_auto_register_xau_gold()

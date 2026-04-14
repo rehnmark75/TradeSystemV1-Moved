@@ -157,10 +157,13 @@ class SignalDetector:
             'VP': self._force_init_volume_profile,
             'FVG_RETEST': self._force_init_fvg_retest,
             'FVG': self._force_init_fvg_retest,
+            'XAU_GOLD': self._force_init_xau_gold,
+            'XAU': self._force_init_xau_gold,
+            'GOLD': self._force_init_xau_gold,
         }
 
         if strategy_name not in init_map:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, VOLUME_PROFILE, FVG_RETEST."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, VOLUME_PROFILE, FVG_RETEST, XAU_GOLD."
 
         return init_map[strategy_name]()
 
@@ -194,6 +197,15 @@ class SignalDetector:
             return True, "Volume Profile strategy force-initialized"
         except Exception as e:
             return False, f"Failed to force-init Volume Profile: {e}"
+
+    def _force_init_xau_gold(self) -> Tuple[bool, str]:
+        """Force-initialize XAU_GOLD strategy for backtest."""
+        try:
+            self.xau_gold_strategy = None  # Lazy-loaded in detect_xau_gold_signals
+            self.logger.info("🔧 Force-initialized XAU_GOLD strategy (lazy-load)")
+            return True, "XAU_GOLD strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init XAU_GOLD: {e}"
 
     def _force_init_fvg_retest(self) -> Tuple[bool, str]:
         """Force-initialize FVG Retest strategy for backtest"""
@@ -504,6 +516,101 @@ class SignalDetector:
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
 
+    @staticmethod
+    def _is_gold_epic(epic: str) -> bool:
+        if not epic:
+            return False
+        e = epic.upper()
+        return 'GOLD' in e or 'XAU' in e
+
+    def detect_xau_gold_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None
+    ) -> Optional[Dict]:
+        """Detect XAU_GOLD strategy signals (gold-specific 3-tier SMC)."""
+        try:
+            # Lazy-init via strategy registry (keeps pattern consistent)
+            if not hasattr(self, 'xau_gold_strategy') or self.xau_gold_strategy is None:
+                try:
+                    from .strategies.xau_gold_strategy import create_xau_gold_strategy
+                except ImportError:
+                    from forex_scanner.core.strategies.xau_gold_strategy import create_xau_gold_strategy
+                self.xau_gold_strategy = create_xau_gold_strategy(
+                    db_manager=self.db_manager,
+                    logger=self.logger,
+                )
+                self.logger.info("✅ XAU_GOLD strategy initialized (lazy-load)")
+
+            # Timeframes from strategy's own config
+            cfg = self.xau_gold_strategy.config
+            htf_tf = cfg.htf_timeframe
+            trigger_tf = cfg.trigger_timeframe
+            entry_tf = cfg.entry_timeframe
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+
+            # Reset cooldowns at start of new backtest
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_xau_gold_backtest_id', None) != current_id:
+                    self._xau_gold_backtest_id = current_id
+                    self.xau_gold_strategy.reset_cooldowns()
+
+            # Lookbacks: 4H needs ~200 bars for EMA50/EMA100 + atr percentile
+            htf_lookback = 4 * 220  # ~220 4H bars = ~880 hours (~37 days)
+            trigger_lookback = 200  # ~200h for 1H BOS + MACD (also drives bos_search_bars=48 window)
+            entry_lookback = 200    # ~200h for 15m (800 bars) — give pullback time to develop
+
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe=htf_tf, lookback_hours=htf_lookback
+            )
+            df_4h = self._filter_incomplete_candles(df_4h, htf_tf)
+            if df_4h is None or len(df_4h) < 80:
+                self.logger.debug(f"⚠️ [XAU_GOLD] Insufficient {htf_tf} data for {epic}: {0 if df_4h is None else len(df_4h)} bars")
+                return None
+
+            df_trigger = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe=trigger_tf, lookback_hours=trigger_lookback
+            )
+            df_trigger = self._filter_incomplete_candles(df_trigger, trigger_tf)
+            if df_trigger is None or len(df_trigger) < 60:
+                self.logger.info(f"⚠️ [XAU_GOLD] Insufficient {trigger_tf} data for {epic}: {0 if df_trigger is None else len(df_trigger)} bars")
+                return None
+
+            df_entry = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe=entry_tf, lookback_hours=entry_lookback
+            )
+            df_entry = self._filter_incomplete_candles(df_entry, entry_tf)
+            if df_entry is None or len(df_entry) < 30:
+                self.logger.info(f"⚠️ [XAU_GOLD] Insufficient {entry_tf} data for {epic}: {0 if df_entry is None else len(df_entry)} bars")
+                return None
+
+            signal = self.xau_gold_strategy.detect_signal(
+                df_trigger=df_trigger,
+                df_4h=df_4h,
+                df_entry=df_entry,
+                epic=epic,
+                pair=pair,
+            )
+
+            if signal:
+                signal = self._add_market_context(signal, df_trigger)
+
+            self.xau_gold_strategy.flush_rejections()
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ [XAU_GOLD] Error detecting signals for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
     def detect_signals_all_strategies(
         self,
         epic: str,
@@ -554,6 +661,20 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [VOLUME_PROFILE] Error for {epic}: {e}")
                     individual_results['volume_profile'] = None
+
+            elif self._is_gold_epic(epic):
+                try:
+                    self.logger.debug(f"🔍 [XAU_GOLD] Starting detection for {epic}")
+                    signal = self.detect_xau_gold_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['xau_gold'] = signal
+                    if signal:
+                        all_signals.append(signal)
+                        self.logger.info(f"✅ [XAU_GOLD] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.2f}")
+                    else:
+                        self.logger.debug(f"📊 [XAU_GOLD] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [XAU_GOLD] Error for {epic}: {e}")
+                    individual_results['xau_gold'] = None
 
             else:
                 # Default: SMC_SIMPLE (always enabled after January 2026 cleanup)

@@ -19,7 +19,13 @@ EPIC_MAP = {
     "EURJPY.100.MINI": "CS.D.EURJPY.MINI.IP",
     "AUDJPY.100.MINI": "CS.D.AUDJPY.MINI.IP",
     "NZDUSD.1.MINI": "CS.D.NZDUSD.MINI.IP",
-    "USDCHF.1.MINI": "CS.D.USDCHF.MINI.IP"
+    "USDCHF.1.MINI": "CS.D.USDCHF.MINI.IP",
+    "CFEGOLD.1.CEE": "CS.D.CFEGOLD.CEE.IP",
+}
+
+# Per-epic order sizes (default 1.0 for FX, smaller for instruments like gold)
+EPIC_ORDER_SIZES = {
+    "CS.D.CFEGOLD.CEE.IP": 0.1,
 }
 
 # Trading blacklist - prevent trading for specific epics (scan-only mode)

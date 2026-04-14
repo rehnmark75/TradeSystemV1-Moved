@@ -35,8 +35,11 @@ def get_point_value(epic: str) -> float:
     # Standard forex pairs use 4 decimal places (0.0001 per pip)
     elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
         return 0.0001
+    # Gold (CFEGOLD): 1 pip = $0.1 price movement
+    elif "CFEGOLD" in epic or "GOLD" in epic:
+        return 0.1
     else:
-        # For indices, commodities, etc.
+        # For indices, other commodities, etc.
         return 1.0
 
 

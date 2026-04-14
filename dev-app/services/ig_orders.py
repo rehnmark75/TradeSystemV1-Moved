@@ -15,12 +15,12 @@ async def has_open_position(epic: str, auth_headers: dict) -> bool:
         return any(pos["market"]["epic"] == epic for pos in positions)
 
 
-async def place_market_order(auth_headers, market_epic, direction, currency_code, sl_limit, limit_distance=None):
+async def place_market_order(auth_headers, market_epic, direction, currency_code, sl_limit, limit_distance=None, size=1.0):
     payload = {
         "epic": market_epic,
         "expiry": "-",
         "direction": direction,
-        "size": 1.0,
+        "size": size,
         "orderType": "MARKET",
         "guaranteedStop": False,
         "forceOpen": True,
@@ -295,6 +295,8 @@ def get_point_value(epic: str) -> float:
         return 0.01
     elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
         return 0.0001
+    elif "CFEGOLD" in epic or "GOLD" in epic:
+        return 0.1
     return 1.0
 
 

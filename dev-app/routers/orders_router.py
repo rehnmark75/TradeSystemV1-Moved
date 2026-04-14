@@ -31,7 +31,7 @@ from services.price_utils import ig_points_to_price
 from services.trading_alert_service import get_alert_service
 
 from services.keyvault import get_secret
-from config import EPIC_MAP, API_BASE_URL, TRADE_COOLDOWN_ENABLED, TRADE_COOLDOWN_MINUTES, EPIC_SPECIFIC_COOLDOWNS, TRADING_BLACKLIST
+from config import EPIC_MAP, API_BASE_URL, TRADE_COOLDOWN_ENABLED, TRADE_COOLDOWN_MINUTES, EPIC_SPECIFIC_COOLDOWNS, TRADING_BLACKLIST, EPIC_ORDER_SIZES
 from dependencies import get_ig_auth_headers, ig_token_cache
 import logging
 import asyncio
@@ -839,12 +839,13 @@ async def ig_place_order(
         # =================================================================
         # MARKET ORDER: Original logic (unchanged)
         # =================================================================
-        logger.info(f"📤 Placing MARKET order: {symbol} {direction} with SL: {sl_limit}, TP: {limit_distance}")
+        order_size = body.size or EPIC_ORDER_SIZES.get(symbol, 1.0)
+        logger.info(f"📤 Placing MARKET order: {symbol} {direction} size={order_size} SL: {sl_limit}, TP: {limit_distance}")
 
         # FIXED: Catch broker duplicate position rejection and convert to HTTP 409
         # 🛡️ SCALPING FAILSAFE: If broker rejects tight SL/TP, retry with 10pt minimum
         try:
-            result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
+            result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance, size=order_size)
         except httpx.HTTPStatusError as broker_error:
             # Check if IG rejected due to existing position or SL/TP issue
             error_text = ""
@@ -887,7 +888,7 @@ async def ig_place_order(
 
                 # Retry the order with adjusted levels
                 try:
-                    result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance)
+                    result = await place_market_order(trading_headers, symbol, direction, currency_code, sl_limit, limit_distance, size=order_size)
                     logger.info(f"✅ Order placed successfully with failsafe levels: SL={sl_limit}, TP={limit_distance}")
                     failsafe_succeeded = True
                 except Exception as retry_error:

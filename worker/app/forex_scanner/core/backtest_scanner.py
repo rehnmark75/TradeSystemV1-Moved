@@ -888,6 +888,9 @@ class BacktestScanner(IntelligentForexScanner):
                 'ICT_SILVER_BULLET': 'detect_silver_bullet_signals',  # Full name
                 'FVG_RETEST': 'detect_fvg_retest_signals',  # FVG Retest dual-mode strategy
                 'FVG': 'detect_fvg_retest_signals',  # Short form
+                'XAU_GOLD': 'detect_xau_gold_signals',  # Gold-optimized 3-tier SMC
+                'XAU': 'detect_xau_gold_signals',
+                'GOLD': 'detect_xau_gold_signals',
             }
 
             # Use specific strategy if requested, otherwise use all strategies

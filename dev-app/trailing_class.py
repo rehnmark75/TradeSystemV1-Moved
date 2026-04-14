@@ -338,6 +338,8 @@ class FixedPointsTrailing(TrailingStrategy):
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 
@@ -377,6 +379,8 @@ class PercentageTrailing(TrailingStrategy):
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 
@@ -456,6 +460,8 @@ class ATRTrailing(TrailingStrategy):
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 
@@ -533,6 +539,8 @@ class ChandelierTrailing(TrailingStrategy):
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 
@@ -697,6 +705,8 @@ class SmartTrailing(TrailingStrategy):
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 
@@ -1161,6 +1171,8 @@ class Progressive3StageTrailing(TrailingStrategy):
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 
@@ -1253,6 +1265,8 @@ class AdvancedTrailingManager:
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
     
     def should_update_trail(self, trade: TradeLog, current_price: float, 
@@ -1376,6 +1390,8 @@ class AdvancedTrailingManager:
             return 0.01
         elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
             return 0.0001
+        elif "CFEGOLD" in epic or "GOLD" in epic:
+            return 0.1
         return 1.0
 
 

@@ -73,7 +73,9 @@ PAIR_INFO = {
     # Cross pairs
     'CS.D.EURGBP.MINI.IP': {'pair': 'EURGBP', 'pip_multiplier': 10000},
     'CS.D.EURAUD.MINI.IP': {'pair': 'EURAUD', 'pip_multiplier': 10000},
-    'CS.D.GBPAUD.MINI.IP': {'pair': 'GBPAUD', 'pip_multiplier': 10000}
+    'CS.D.GBPAUD.MINI.IP': {'pair': 'GBPAUD', 'pip_multiplier': 10000},
+    # Commodities (pip_size = 0.1 → multiplier 10)
+    'CS.D.CFEGOLD.CEE.IP': {'pair': 'XAUUSD', 'pip_multiplier': 10},
 }
 
 EPIC_LIST: List[str] = [
@@ -85,7 +87,8 @@ EPIC_LIST: List[str] = [
     'CS.D.USDCAD.MINI.IP',
     'CS.D.NZDUSD.MINI.IP',
     'CS.D.EURJPY.MINI.IP',
-    'CS.D.AUDJPY.MINI.IP'
+    'CS.D.AUDJPY.MINI.IP',
+    'CS.D.CFEGOLD.CEE.IP',
 ]
 
 # Epic mapping (scanner epic -> trading API epic)
@@ -98,7 +101,8 @@ EPIC_MAP = {
     "CS.D.EURJPY.MINI.IP": "EURJPY.100.MINI",
     "CS.D.AUDJPY.MINI.IP": "AUDJPY.100.MINI",
     "CS.D.NZDUSD.MINI.IP": "NZDUSD.1.MINI",
-    "CS.D.USDCHF.MINI.IP": "USDCHF.1.MINI"
+    "CS.D.USDCHF.MINI.IP": "USDCHF.1.MINI",
+    "CS.D.CFEGOLD.CEE.IP": "CFEGOLD.1.CEE",
 }
 
 REVERSE_EPIC_MAP = {v: k for k, v in EPIC_MAP.items()}
