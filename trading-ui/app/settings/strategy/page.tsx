@@ -633,7 +633,7 @@ export default function UnifiedStrategySettings() {
           <button
             key={key}
             type="button"
-            className={`pair-status-btn ${strategy === key ? "selected" : ""}`}
+            className={`pair-status-btn strategy-selector-btn ${strategy === key ? "selected" : ""}`}
             onClick={() => setStrategy(key)}
           >
             {STRATEGIES[key].label}

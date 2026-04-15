@@ -3725,6 +3725,38 @@ input {
   font-weight: 600;
 }
 
+.strategy-selector-btn {
+  position: relative;
+  min-width: 132px;
+  padding: 8px 14px;
+  border-radius: 10px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.strategy-selector-btn.selected {
+  background: linear-gradient(180deg, #133a63 0%, #0f2f51 100%);
+  border-color: #0f2f51;
+  color: #fff;
+  box-shadow: 0 8px 20px rgba(15, 47, 81, 0.22);
+  transform: translateY(-1px);
+}
+
+.strategy-selector-btn.selected::after {
+  content: "";
+  position: absolute;
+  left: 10px;
+  right: 10px;
+  bottom: -6px;
+  height: 3px;
+  border-radius: 999px;
+  background: #d28b00;
+}
+
+.strategy-selector-btn:hover {
+  border-color: #0f2f51;
+}
+
 .override-grid {
   display: grid;
   gap: 12px;
