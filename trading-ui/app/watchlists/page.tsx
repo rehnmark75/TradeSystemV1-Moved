@@ -179,6 +179,14 @@ type WatchlistDetail = WatchlistRow & {
   latest_scanner_timestamp: string | null;
 };
 
+const CLAUDE_LONG_ONLY_CONTEXT = {
+  trading_perspective: "long_only",
+  allowed_trade_side: "buy",
+  disallowed_trade_side: "sell",
+  instruction:
+    "Analyze this stock strictly from a long-only perspective. The user can only take buy trades. Do not recommend short or sell-side entries. If the setup is unattractive for a long entry, respond with HOLD, AVOID, or equivalent no-trade guidance."
+} as const;
+
 type NoteEntry = {
   id: number;
   ticker: string;
@@ -474,8 +482,8 @@ export default function Page() {
     setClaudeMessage((prev) => ({ ...prev, [ticker]: "" }));
     const endpoint = signalId ? "claude/analyze" : "claude/analyze-watchlist";
     const body = signalId
-      ? { signal_id: signalId }
-      : { watchlist_name: watchlist, ticker, scan_date: scanDateValue };
+      ? { signal_id: signalId, ...CLAUDE_LONG_ONLY_CONTEXT }
+      : { watchlist_name: watchlist, ticker, scan_date: scanDateValue, ...CLAUDE_LONG_ONLY_CONTEXT };
     const res = await fetch(`${apiPath(endpoint)}`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
