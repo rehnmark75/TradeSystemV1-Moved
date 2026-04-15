@@ -31,6 +31,7 @@ export default function SettingsSidebar() {
       <div className="settings-sidebar-section">
         <h3>Trailing Stops</h3>
         <Link href="/settings/trailing">Trailing Settings</Link>
+        <Link href="/settings/trailing-ratios">Trailing Ratios</Link>
       </div>
     </nav>
   );

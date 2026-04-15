@@ -897,11 +897,11 @@ DEFAULT_TRAILING_RATIOS = {
 }
 
 DEFAULT_SCALP_TRAILING_RATIOS = {
-    'early_be_trigger_ratio': 0.50,
+    'early_be_trigger_ratio': 0.33,
     'stage1_trigger_ratio': 0.65,
     'stage2_trigger_ratio': 1.00,
     'stage3_trigger_ratio': 1.30,
-    'break_even_trigger_ratio': 0.50,
+    'break_even_trigger_ratio': 0.33,
     'partial_close_trigger_ratio': 0.80,
 
     'stage1_lock_ratio': 0.33,
@@ -952,15 +952,24 @@ def compute_sltp_trailing_config(
     """
     result = dict(static_config)
 
-    # Select ratio profile
-    if is_scalp:
-        ratios = dict(DEFAULT_SCALP_TRAILING_RATIOS)
-        if epic and epic in PAIR_SCALP_TRAILING_RATIO_OVERRIDES:
-            ratios.update(PAIR_SCALP_TRAILING_RATIO_OVERRIDES[epic])
-    else:
-        ratios = dict(DEFAULT_TRAILING_RATIOS)
-        if epic and epic in PAIR_TRAILING_RATIO_OVERRIDES:
-            ratios.update(PAIR_TRAILING_RATIO_OVERRIDES[epic])
+    # Select ratio profile. Primary source is the DB (trailing_ratio_config,
+    # 120s cache, per-pair overrides + DEFAULT inheritance). The file-level
+    # DEFAULT_*_TRAILING_RATIOS dicts below are retained as a last-resort
+    # fallback for demo if the DB is unreachable at startup.
+    file_defaults = DEFAULT_SCALP_TRAILING_RATIOS if is_scalp else DEFAULT_TRAILING_RATIOS
+    ratios = dict(file_defaults)
+    try:
+        from services.trailing_ratio_service import get_trailing_ratio_service
+        db_ratios = get_trailing_ratio_service().get_ratios(epic, is_scalp=is_scalp)
+        for k, v in db_ratios.items():
+            if v is not None:
+                ratios[k] = v
+    except Exception as e:
+        # Keep file defaults; the service already logs the root cause.
+        import logging
+        logging.getLogger(__name__).warning(
+            f"trailing_ratio_service unavailable, using file defaults: {e}"
+        )
 
     # Compute trigger points from TP
     result['early_breakeven_trigger_points'] = max(
