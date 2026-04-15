@@ -99,6 +99,21 @@ class SMCSimpleConfig:
     momentum_staleness_enabled: bool = True
     max_momentum_staleness_bars: int = 8  # Max bars since swing break (~2 hours on 15m)
 
+    # v5.0.0: CONTINUATION ENTRY (opt-in per pair)
+    # In strongly trending conditions, allows entry without a pullback by relaxing
+    # the momentum branch thresholds. Disabled globally; enable per-pair via
+    # smc_simple_pair_overrides.parameter_overrides JSONB.
+    # Trend gate: market_regime == 'trending' AND ADX >= min_adx AND efficiency_ratio >= min_efficiency
+    continuation_entry_enabled: bool = False
+    continuation_entry_min_adx: float = 25.0
+    continuation_entry_min_efficiency: float = 0.40
+    continuation_entry_max_extension_atr: float = 1.5   # vs 0.50 in standard momentum path
+    continuation_entry_min_depth: float = -1.0           # vs -0.15 global in standard momentum
+    continuation_entry_max_bars_since_break: int = 8     # staleness guard (same default as momentum)
+    continuation_entry_sl_atr_multiple: float = 1.0      # SL = ATR × this multiple
+    continuation_entry_sl_min_pips: float = 8.0          # floor so tight-ATR regimes don't produce 3-pip stops
+    continuation_entry_sl_max_pips: float = 35.0         # ceiling so blow-off ATR doesn't produce 60-pip stops
+
     # LIMIT ORDER CONFIGURATION
     limit_order_enabled: bool = True
     limit_expiry_minutes: int = 45
@@ -627,6 +642,27 @@ class SMCSimpleConfig:
             if po.get('mfi_filter_enabled') is not None:
                 return bool(po['mfi_filter_enabled'])
         return self.mfi_filter_enabled
+
+    # v5.0.0: CONTINUATION ENTRY getters
+    def get_pair_continuation_entry_enabled(self, epic: str) -> bool:
+        """Check if continuation entry mode is enabled for a specific pair."""
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get('continuation_entry_enabled') is not None:
+                return bool(po['continuation_entry_enabled'])
+        return self.continuation_entry_enabled
+
+    def get_pair_continuation_param(self, epic: str, key: str, default):
+        """Get a continuation entry parameter for a specific pair, with global fallback.
+
+        Supports per-pair JSONB override for any continuation_entry_* key.
+        Returns the default if neither the pair nor the global config has the key.
+        """
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            if po.get(key) is not None:
+                return type(default)(po[key])
+        return type(default)(getattr(self, key, default))
 
     def get_pair_mfi_filter_mode(self, epic: str) -> str:
         """Get MFI filter mode for a specific pair (MONITORING or ACTIVE)."""
@@ -1946,6 +1982,13 @@ class SMCSimpleConfigService:
             'rolling_perf_high_wr_threshold',
             'rolling_perf_low_wr_penalty', 'rolling_perf_very_low_wr_penalty',
             'rolling_perf_high_wr_bonus',
+            # CONTINUATION ENTRY (v5.0.0)
+            'continuation_entry_enabled',
+            'continuation_entry_min_adx', 'continuation_entry_min_efficiency',
+            'continuation_entry_max_extension_atr', 'continuation_entry_min_depth',
+            'continuation_entry_max_bars_since_break',
+            'continuation_entry_sl_atr_multiple',
+            'continuation_entry_sl_min_pips', 'continuation_entry_sl_max_pips',
         ]
 
         # Fields that must be integers (used for DataFrame slicing, loop counts, etc.)
@@ -1970,6 +2013,8 @@ class SMCSimpleConfigService:
             'sweep_min_conditions',
             # Pattern confirmation int fields
             'rsi_divergence_lookback',
+            # Continuation entry int fields
+            'continuation_entry_max_bars_since_break',
         }
 
         for attr_name in direct_mappings:
@@ -2303,6 +2348,15 @@ class SMCSimpleConfigService:
     def get_pair_mfi_filter_enabled(self, epic: str) -> bool:
         """Check if MFI filter is enabled for a specific pair"""
         return self.get_config().get_pair_mfi_filter_enabled(epic)
+
+    # v5.0.0: CONTINUATION ENTRY service accessors
+    def get_pair_continuation_entry_enabled(self, epic: str) -> bool:
+        """Check if continuation entry mode is enabled for a specific pair"""
+        return self.get_config().get_pair_continuation_entry_enabled(epic)
+
+    def get_pair_continuation_param(self, epic: str, key: str, default):
+        """Get a continuation entry parameter for a specific pair, with global fallback"""
+        return self.get_config().get_pair_continuation_param(epic, key, default)
 
     def get_pair_mfi_filter_mode(self, epic: str) -> str:
         """Get MFI filter mode for a specific pair"""

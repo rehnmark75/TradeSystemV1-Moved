@@ -2220,6 +2220,42 @@ class SMCSimpleStrategy:
             else:
                 entry_df = df_entry
 
+            # v5.0.0: CONTINUATION ENTRY — Early regime snapshot
+            # market_regime/adx_value/efficiency_ratio are normally written by
+            # _add_performance_metrics() AFTER tier 3.  When continuation_entry_enabled
+            # is True for this pair we compute them early so _check_pullback_zone can
+            # evaluate the trend gate (regime + ADX + efficiency_ratio).
+            _cont_regime = 'unknown'
+            _cont_adx = 0.0
+            _cont_er = 0.0
+            _cont_entry_enabled = (
+                hasattr(self, '_using_database_config') and self._using_database_config
+                and self._db_config
+                and self._db_config.get_pair_continuation_entry_enabled(epic)
+            )
+            if _cont_entry_enabled:
+                try:
+                    from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                        get_performance_metrics_calculator
+                    )
+                    _cont_calc = get_performance_metrics_calculator(self.logger)
+                    _cont_metrics = _cont_calc.calculate_metrics(
+                        df_5m=entry_df,
+                        df_15m=df_trigger,
+                        df_4h=df_4h,
+                        signal_data={'signal_type': direction},
+                        epic=epic
+                    )
+                    _cont_regime = _cont_metrics.market_regime or 'unknown'
+                    _cont_adx = float(_cont_metrics.adx_value or 0.0)
+                    _cont_er = float(_cont_metrics.efficiency_ratio or 0.0)
+                    self.logger.info(
+                        f"   📊 Continuation gate: regime={_cont_regime}, "
+                        f"ADX={_cont_adx:.1f}, ER={_cont_er:.2f}"
+                    )
+                except Exception as _cont_err:
+                    self.logger.debug(f"Continuation early metrics failed: {_cont_err}")
+
             pullback_result = self._check_pullback_zone(
                 entry_df,
                 direction,
@@ -2227,7 +2263,10 @@ class SMCSimpleStrategy:
                 opposite_swing,  # v1.6.0: Pass opposite swing for correct Fib calc
                 break_candle,
                 pip_value,
-                epic  # v2.6.0: Pass epic for pair-specific overrides
+                epic,  # v2.6.0: Pass epic for pair-specific overrides
+                continuation_regime=_cont_regime,
+                continuation_adx=_cont_adx,
+                continuation_er=_cont_er
             )
 
             # v2.24.0: Initialize pattern/divergence data for alternative entry detection
@@ -2372,8 +2411,11 @@ class SMCSimpleStrategy:
                     trigger_type = f"{trigger_type}{PATTERN_SUFFIX_DIV}"
                     trigger_details['enhanced_trigger'] = trigger_type
 
-            # v1.8.0: Log entry type (v2.24.0: added PATTERN and DIVERGENCE types)
-            if entry_type == 'MOMENTUM':
+            # v1.8.0: Log entry type (v2.24.0: added PATTERN/DIVERGENCE; v5.0.0: CONTINUATION)
+            if entry_type == 'CONTINUATION':
+                self.logger.info(f"   ✅ Entry Type: CONTINUATION (trend-following, no pullback required)")
+                self.logger.info(f"   ✅ Beyond Break: {pullback_depth*100:.1f}% | ADX={_cont_adx:.1f}, ER={_cont_er:.2f}, regime={_cont_regime}")
+            elif entry_type == 'MOMENTUM':
                 self.logger.info(f"   ✅ Entry Type: MOMENTUM (continuation)")
                 self.logger.info(f"   ✅ Beyond Break: {pullback_depth*100:.1f}%")
             elif entry_type == 'PATTERN':
@@ -2395,8 +2437,8 @@ class SMCSimpleStrategy:
             # v2.24.0: PATTERN and DIVERGENCE entries are allowed (alternative entries)
             # ================================================================
             if self.scalp_mode_enabled:
-                # Filter 1: Momentum-only (block pullback entries, allow PATTERN/DIVERGENCE)
-                allowed_entry_types = ['MOMENTUM', 'PATTERN', 'DIVERGENCE']
+                # Filter 1: Momentum-only (block pullback entries, allow PATTERN/DIVERGENCE/CONTINUATION)
+                allowed_entry_types = ['MOMENTUM', 'CONTINUATION', 'PATTERN', 'DIVERGENCE']
                 if self.scalp_momentum_only_filter and entry_type not in allowed_entry_types:
                     rejection_reason = f"Scalp filter: Non-momentum entry ({entry_type}) blocked"
                     self.logger.info(f"   ❌ {rejection_reason}")
@@ -3057,6 +3099,35 @@ class SMCSimpleStrategy:
                     # Use instance attributes (set from config)
                     fixed_sl_pips = self.fixed_stop_loss_pips
                     fixed_tp_pips = self.fixed_take_profit_pips
+
+                # v5.0.0: CONTINUATION ENTRY — ATR-referenced SL
+                # For entries that are already 0.5–1.5 ATR beyond the swing break,
+                # fixed-pip SL is structurally invalid (too tight). Replace it with
+                # ATR × sl_atr_multiple, clamped to [sl_min_pips, sl_max_pips].
+                if entry_type == 'CONTINUATION' and self._using_database_config and self._db_config:
+                    try:
+                        _atr_df = (entry_df if (entry_df is not None
+                                               and 'atr' in entry_df.columns
+                                               and len(entry_df) > 0)
+                                   else df_trigger)
+                        _cont_atr_val = self._calculate_atr(_atr_df)
+                        if _cont_atr_val > 0 and pip_value > 0:
+                            _sl_mult = float(self._db_config.get_pair_continuation_param(
+                                epic, 'continuation_entry_sl_atr_multiple', 1.0))
+                            _sl_floor = float(self._db_config.get_pair_continuation_param(
+                                epic, 'continuation_entry_sl_min_pips', 8.0))
+                            _sl_ceil = float(self._db_config.get_pair_continuation_param(
+                                epic, 'continuation_entry_sl_max_pips', 35.0))
+                            _atr_pips = _cont_atr_val / pip_value
+                            _cont_sl = max(_sl_floor, min(_sl_ceil, _atr_pips * _sl_mult))
+                            self.logger.info(
+                                f"   🎯 CONTINUATION SL: ATR-based {_cont_sl:.1f} pips "
+                                f"(ATR={_atr_pips:.1f} × {_sl_mult}, "
+                                f"clamp [{_sl_floor}, {_sl_ceil}])"
+                            )
+                            fixed_sl_pips = _cont_sl
+                    except Exception as _sl_e:
+                        self.logger.debug(f"Continuation ATR SL failed: {_sl_e}")
 
                 if fixed_sl_pips is not None and fixed_sl_pips > 0:
                     # v4.0.0: Apply regime-gated multipliers to base SL/TP
@@ -5055,7 +5126,10 @@ class SMCSimpleStrategy:
         opposite_swing: float,
         break_candle: Dict,
         pip_value: float,
-        epic: str = None
+        epic: str = None,
+        continuation_regime: str = 'unknown',
+        continuation_adx: float = 0.0,
+        continuation_er: float = 0.0
     ) -> Dict:
         """
         TIER 3: Check if price is in valid entry zone (pullback OR momentum continuation)
@@ -5232,14 +5306,43 @@ class SMCSimpleStrategy:
         else:
             pair_momentum_min = self._get_pair_param(epic, 'MOMENTUM_MIN_DEPTH', self.momentum_min_depth)
 
+        # v5.0.0: Pre-compute continuation flags (used inside momentum branch)
+        # _use_continuation = True only when trend gate passes AND feature is enabled for pair.
+        # _eff_max_ext = effective max ATR extension (relaxed for continuation, standard otherwise).
+        _use_continuation = False
+        _eff_max_ext = self.max_extension_atr  # default: standard momentum cap
+        _eff_max_bars = self.max_momentum_staleness_bars  # default: standard staleness guard
+        if (hasattr(self, '_using_database_config') and self._using_database_config
+                and self._db_config
+                and self._db_config.get_pair_continuation_entry_enabled(epic)):
+            _trend_ok = (
+                continuation_regime == 'trending'
+                and continuation_adx >= float(self._db_config.get_pair_continuation_param(
+                    epic, 'continuation_entry_min_adx', 25.0))
+                and continuation_er >= float(self._db_config.get_pair_continuation_param(
+                    epic, 'continuation_entry_min_efficiency', 0.40))
+            )
+            if _trend_ok:
+                _use_continuation = True
+                _cont_min_depth = float(self._db_config.get_pair_continuation_param(
+                    epic, 'continuation_entry_min_depth', -1.0))
+                _eff_max_ext = float(self._db_config.get_pair_continuation_param(
+                    epic, 'continuation_entry_max_extension_atr', 1.5))
+                _eff_max_bars = int(self._db_config.get_pair_continuation_param(
+                    epic, 'continuation_entry_max_bars_since_break', 8))
+                # Relax pair_momentum_min to the continuation threshold
+                pair_momentum_min = min(pair_momentum_min, _cont_min_depth)
+
         # Check for momentum continuation entry (price beyond break point)
         if pullback_depth < 0:
-            if self.momentum_mode_enabled:
+            if self.momentum_mode_enabled or _use_continuation:
                 # v1.8.0: Allow momentum entries within configured range
                 # v2.12.0: Use direction-aware momentum_min_depth
+                # v5.0.0: _use_continuation may relax pair_momentum_min further
                 if pair_momentum_min <= pullback_depth <= self.momentum_max_depth:
 
                     # v2.18.0: ATR-based extension filter (prevents chasing extended moves)
+                    # v5.0.0: _eff_max_ext is relaxed when continuation gate passes
                     if self.max_extension_atr_enabled:
                         atr = self._calculate_atr(df)
                         if atr > 0 and swing_range > 0:
@@ -5247,27 +5350,29 @@ class SMCSimpleStrategy:
                             extension_distance = abs(pullback_depth) * swing_range
                             extension_atr = extension_distance / atr
 
-                            if extension_atr > self.max_extension_atr:
+                            if extension_atr > _eff_max_ext:
                                 extension_pips = extension_distance / pip_value
-                                max_pips = (self.max_extension_atr * atr) / pip_value
+                                max_pips = (_eff_max_ext * atr) / pip_value
                                 return {
                                     'valid': False,
-                                    'reason': f"Extension too far ({extension_atr:.2f} ATR / {extension_pips:.1f} pips > {self.max_extension_atr} ATR / {max_pips:.1f} pips max)"
+                                    'reason': f"Extension too far ({extension_atr:.2f} ATR / {extension_pips:.1f} pips > {_eff_max_ext} ATR / {max_pips:.1f} pips max)"
                                 }
 
                     # v2.18.0: Momentum staleness filter (rejects old swing breaks)
+                    # v5.0.0: _eff_max_bars comes from continuation config when gate passes
                     if self.momentum_staleness_enabled and break_candle:
                         bars_since_break = break_candle.get('bars_ago', 0)
-                        if bars_since_break > self.max_momentum_staleness_bars:
+                        if bars_since_break > _eff_max_bars:
                             return {
                                 'valid': False,
-                                'reason': f"Momentum entry too stale ({bars_since_break} bars since break > {self.max_momentum_staleness_bars} max)"
+                                'reason': f"Momentum entry too stale ({bars_since_break} bars since break > {_eff_max_bars} max)"
                             }
 
-                    entry_type = 'MOMENTUM'
+                    # v5.0.0: Tag as CONTINUATION when trend gate passed, else standard MOMENTUM
+                    entry_type = 'CONTINUATION' if _use_continuation else 'MOMENTUM'
                     # v2.23.0: Add trigger type for tracking
                     trigger_type = TRIGGER_SWING_MOMENTUM
-                    # Momentum entries are not in "optimal" Fib zone
+                    # Momentum/continuation entries are not in "optimal" Fib zone
                     return {
                         'valid': True,
                         'entry_price': entry_price,
@@ -5276,7 +5381,7 @@ class SMCSimpleStrategy:
                         'entry_type': entry_type,
                         'trigger_type': trigger_type,
                         'swing_range_pips': range_pips,
-                        'reason': f"Momentum continuation ({pullback_depth*100:.1f}% beyond break)"
+                        'reason': f"{'Continuation' if _use_continuation else 'Momentum'} entry ({pullback_depth*100:.1f}% beyond break)"
                     }
                 elif pullback_depth < pair_momentum_min:
                     return {
@@ -5284,7 +5389,7 @@ class SMCSimpleStrategy:
                         'reason': f"Price too far beyond break ({pullback_depth*100:.1f}% < {pair_momentum_min*100:.0f}%)"
                     }
             else:
-                # Momentum mode disabled - reject prices beyond break
+                # Momentum mode disabled and continuation gate did not pass - reject
                 return {
                     'valid': False,
                     'reason': f"Price beyond break point ({pullback_depth*100:.1f}% - momentum mode disabled)"
