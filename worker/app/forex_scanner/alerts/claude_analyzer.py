@@ -611,7 +611,11 @@ class ClaudeAnalyzer:
                 if 'scalp_mode' in signal:
                     is_scalp = bool(signal.get('scalp_mode'))
                 else:
-                    is_scalp = strategy_htf != '4h' and strategy_entry == '1m'
+                    # If strategy_indicators report any non-swing timeframe
+                    # (HTF faster than 4h, or entry finer than 5m), treat as
+                    # scalp so the fetch path matches the chart generator's
+                    # role map (which keys off the same strategy_indicators).
+                    is_scalp = strategy_htf != '4h' or strategy_entry != '5m'
 
             if is_scalp:
                 self.logger.info(
