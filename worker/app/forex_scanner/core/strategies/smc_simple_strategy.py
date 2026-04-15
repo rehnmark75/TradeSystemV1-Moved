@@ -3108,10 +3108,13 @@ class SMCSimpleStrategy:
                 # ATR × sl_atr_multiple, clamped to [sl_min_pips, sl_max_pips].
                 if entry_type == 'CONTINUATION' and self._using_database_config and self._db_config:
                     try:
-                        _atr_df = (entry_df if (entry_df is not None
-                                               and 'atr' in entry_df.columns
-                                               and len(entry_df) > 0)
-                                   else df_trigger)
+                        # Prefer trigger TF (5m scalp / 15m swing). Entry-TF ATR
+                        # in scalp mode is 1m and understates true volatility by ~50%,
+                        # which would place continuation stops inside normal noise.
+                        _atr_df = (df_trigger if (df_trigger is not None
+                                                 and 'atr' in df_trigger.columns
+                                                 and len(df_trigger) > 0)
+                                   else entry_df)
                         _cont_atr_val = self._calculate_atr(_atr_df)
                         if _cont_atr_val > 0 and pip_value > 0:
                             _sl_mult = float(self._db_config.get_pair_continuation_param(
