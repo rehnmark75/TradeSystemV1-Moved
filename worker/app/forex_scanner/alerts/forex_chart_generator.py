@@ -248,6 +248,12 @@ class ForexChartGenerator:
                 if smc_data and is_trigger_or_entry:
                     self._add_smc_annotations(ax, df, signal, smc_data, tf, role=role)
 
+                # Swing pivot labels (HH/HL/LH/LL) on the macro 4H panel
+                if role == 'macro' and signal:
+                    macro_structure = signal.get('_macro_structure')
+                    if macro_structure:
+                        self._add_macro_swing_markers(ax, df, macro_structure)
+
                 # Set labels and title — append role label so scalp charts are self-describing
                 role_label = {
                     'macro': 'Macro',
@@ -1423,6 +1429,88 @@ class ForexChartGenerator:
         except Exception as e:
             logger.error(f"Error generating single timeframe chart: {e}")
             return None
+
+    def _add_macro_swing_markers(self, ax, df: pd.DataFrame, macro_structure: Dict[str, Any]) -> None:
+        """
+        Draw lightweight swing-pivot labels (HH/HL/LH/LL) on the 4H macro panel.
+
+        Uses the pre-computed macro_structure dict from _compute_4h_macro_structure so
+        the visual labels exactly match the authoritative text injected into the prompt.
+        """
+        try:
+            highs = df['High'].values if 'High' in df.columns else df['high'].values
+            lows = df['Low'].values if 'Low' in df.columns else df['low'].values
+
+            LB = 3  # same window as claude_analyzer
+            n = len(highs)
+            swing_highs = []
+            swing_lows = []
+            for i in range(LB, n - LB):
+                if highs[i] == max(highs[i-LB:i+LB+1]):
+                    swing_highs.append((i, float(highs[i])))
+                if lows[i] == min(lows[i-LB:i+LB+1]):
+                    swing_lows.append((i, float(lows[i])))
+
+            # Take most recent 4 of each
+            recent_highs = swing_highs[-4:]
+            recent_lows = swing_lows[-4:]
+
+            # Label swing highs
+            for j, (idx, val) in enumerate(recent_highs):
+                if j == 0:
+                    label = 'H'
+                else:
+                    label = 'HH' if val > recent_highs[j-1][1] else 'LH'
+                ax.annotate(
+                    label,
+                    xy=(idx, val),
+                    xytext=(0, 6),
+                    textcoords='offset points',
+                    fontsize=7,
+                    color='#FF6B35',
+                    fontweight='bold',
+                    ha='center',
+                )
+                ax.plot(idx, val, marker='v', color='#FF6B35', markersize=5, zorder=5)
+
+            # Label swing lows
+            for j, (idx, val) in enumerate(recent_lows):
+                if j == 0:
+                    label = 'L'
+                else:
+                    label = 'HL' if val > recent_lows[j-1][1] else 'LL'
+                ax.annotate(
+                    label,
+                    xy=(idx, val),
+                    xytext=(0, -10),
+                    textcoords='offset points',
+                    fontsize=7,
+                    color='#4FC3F7',
+                    fontweight='bold',
+                    ha='center',
+                )
+                ax.plot(idx, val, marker='^', color='#4FC3F7', markersize=5, zorder=5)
+
+            # Add trend label text in top-left corner
+            trend = macro_structure.get('trend_label', '')
+            if trend:
+                color_map = {
+                    'BULLISH': '#4CAF50',
+                    'RECOVERING': '#8BC34A',
+                    'RANGING': '#FFC107',
+                    'WEAKENING': '#FF9800',
+                    'BEARISH': '#F44336',
+                }
+                color = color_map.get(trend, '#FFFFFF')
+                ax.text(
+                    0.01, 0.97, f'4H: {trend}',
+                    transform=ax.transAxes,
+                    fontsize=8, fontweight='bold',
+                    color=color, va='top',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='#1a1a2e', alpha=0.7, edgecolor=color)
+                )
+        except Exception as e:
+            logger.debug(f"_add_macro_swing_markers error: {e}")
 
 
 # Factory function

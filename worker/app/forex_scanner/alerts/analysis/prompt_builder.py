@@ -817,9 +817,25 @@ This is a MOMENTUM continuation trade (price beyond swing break).
 12. ✓ Are there any concerning patterns (engulfing candles, dojis at entry)?
 13. ✓ Does the entry type box (5m) show favorable conditions?"""
 
+                # Authoritative 4H structure block — pre-computed, not inferred
+                macro_structure = signal.get('_macro_structure') or {}
+                macro_auth_block = ""
+                if macro_structure and macro_structure.get('trend_label', 'UNKNOWN') != 'UNKNOWN':
+                    seq_str = ' → '.join(macro_structure.get('swing_sequence', [])) or 'insufficient pivots'
+                    ema_str = macro_structure.get('ema50_relation', 'unknown')
+                    macro_auth_block = f"""
+⚠️ [AUTHORITATIVE PRE-COMPUTED DATA — DO NOT OVERRIDE WITH VISUAL IMPRESSION]
+4H Macro Structure (computed from raw price data — treat as ground truth):
+  • Trend: {macro_structure['trend_label']}
+  • Recent swing sequence (oldest → newest): {seq_str}
+  • Price vs 4H EMA50: {ema_str}
+Your structure assessment of the 4H panel MUST agree with this data. If the chart appears to contradict it, prioritise this data.
+[END AUTHORITATIVE DATA]
+"""
+
                 chart_instruction = f"""
 ## CHART ANALYSIS (CRITICAL - EXAMINE CAREFULLY)
-
+{macro_auth_block}
 The attached chart shows multi-timeframe forex analysis with the following elements:
 
 {tf_display_section}

@@ -640,6 +640,16 @@ class ClaudeAnalyzer:
                 if df_4h is not None and len(df_4h) >= 20:
                     candles['4h'] = df_4h
                     self.logger.info(f"📊 Fetched 4H: {len(df_4h)} bars")
+                    # Compute authoritative structure and attach to signal so
+                    # prompt_builder and chart_generator can read it
+                    if signal is not None:
+                        macro = self._compute_4h_macro_structure(df_4h)
+                        signal['_macro_structure'] = macro
+                        self.logger.info(
+                            f"📊 4H macro: {macro['trend_label']} "
+                            f"swings={macro['swing_sequence']} "
+                            f"EMA50={macro['ema50_relation']}"
+                        )
                 else:
                     self.logger.warning(f"📊 4H fetch failed or thin: {len(df_4h) if df_4h is not None else 'None'} bars")
             except Exception as e:
@@ -756,6 +766,94 @@ class ClaudeAnalyzer:
         except Exception as e:
             self.logger.error(f"Error fetching candles for chart: {e}")
             return None
+
+    def _compute_4h_macro_structure(self, df) -> Dict:
+        """
+        Derive authoritative 4H macro structure from the fetched dataframe.
+
+        Returns a dict with:
+          trend_label   - BULLISH / BEARISH / RECOVERING / RANGING
+          swing_sequence - list of up to 4 most-recent pivot labels (HH/HL/LH/LL)
+          ema50_relation - 'above' or 'below' + pips distance
+          ema50_pips    - signed float (positive = above EMA)
+        """
+        import numpy as np
+        result = {
+            'trend_label': 'UNKNOWN',
+            'swing_sequence': [],
+            'ema50_relation': 'unknown',
+            'ema50_pips': 0.0,
+        }
+        try:
+            if df is None or len(df) < 20:
+                return result
+
+            # Use last 60 bars for recency
+            df = df.tail(60).copy().reset_index(drop=True)
+            highs = df['High'].values if 'High' in df.columns else df['high'].values
+            lows = df['Low'].values if 'Low' in df.columns else df['low'].values
+            closes = df['Close'].values if 'Close' in df.columns else df['close'].values
+
+            # EMA50 relation
+            ema50 = df['EMA50'].values[-1] if 'EMA50' in df.columns else None
+            if ema50 is None and len(closes) >= 50:
+                ema50 = float(np.array(closes).mean())  # rough fallback
+            if ema50 is not None:
+                # Estimate pips (handle JPY: if price > 50 use 2dp, else 4dp)
+                pip_div = 100.0 if closes[-1] > 50 else 10000.0
+                ema50_pips = round((closes[-1] - ema50) * pip_div, 1)
+                result['ema50_pips'] = ema50_pips
+                result['ema50_relation'] = f"{'above' if ema50_pips >= 0 else 'below'} by {abs(ema50_pips)} pips"
+
+            # Simple rolling pivot detection (lookback window = 3 bars each side)
+            LB = 3
+            pivot_highs = []
+            pivot_lows = []
+            for i in range(LB, len(highs) - LB):
+                if highs[i] == max(highs[i-LB:i+LB+1]):
+                    pivot_highs.append((i, float(highs[i])))
+                if lows[i] == min(lows[i-LB:i+LB+1]):
+                    pivot_lows.append((i, float(lows[i])))
+
+            # Label pivots as HH/LH (highs) and HL/LL (lows)
+            labeled = []
+            for j, (idx, val) in enumerate(pivot_highs[-4:]):
+                if j == 0:
+                    labeled.append((idx, val, 'H'))
+                else:
+                    prev_val = pivot_highs[max(0, len(pivot_highs)-4):][j-1][1]
+                    labeled.append((idx, val, 'HH' if val > prev_val else 'LH'))
+            for j, (idx, val) in enumerate(pivot_lows[-4:]):
+                if j == 0:
+                    labeled.append((idx, val, 'L'))
+                else:
+                    prev_val = pivot_lows[max(0, len(pivot_lows)-4):][j-1][1]
+                    labeled.append((idx, val, 'HL' if val > prev_val else 'LL'))
+
+            labeled.sort(key=lambda x: x[0])
+            swing_sequence = [lbl for _, _, lbl in labeled[-4:] if len(lbl) == 2]
+            result['swing_sequence'] = swing_sequence
+
+            # Determine trend label from sequence
+            if not swing_sequence:
+                result['trend_label'] = 'RANGING'
+            else:
+                bullish_count = sum(1 for s in swing_sequence if s in ('HH', 'HL'))
+                bearish_count = sum(1 for s in swing_sequence if s in ('LH', 'LL'))
+                if bullish_count >= 3:
+                    result['trend_label'] = 'BULLISH'
+                elif bearish_count >= 3:
+                    result['trend_label'] = 'BEARISH'
+                elif bullish_count > bearish_count:
+                    result['trend_label'] = 'RECOVERING'
+                elif bearish_count > bullish_count:
+                    result['trend_label'] = 'WEAKENING'
+                else:
+                    result['trend_label'] = 'RANGING'
+
+        except Exception as e:
+            self.logger.debug(f"_compute_4h_macro_structure error: {e}")
+        return result
 
     def _save_vision_analysis_artifacts(
         self,
