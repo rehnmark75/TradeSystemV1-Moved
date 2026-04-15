@@ -34,14 +34,16 @@ class ResponseParser:
                 return result
             
             lines = [line.strip() for line in response.strip().split('\n') if line.strip()]
-            
-            for line in lines:
+
+            section_markers = ('SCORE:', 'DECISION:', 'REASON:', 'CORRECT_TYPE:')
+            i = 0
+            while i < len(lines):
+                line = lines[i]
                 if line.startswith('SCORE:'):
                     score_text = line.replace('SCORE:', '').strip()
                     try:
                         result['score'] = int(float(score_text))
                     except ValueError:
-                        # Extract number from text like "8/10" or "Score: 7"
                         numbers = re.findall(r'\b(\d+)\b', score_text)
                         if numbers:
                             try:
@@ -49,14 +51,22 @@ class ResponseParser:
                             except (ValueError, IndexError):
                                 result['score'] = 0
                                 self.logger.warning(f"Could not parse score from: {score_text}")
-                
+
                 elif line.startswith('DECISION:'):
                     decision = line.replace('DECISION:', '').strip().upper()
                     result['decision'] = decision
                     result['approved'] = decision == 'APPROVE'
-                
+
                 elif line.startswith('REASON:'):
-                    result['reason'] = line.replace('REASON:', '').strip()
+                    reason_parts = [line.replace('REASON:', '').strip()]
+                    j = i + 1
+                    while j < len(lines) and not lines[j].startswith(section_markers):
+                        reason_parts.append(lines[j])
+                        j += 1
+                    result['reason'] = ' '.join(p for p in reason_parts if p).strip()
+                    i = j
+                    continue
+                i += 1
             
             return result
             
@@ -144,14 +154,17 @@ class ResponseParser:
             self.logger.debug(f"🔍 Structured parsing: Found {len(lines)} lines")
             
             found_fields = []
-            
-            for i, line in enumerate(lines):
-                line = line.strip()
+            section_markers = ('SCORE:', 'DECISION:', 'REASON:', 'CORRECT_TYPE:')
+
+            i = 0
+            while i < len(lines):
+                line = lines[i].strip()
                 if not line:
+                    i += 1
                     continue
-                    
+
                 self.logger.debug(f"  Processing line {i}: '{line}'")
-                
+
                 if line.startswith('SCORE:'):
                     score_text = line.replace('SCORE:', '').strip()
                     self.logger.debug(f"    Found SCORE field: '{score_text}'")
@@ -184,12 +197,21 @@ class ResponseParser:
                         self.logger.debug(f"    Parsed decision: {result['decision']}")
                         
                 elif line.startswith('REASON:'):
-                    reason = line.replace('REASON:', '').strip()
+                    reason_parts = [line.replace('REASON:', '').strip()]
+                    j = i + 1
+                    while j < len(lines) and not lines[j].strip().startswith(section_markers):
+                        if lines[j].strip():
+                            reason_parts.append(lines[j].strip())
+                        j += 1
+                    reason = ' '.join(p for p in reason_parts if p).strip()
                     if reason:
                         result['reason'] = reason
                         found_fields.append('reason')
                         self.logger.debug(f"    Parsed reason: '{reason[:50]}...'")
-            
+                    i = j
+                    continue
+                i += 1
+
             self.logger.debug(f"🔍 Structured parsing found fields: {found_fields}")
             
             # Check if we got the minimum required fields

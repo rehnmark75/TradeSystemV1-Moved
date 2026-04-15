@@ -755,6 +755,19 @@ REASON: Analysis error - neutral assessment"""
             # Confidence breakdown
             confidence_breakdown = strategy_indicators.get('confidence_breakdown', {})
 
+            # Proportional S/R buffer: tight stops need tighter buffer rules.
+            # max(0.6 × SL, 5) capped at 10 to preserve legacy behavior for swing setups.
+            try:
+                _risk = float(risk_pips) if risk_pips else 0
+            except (TypeError, ValueError):
+                _risk = 0
+            sr_buffer_pips = int(round(max(0.6 * _risk, 5))) if _risk > 0 else 10
+            sr_buffer_pips = min(sr_buffer_pips, 10)
+
+            # HTF label: in scalp mode use the strategy's actual HTF (e.g. 1H),
+            # not 4H. 4H remains as macro context only.
+            primary_htf_label = strategy_htf.upper() if is_scalp_mode else '4H'
+
             # Build chart analysis instructions
             chart_instruction = ""
             if has_chart:
@@ -783,8 +796,8 @@ This is a MOMENTUM continuation trade (price beyond swing break).
 - {entry_upper} timeframe: Entry precision — entry zone, Fibonacci levels, entry type annotation"""
                     primary_markers_label = f"{trigger_upper} chart (PRIMARY)"
                     entry_markers_label = f"{entry_upper} chart"
-                    checklist_items = f"""1. ✓ **4H MACRO STRUCTURE (HIGHEST PRIORITY):** Look at 4H candles — HH/HL (bullish) or LH/LL (bearish)? A BUY in a 4H downtrend or SELL in a 4H uptrend must score ≤4.
-2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number? For SELL — near a swing LOW, support zone, or round number? Within 10 pips = HIGH-RISK. Buying AT resistance or selling AT support = score ≤4.
+                    checklist_items = f"""1. ✓ **{htf_upper} STRATEGY HTF (HIGHEST PRIORITY):** This signal uses {htf_upper} for directional bias — not 4H. Judge trend alignment against the {htf_upper} EMA/structure shown on the chart. Use 4H ONLY as macro backdrop: if {htf_upper} aligns with the signal, a conflicting 4H is a −1 penalty, not a rejection.
+2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number? For SELL — near a swing LOW, support zone, or round number? Within {sr_buffer_pips} pips (proportional to {_risk:.0f}-pip SL) = HIGH-RISK. Buying AT resistance or selling AT support = score ≤4.
 3. ✓ **POSITION IN RANGE:** For BUY: entry should be near the BOTTOM of a local range. For SELL: near the TOP. Entry at the TOP of a recovery in a downtrend = buying into supply. REJECT.
 4. ✓ Is price clearly respecting the {htf_upper} EMA trend direction? (This is the EMA the strategy used for bias — CRITICAL for scalp quality.)
 5. ✓ Is the swing break on the {trigger_upper} chart clean and confirmed (full candle close)?
@@ -803,8 +816,8 @@ This is a MOMENTUM continuation trade (price beyond swing break).
 - 5m timeframe: Shows entry zone with Fibonacci levels and entry type annotation"""
                     primary_markers_label = "15m chart - PRIMARY"
                     entry_markers_label = "5m chart"
-                    checklist_items = """1. ✓ **4H TREND STRUCTURE (HIGHEST PRIORITY):** Look at the 4H chart candles — is the trend making Higher Highs/Higher Lows (bullish) or Lower Highs/Lower Lows (bearish)? This is MORE important than EMA position alone. A BUY signal in a 4H downtrend (LH/LL) or SELL signal in a 4H uptrend (HH/HL) is COUNTER-TREND and must score ≤4.
-2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number (x.x000, x.x500)? For SELL — is entry near a recent swing LOW, support zone, or round number? If within 10 pips of a major level, this is a HIGH-RISK entry. Buying AT resistance or selling AT support = score ≤4.
+                    checklist_items = f"""1. ✓ **4H TREND STRUCTURE (HIGHEST PRIORITY):** Look at the 4H chart candles — is the trend making Higher Highs/Higher Lows (bullish) or Lower Highs/Lower Lows (bearish)? This is MORE important than EMA position alone. A BUY signal in a 4H downtrend (LH/LL) or SELL signal in a 4H uptrend (HH/HL) is COUNTER-TREND and must score ≤4.
+2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number (x.x000, x.x500)? For SELL — is entry near a recent swing LOW, support zone, or round number? Within {sr_buffer_pips} pips (proportional to {_risk:.0f}-pip SL) = HIGH-RISK. Buying AT resistance or selling AT support = score ≤4.
 3. ✓ **POSITION IN RANGE:** Is entry at a favorable location? For BUY: entry should be near the BOTTOM of a local range (at demand/support). For SELL: entry should be near the TOP of a local range (at supply/resistance). Entry at the TOP of a recovery in a downtrend = buying the worst location.
 4. ✓ Is price clearly respecting the 4H EMA trend direction?
 5. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
@@ -1084,15 +1097,16 @@ DECISION: [APPROVE/REJECT]
 REASON: [2-3 sentences explaining your professional assessment. Focus on: trend alignment, entry quality, and any visual concerns from the chart. Do NOT penalize for low R:R or small TP - we are testing small quick profits.]
 
 **SCORING GUIDELINES FOR v2.9.0 (HTF-STRICT MODE):**
-- 8-10: Strong 4H trend alignment (HH/HL or LH/LL confirmed), clean swing break on 15m, volume confirmed, EMA 9/21 aligned, entry at favorable range location
-- 6-7: Good 4H trend alignment with minor concerns (e.g., momentum slightly extended, volume not confirmed, minor S/R nearby)
-- 4-5: Marginal setup - 4H trend unclear/choppy, entry near resistance/support level, or EMA micro-structure conflict
-- 1-3: Poor setup - counter-trend to 4H structure, entry AT resistance/support, or technical breakdown
+- Primary HTF for this signal: **{primary_htf_label}** (strategy bias TF). 4H is macro backdrop only.
+- 8-10: Strong {primary_htf_label} trend alignment (HH/HL or LH/LL confirmed), clean swing break on trigger TF, volume confirmed, EMA 9/21 aligned, entry at favorable range location
+- 6-7: Good {primary_htf_label} trend alignment with minor concerns (e.g., momentum slightly extended, volume not confirmed, minor S/R nearby)
+- 4-5: Marginal setup - {primary_htf_label} trend unclear/choppy, entry near resistance/support level, or EMA micro-structure conflict
+- 1-3: Poor setup - counter-trend to {primary_htf_label} structure, entry AT resistance/support, or technical breakdown
 
 **HARD SCORE CAPS (cannot exceed these regardless of other factors):**
-- Counter-trend to 4H structure AND MTF Confluence < 0.6 (BUY in LH/LL downtrend, SELL in HH/HL uptrend, WITHOUT multi-timeframe agreement): MAX SCORE 4, REJECT
-  ⚠️ EXCEPTION: If MTF Confluence ≥ 0.6 OR "All TFs aligned" flag is present, the strategy's multi-timeframe system has already validated direction. Do NOT apply counter-trend cap based on 4H structure alone — score on entry quality and S/R location instead.
-- Entry within 10 pips of major resistance (for BUY) or support (for SELL): MAX SCORE 4, REJECT
+- Counter-trend to **{primary_htf_label}** structure AND MTF Confluence < 0.6: MAX SCORE 4, REJECT. This cap is evaluated against the strategy's primary HTF ({primary_htf_label}), NOT 4H macro. If {primary_htf_label} aligns with the signal but 4H disagrees, apply only a −1 penalty.
+  ⚠️ EXCEPTION: If MTF Confluence ≥ 0.6 OR "All TFs aligned" flag is present, the strategy's multi-timeframe system has already validated direction. Do NOT apply counter-trend cap — score on entry quality and S/R location instead.
+- Entry within **{sr_buffer_pips} pips** of major resistance (for BUY) or support (for SELL): MAX SCORE 4, REJECT. Buffer is proportional to SL size ({_risk:.0f}-pip SL) — do NOT enforce a larger buffer than this.
 - Entry at round number psychological level (x.x000, x.x500) against HTF trend: MAX SCORE 3, REJECT
 - Entry at TOP of local recovery in a downtrend (or BOTTOM of local selloff in uptrend): MAX SCORE 4, REJECT
 
@@ -1119,14 +1133,14 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - MI Confidence Modifier strongly negative (< -10%): market intelligence is bearish on this signal
 
 **AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
-- **4H trend structure opposes signal AND MTF Confluence < 0.6** — BUY when 4H shows Lower Highs/Lower Lows, or SELL when 4H shows Higher Highs/Higher Lows, WITHOUT multi-timeframe agreement. If MTF Confluence ≥ 0.6 or "All TFs aligned", skip this rejection — the strategy's own MTF system has validated direction; evaluate on entry quality/S-R instead.
-- **Entry AT resistance (BUY) or AT support (SELL)** — If price is within 10 pips of a visible resistance/support zone, swing high/low, or round number (x.x000, x.x500), REJECT. This is the #1 reason good-looking setups fail.
-- **Entry at top of local recovery in downtrend** — If 4H is bearish but 15m/5m show a rally, and entry is near the TOP of that rally (not at a pullback), this is buying into supply. REJECT.
-- Counter-trend trades (price on wrong side of 4H EMA with confirming bearish/bullish candle structure)
-- MOMENTUM entry showing reversal candles on 15m (engulfing, pin bars against direction)
-- Price too close to 4H EMA (<2.5 pips) - buffer zone violation
-- S/R level on 15m blocking more than 75% of path to target
-- EMA 9/21 crossed against signal direction on 15m
+- **{primary_htf_label} trend structure opposes signal AND MTF Confluence < 0.6** — evaluate against the strategy's primary HTF ({primary_htf_label}). If MTF Confluence ≥ 0.6 or "All TFs aligned", skip this rejection. Do NOT reject based on 4H macro structure alone when {primary_htf_label} aligns with the signal.
+- **Entry AT resistance (BUY) or AT support (SELL)** — If price is within **{sr_buffer_pips} pips** (proportional to {_risk:.0f}-pip SL) of a visible resistance/support zone, swing high/low, or round number (x.x000, x.x500), REJECT. Do NOT enforce a larger buffer.
+- **Entry at top of local recovery in downtrend** — If {primary_htf_label} is bearish but trigger/entry TFs show a rally, and entry is near the TOP of that rally (not at a pullback), this is buying into supply. REJECT.
+- Counter-trend trades (price on wrong side of {primary_htf_label} EMA with confirming bearish/bullish candle structure)
+- MOMENTUM entry showing reversal candles on trigger TF (engulfing, pin bars against direction)
+- Price too close to {primary_htf_label} EMA (<2.5 pips) - buffer zone violation
+- S/R level on trigger TF blocking more than 75% of path to target
+- EMA 9/21 crossed against signal direction on trigger TF
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 
