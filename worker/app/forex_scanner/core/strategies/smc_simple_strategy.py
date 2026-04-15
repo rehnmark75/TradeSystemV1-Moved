@@ -1038,7 +1038,6 @@ class SMCSimpleStrategy:
 
             # v2.22.0: Scalp Entry Filters (for backtest parameter testing)
             'scalp_momentum_only_filter': 'scalp_momentum_only_filter',
-            'scalp_require_htf_alignment': 'scalp_require_htf_alignment',
             'scalp_entry_rsi_buy_max': 'scalp_entry_rsi_buy_max',
             'scalp_entry_rsi_sell_min': 'scalp_entry_rsi_sell_min',
             'scalp_min_ema_distance_pips': 'scalp_min_ema_distance_pips',
@@ -1204,7 +1203,6 @@ class SMCSimpleStrategy:
         # v2.22.0: Scalp entry filters (based on Jan 2026 trade analysis)
         # These filters block non-winning entry patterns
         self.scalp_momentum_only_filter = getattr(config, 'scalp_momentum_only_filter', False)
-        self.scalp_require_htf_alignment = getattr(config, 'scalp_require_htf_alignment', False)
         self.scalp_entry_rsi_buy_max = getattr(config, 'scalp_entry_rsi_buy_max', 100.0)
         self.scalp_entry_rsi_sell_min = getattr(config, 'scalp_entry_rsi_sell_min', 0.0)
         self.scalp_min_ema_distance_pips = getattr(config, 'scalp_min_ema_distance_pips', 0.0)
@@ -1488,16 +1486,6 @@ class SMCSimpleStrategy:
         # v2.31.0: Apply per-pair reversal override settings (GBPUSD/NZDUSD optimization)
         self.scalp_reversal_enabled = pair_config.get('reversal_enabled', self.scalp_reversal_enabled)
         self.scalp_reversal_min_runway_pips = pair_config.get('reversal_min_runway_pips', self.scalp_reversal_min_runway_pips)
-
-        # v2.32.1: Per-pair HTF alignment override
-        # Allows disabling the HTF alignment filter for specific pairs via parameter_overrides
-        # Only apply if there's an EXPLICIT per-pair override (not the global fallback)
-        # to avoid clobbering backtest --override values
-        if self._db_config and not (self._backtest_mode and self._config_override and 'scalp_require_htf_alignment' in self._config_override):
-            pair_overrides = self._db_config._pair_overrides.get(epic, {})
-            param_overrides = pair_overrides.get('parameter_overrides', {})
-            if 'scalp_require_htf_alignment' in param_overrides:
-                self.scalp_require_htf_alignment = bool(param_overrides['scalp_require_htf_alignment'])
 
         # v2.32.2: Per-pair RSI entry threshold overrides
         # Without this, parameter_overrides JSONB values are ignored and global defaults (0/100) are used
@@ -2176,51 +2164,10 @@ class SMCSimpleStrategy:
             )
             self.logger.debug(f"   📊 HTF Candle: {htf_candle_direction} (prev: {htf_candle_direction_prev})")
 
-            # ================================================================
-            # v2.35.4: HTF CANDLE ALIGNMENT FILTER (scalp mode)
-            # ================================================================
-            # Reject signals where HTF candle direction contradicts trade direction.
-            # Analysis of Jan 29, 2026 trades showed 73% of losing trades had
-            # HTF candle direction OPPOSITE to trade direction.
-            # - BULL signal + BEARISH HTF candle = likely reversal, reject
-            # - BEAR signal + BULLISH HTF candle = likely reversal, reject
-            # ================================================================
-            if self.scalp_mode_enabled and getattr(self, 'scalp_require_htf_alignment', False):
-                htf_aligned = (
-                    (direction == 'BULL' and htf_candle_direction == 'BULLISH') or
-                    (direction == 'BEAR' and htf_candle_direction == 'BEARISH') or
-                    (htf_candle_direction == 'DOJI')  # Allow DOJI (neutral)
-                )
-
-                if not htf_aligned:
-                    expected_htf = 'BULLISH' if direction == 'BULL' else 'BEARISH'
-                    rejection_reason = (
-                        f"HTF candle not aligned: {htf_candle_direction} candle for {direction} signal "
-                        f"(need {expected_htf})"
-                    )
-                    self.logger.info(f"   ❌ {rejection_reason}")
-
-                    # Track rejection with full market context
-                    self._track_rejection(
-                        stage='TIER1_HTF_CANDLE',
-                        reason=rejection_reason,
-                        epic=epic,
-                        pair=pair,
-                        candle_timestamp=candle_timestamp,
-                        direction=direction,
-                        context={
-                            'htf_candle_direction': htf_candle_direction,
-                            'htf_candle_direction_prev': htf_candle_direction_prev,
-                            'expected_htf_candle': expected_htf,
-                            'ema_direction': direction,
-                            'ema_value': ema_value,
-                            'ema_distance_pips': ema_distance,
-                            'filter': 'htf_candle_alignment'
-                        }
-                    )
-                    return None
-                else:
-                    self.logger.info(f"   ✅ HTF candle aligned: {htf_candle_direction} matches {direction}")
+            # HTF candle alignment filter removed Apr 15 2026: executed-trade
+            # data showed OPPOSED signals outperformed ALIGNED (68.8% WR / +$507
+            # vs 56.5% WR / -$810 over 60 days). Flag retired; direction data
+            # above is still captured for analytics.
 
             # ================================================================
             # TIER 2: Swing Break Confirmation (15m or 1H based on config)
