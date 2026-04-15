@@ -37,6 +37,14 @@ except ImportError:  # pragma: no cover
     )
 
 try:
+    from .helpers.smc_fair_value_gaps import FVGType, SMCFairValueGaps
+except ImportError:  # pragma: no cover
+    from forex_scanner.core.strategies.helpers.smc_fair_value_gaps import (
+        FVGType,
+        SMCFairValueGaps,
+    )
+
+try:
     from services.xau_gold_config_service import (
         XAUGoldConfig,
         XAUGoldConfigService,
@@ -286,6 +294,9 @@ class XAUGoldStrategy(StrategyInterface):
         if entry is None:
             self._reject(epic, "no_pullback_entry", "not in fib zone yet")
             return None
+        if cfg.require_ob_or_fvg and not self._entry_has_fvg_confluence(df_entry, entry, bias, epic):
+            self._reject(epic, "missing_fvg_confluence", "entry lacks nearby active FVG")
+            return None
 
         # RSI neutrality on trigger
         rsi_val = float(df_trigger["rsi_14"].iloc[-1])
@@ -353,6 +364,8 @@ class XAUGoldStrategy(StrategyInterface):
                 "bos_to_price": bos.get("to_price"),
                 "bos_displacement_atr": bos.get("displacement_atr"),
                 "fib_depth": entry.get("fib_depth"),
+                "entry_age_bars": entry.get("entry_age_bars"),
+                "fvg_confluence": entry.get("fvg_confluence", False),
                 "rsi_14": rsi_val,
                 "atr_pct": float(atr_pct),
                 "rr_ratio": float(rr),
@@ -489,9 +502,9 @@ class XAUGoldStrategy(StrategyInterface):
     ) -> Optional[Dict[str, Any]]:
         """Look for a pullback on 15m into the fib zone of the BOS impulse.
 
-        Scans the most recent entry_check_bars (default 48 = 12h on 15m) for any bar
+        Scans the most recent entry_check_bars for any bar
         whose close is in the fib zone. This allows the strategy to fire when price
-        RECENTLY touched the pullback zone, not only at the exact current bar.
+        RECENTLY touched the pullback zone, but still keeps the setup fresh.
         """
         c = self.config
         from_p = float(bos["from_price"])
@@ -527,9 +540,69 @@ class XAUGoldStrategy(StrategyInterface):
                 # Untested: no bar prior to this one has been in the zone
                 prior = scan_df.iloc[max(0, i - 10) : i]
                 untested = not ((prior["low"] <= hi) & (prior["high"] >= lo)).any() if len(prior) > 0 else True
-                return {"fib_depth": float(depth), "untested": bool(untested)}
+                entry_age_bars = len(scan_df) - 1 - i
+                return {
+                    "fib_depth": float(depth),
+                    "untested": bool(untested),
+                    "entry_index": int(i),
+                    "entry_age_bars": int(entry_age_bars),
+                    "entry_price": float(price),
+                    "zone_low": float(lo),
+                    "zone_high": float(hi),
+                }
 
         return None
+
+    def _entry_has_fvg_confluence(
+        self,
+        df_entry: pd.DataFrame,
+        entry: Dict[str, Any],
+        bias: str,
+        epic: str,
+    ) -> bool:
+        """Require the selected entry touch to occur inside or very near an active FVG."""
+        entry_idx = entry.get("entry_index")
+        if entry_idx is None:
+            return False
+
+        lookback_bars = min(len(df_entry), 96)
+        scoped = df_entry.iloc[-lookback_bars:].copy()
+        if entry_idx >= len(scoped):
+            return False
+
+        upto_entry = scoped.iloc[: entry_idx + 1].copy()
+        if len(upto_entry) < 3:
+            return False
+
+        detector = SMCFairValueGaps(self.logger)
+        pip_value = self.config.get_pip_size(epic)
+        detector.detect_fair_value_gaps(
+            upto_entry,
+            {
+                "epic": epic,
+                "pip_value": pip_value,
+                "fvg_min_size": 8,
+                "fvg_max_age": 24,
+                "fvg_fill_threshold": 0.8,
+                "max_distance_to_zone": 5,
+            },
+        )
+
+        target_type = FVGType.BULLISH if bias == "bullish" else FVGType.BEARISH
+        candle = upto_entry.iloc[-1]
+        candle_low = float(candle["low"])
+        candle_high = float(candle["high"])
+
+        for fvg in detector.fair_value_gaps:
+            if fvg.gap_type != target_type:
+                continue
+            if fvg.status.name not in {"ACTIVE", "PARTIALLY_FILLED"}:
+                continue
+            if candle_high >= fvg.low_price and candle_low <= fvg.high_price:
+                entry["fvg_confluence"] = True
+                return True
+
+        return False
 
     # ---- confidence / SL TP ----------------------------------------------
 

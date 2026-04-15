@@ -75,7 +75,7 @@ VALUES
     -- Regime gating
     ('adx_trending_threshold', '25.0',             'float',  'regime', 'ADX above = trending',     60),
     ('adx_ranging_threshold',  '20.0',             'float',  'regime', 'ADX below = ranging (blocked)', 61),
-    ('atr_expansion_pct',      '80.0',             'float',  'regime', 'ATR percentile = expansion (blocked)', 62),
+    ('atr_expansion_pct',      '85.0',             'float',  'regime', 'ATR percentile = expansion (blocked)', 62),
     ('atr_pct_lookback_bars',  '120',              'int',    'regime', 'ATR percentile lookback (4H bars)', 63),
     ('block_ranging',          'true',             'bool',   'regime', 'Block signals in ranging regime', 64),
     ('block_expansion',        'true',             'bool',   'regime', 'Block signals in news/expansion', 65),
@@ -94,7 +94,10 @@ VALUES
     ('bos_displacement_atr_mult', '1.2',           'float',  'structure', '1H BOS candle displacement vs ATR', 80),
     ('fib_pullback_min',       '0.382',            'float',  'structure', 'Min pullback depth',   81),
     ('fib_pullback_max',       '0.618',            'float',  'structure', 'Max pullback depth',   82),
-    ('require_ob_or_fvg',      'false',            'bool',   'structure', 'Require untested OB/FVG overlap', 83),
+    ('bos_expiry_hours',       '12',               'float',  'structure', 'Max BOS age in hours', 83),
+    ('bos_search_bars',        '24',               'int',    'structure', 'Recent 1H bars to search for BOS', 84),
+    ('entry_check_bars',       '12',               'int',    'structure', 'Recent 15m bars to allow pullback entry', 85),
+    ('require_ob_or_fvg',      'true',             'bool',   'structure', 'Require untested OB/FVG overlap', 86),
 
     -- Cooldown / limits
     ('signal_cooldown_minutes','180',              'int',    'limits', 'Cooldown per epic',       90),

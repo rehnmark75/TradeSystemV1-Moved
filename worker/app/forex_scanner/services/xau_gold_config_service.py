@@ -74,7 +74,7 @@ class XAUGoldConfig:
     # Regime
     adx_trending_threshold: float = 25.0
     adx_ranging_threshold: float = 20.0
-    atr_expansion_pct: float = 80.0
+    atr_expansion_pct: float = 85.0
     atr_pct_lookback_bars: int = 120
     block_ranging: bool = True
     block_expansion: bool = True
@@ -91,12 +91,12 @@ class XAUGoldConfig:
 
     # Structure
     bos_displacement_atr_mult: float = 1.2
-    fib_pullback_min: float = 0.05
-    fib_pullback_max: float = 0.65
-    bos_expiry_hours: float = 48.0
-    bos_search_bars: int = 48
-    entry_check_bars: int = 48
-    require_ob_or_fvg: bool = False
+    fib_pullback_min: float = 0.382
+    fib_pullback_max: float = 0.618
+    bos_expiry_hours: float = 12.0
+    bos_search_bars: int = 24
+    entry_check_bars: int = 12
+    require_ob_or_fvg: bool = True
 
     # Limits
     signal_cooldown_minutes: int = 180

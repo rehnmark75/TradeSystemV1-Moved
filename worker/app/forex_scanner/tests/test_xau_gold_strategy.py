@@ -78,6 +78,8 @@ class XAUGoldConfigTests(unittest.TestCase):
         self.assertEqual(self.cfg.entry_timeframe, "15m")
         self.assertAlmostEqual(self.cfg.rr_ratio, 2.0)
         self.assertTrue(self.cfg.block_ranging)
+        self.assertEqual(self.cfg.entry_check_bars, 12)
+        self.assertTrue(self.cfg.require_ob_or_fvg)
 
     def test_session_filter(self):
         # London block: 07-10, NY: 13-20, rollover 21-22 blocked
@@ -149,6 +151,18 @@ class XAUGoldStrategyTests(unittest.TestCase):
     def test_htf_bias_bearish(self):
         df = self.strat._enrich_htf(_make_htf("down"))
         self.assertEqual(self.strat._htf_bias(df), "bearish")
+
+    def test_entry_fvg_confluence_detects_bullish_gap(self):
+        closes = np.array([1900.0, 1902.0, 1908.0, 1907.0, 1906.0, 1905.5])
+        highs = np.array([1901.0, 1903.0, 1909.0, 1908.0, 1906.5, 1906.0])
+        lows = np.array([1899.0, 1901.0, 1906.0, 1906.2, 1905.8, 1905.4])
+        df = pd.DataFrame(
+            {"open": closes, "high": highs, "low": lows, "close": closes},
+            index=pd.date_range(end=pd.Timestamp("2026-04-01 12:00", tz="UTC"), periods=len(closes), freq="15min"),
+        )
+        entry = {"entry_index": len(df) - 1}
+        self.assertTrue(self.strat._entry_has_fvg_confluence(df, entry, "bullish", GOLD_EPIC))
+        self.assertTrue(entry.get("fvg_confluence"))
 
 
 if __name__ == "__main__":
