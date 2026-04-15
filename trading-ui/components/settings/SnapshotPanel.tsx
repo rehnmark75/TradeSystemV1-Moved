@@ -6,6 +6,7 @@ import SnapshotDiffView from "./SnapshotDiffView";
 import type { ConfigSnapshot, SnapshotDiff } from "../../types/settings";
 
 interface SnapshotPanelProps {
+  configSet: string;
   onClose: () => void;
   onRestored: () => void;
 }
@@ -18,7 +19,7 @@ interface DiffState {
   changedCount: number;
 }
 
-export default function SnapshotPanel({ onClose, onRestored }: SnapshotPanelProps) {
+export default function SnapshotPanel({ configSet, onClose, onRestored }: SnapshotPanelProps) {
   const {
     snapshots,
     loading,
@@ -28,7 +29,7 @@ export default function SnapshotPanel({ onClose, onRestored }: SnapshotPanelProp
     deleteSnapshot,
     restoreSnapshot,
     compareSnapshot,
-  } = useSnapshots();
+  } = useSnapshots(configSet);
 
   const [newName, setNewName] = useState("");
   const [newDesc, setNewDesc] = useState("");
@@ -85,7 +86,7 @@ export default function SnapshotPanel({ onClose, onRestored }: SnapshotPanelProp
   };
 
   const handleRestore = async (id: number, name: string) => {
-    if (!confirm(`Restore snapshot "${name}"? This will overwrite the current live config.`)) return;
+    if (!confirm(`Restore snapshot "${name}"? This will overwrite the current ${configSet} config.`)) return;
     setActionLoading(id);
     try {
       await restoreSnapshot(id);

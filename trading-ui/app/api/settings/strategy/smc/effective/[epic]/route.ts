@@ -3,6 +3,11 @@ import { strategyConfigPool } from "../../../../../../../lib/strategyConfigDb";
 
 export const dynamic = "force-dynamic";
 
+function isEpicGloballyEnabled(globalConfig: Record<string, unknown>, epic: string) {
+  const enabledPairs = Array.isArray(globalConfig.enabled_pairs) ? globalConfig.enabled_pairs : [];
+  return enabledPairs.includes(epic);
+}
+
 async function loadActiveSmcConfig(configSet: string, client?: any) {
   const executor = client ?? strategyConfigPool;
   const result = await executor.query(
@@ -43,6 +48,13 @@ export async function GET(
       [globalConfig.id, params.epic]
     );
     const override = overridesResult.rows[0] ?? null;
+    const globalEnabled = isEpicGloballyEnabled(globalConfig, params.epic);
+    const overrideEnabled =
+      override && Object.prototype.hasOwnProperty.call(override, "is_enabled")
+        ? override.is_enabled
+        : null;
+    const effectiveEnabled = overrideEnabled === null ? globalEnabled : Boolean(overrideEnabled);
+    const monitorOnly = Boolean(override?.parameter_overrides?.monitor_only);
 
     const effective = { ...globalConfig };
     if (override) {
@@ -70,7 +82,13 @@ export async function GET(
       epic: params.epic,
       global: globalConfig,
       override,
-      effective
+      effective,
+      pair_status: {
+        global_enabled: globalEnabled,
+        override_enabled: overrideEnabled,
+        effective_enabled: effectiveEnabled,
+        monitor_only: monitorOnly,
+      }
     });
   } catch (error) {
     console.error("Failed to load effective SMC config", error);

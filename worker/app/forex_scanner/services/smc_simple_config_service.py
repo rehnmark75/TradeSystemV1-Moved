@@ -472,7 +472,16 @@ class SMCSimpleConfig:
 
     def is_pair_enabled(self, epic: str) -> bool:
         """Check if pair is enabled"""
+        if epic in self._pair_overrides:
+            override_enabled = self._pair_overrides[epic].get('is_enabled')
+            if override_enabled is not None:
+                return bool(override_enabled)
         return epic in self.enabled_pairs
+
+    def get_effective_enabled_pairs(self) -> List[str]:
+        """Return the effective enabled universe after applying pair overrides."""
+        all_epics = set(self.enabled_pairs) | set(self._pair_overrides.keys())
+        return sorted(epic for epic in all_epics if self.is_pair_enabled(epic))
 
     def get_optimal_pullback_zone(self) -> tuple:
         """Get optimal Fibonacci pullback zone"""
@@ -1793,7 +1802,7 @@ class SMCSimpleConfigService:
                 # Load pair overrides
                 cur.execute("""
                     SELECT * FROM smc_simple_pair_overrides
-                    WHERE config_id = %s AND is_enabled = TRUE
+                    WHERE config_id = %s
                 """, (global_row['id'],))
                 override_rows = cur.fetchall()
 

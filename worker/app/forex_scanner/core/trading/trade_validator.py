@@ -2706,7 +2706,7 @@ class TradeValidator:
                     try:
                         from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
                         smc_cfg = get_smc_simple_config()
-                        epic_list = smc_cfg.enabled_pairs if smc_cfg and smc_cfg.enabled_pairs else [
+                        epic_list = smc_cfg.get_effective_enabled_pairs() if smc_cfg else [
                             'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP'
                         ]
                     except Exception:
