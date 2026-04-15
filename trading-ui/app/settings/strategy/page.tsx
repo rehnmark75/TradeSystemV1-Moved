@@ -22,6 +22,12 @@ type EffectivePayload = {
   global: Record<string, unknown>;
   override: Record<string, unknown> | null;
   effective: Record<string, unknown>;
+  pair_status?: {
+    global_enabled: boolean;
+    override_enabled: boolean | null;
+    effective_enabled: boolean;
+    monitor_only: boolean;
+  };
 };
 
 const SYSTEM_FIELDS = new Set([
@@ -35,8 +41,13 @@ const META_FIELDS = new Set([
 
 const STATUS_FIELDS = new Set(["is_enabled", "monitor_only"]);
 
-type PairStatus = "active" | "monitor" | "disabled";
-const STATUS_LABELS: Record<PairStatus, string> = { active: "Active", monitor: "Monitor", disabled: "Disabled" };
+type PairStatus = "inherit" | "active" | "monitor" | "disabled";
+const STATUS_LABELS: Record<PairStatus, string> = {
+  inherit: "Inherit",
+  active: "Active",
+  monitor: "Monitor",
+  disabled: "Disabled",
+};
 
 const PREFERRED_ORDER = [
   "Tier 1: 4H Directional Bias",
@@ -153,11 +164,17 @@ export default function UnifiedStrategySettings() {
     return Array.isArray(v) ? v.filter((x): x is string => typeof x === "string") : [];
   }, [globalConfig]);
 
+  const knownPairs = useMemo(() => {
+    const v = globalConfig?.pair_pip_values;
+    if (!v || typeof v !== "object" || Array.isArray(v)) return [];
+    return Object.keys(v);
+  }, [globalConfig]);
+
   const allPairs = useMemo(() => {
-    const pairs = new Set<string>(enabledPairs);
+    const pairs = new Set<string>([...enabledPairs, ...knownPairs]);
     overrides.forEach((o) => pairs.add(o.epic));
     return Array.from(pairs).sort();
-  }, [enabledPairs, overrides]);
+  }, [enabledPairs, knownPairs, overrides]);
 
   // Auto-select first pair
   useEffect(() => {
@@ -189,7 +206,11 @@ export default function UnifiedStrategySettings() {
       if (META_FIELDS.has(key) || key === "parameter_overrides") return;
       if (!columnSet.has(key)) return;
       const value = override[key];
-      if (value !== null && value !== undefined) columnOverrides[key] = value;
+      if (value !== null && value !== undefined) {
+        columnOverrides[key] = value;
+        return;
+      }
+      if (STATUS_FIELDS.has(key)) columnOverrides[key] = null;
     });
     const merged = { ...paramOverrides, ...columnOverrides };
     setInitialOverrides(merged);
@@ -333,15 +354,21 @@ export default function UnifiedStrategySettings() {
 
   // Trading status derived from draftOverrides
   const currentStatus = useMemo((): PairStatus => {
-    if (draftOverrides.is_enabled === false) return "disabled";
     if (draftOverrides.monitor_only === true || draftOverrides.monitor_only === "true") return "monitor";
+    if (draftOverrides.is_enabled === false) return "disabled";
+    if (draftOverrides.is_enabled === true) return "active";
+    if (draftOverrides.is_enabled === null) return "inherit";
+    if (!hasKey(draftOverrides, "is_enabled")) return "inherit";
     return "active";
   }, [draftOverrides]);
 
   const setStatus = (status: PairStatus) => {
     setDraftOverrides((prev) => {
       const copy = { ...prev };
-      if (status === "disabled") {
+      if (status === "inherit") {
+        delete copy.is_enabled;
+        delete copy.monitor_only;
+      } else if (status === "disabled") {
         copy.is_enabled = false;
         delete copy.monitor_only;
       } else if (status === "monitor") {
@@ -551,7 +578,7 @@ export default function UnifiedStrategySettings() {
         <div className="pair-status-bar">
           <span className="pair-status-bar-label">Trading Status</span>
           <div className="pair-status-control">
-            {(["active", "monitor", "disabled"] as const).map((s) => (
+            {(["inherit", "active", "monitor", "disabled"] as const).map((s) => (
               <button
                 key={s}
                 className={`pair-status-btn pair-status-btn-${s}${currentStatus === s ? " selected" : ""}`}
@@ -562,7 +589,13 @@ export default function UnifiedStrategySettings() {
             ))}
           </div>
           <span className="pair-status-bar-hint">
-            {currentStatus === "monitor" ? "Signals logged but not traded" : currentStatus === "disabled" ? "Pair fully disabled" : "Pair actively traded"}
+            {currentStatus === "inherit"
+              ? `Using global pair status (${effective?.pair_status?.effective_enabled ? "enabled" : "disabled"})`
+              : currentStatus === "monitor"
+              ? "Signals logged but not traded"
+              : currentStatus === "disabled"
+              ? "Pair fully disabled"
+              : "Pair actively traded"}
           </span>
         </div>
       ) : null}
@@ -657,6 +690,7 @@ export default function UnifiedStrategySettings() {
 
       {showSnapshotPanel ? (
         <SnapshotPanel
+          configSet={environment}
           onClose={() => setShowSnapshotPanel(false)}
           onRestored={() => window.location.reload()}
         />

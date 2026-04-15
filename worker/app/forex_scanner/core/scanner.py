@@ -165,7 +165,7 @@ class IntelligentForexScanner:
 
         # Core configuration from database - NO FALLBACK
         self.db_manager = db_manager
-        self.epic_list = epic_list or self._smc_cfg.enabled_pairs
+        self.epic_list = epic_list or self._smc_cfg.get_effective_enabled_pairs()
         self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
         self.scan_interval = scan_interval
         self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False

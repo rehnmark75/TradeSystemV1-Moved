@@ -247,7 +247,7 @@ class TradingOrchestrator:
 
         # SCANNER CONFIGURATION (from database - NO FALLBACK)
         self.scan_interval = scan_interval if scan_interval is not None else self._scanner_cfg.scan_interval
-        self.epic_list = epic_list or self._smc_cfg.enabled_pairs
+        self.epic_list = epic_list or self._smc_cfg.get_effective_enabled_pairs()
         self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
         self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
         self.spread_pips = spread_pips if spread_pips is not None else 1.5

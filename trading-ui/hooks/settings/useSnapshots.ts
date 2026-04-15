@@ -13,7 +13,7 @@ interface SnapshotCompareResult {
   changed_count: number;
 }
 
-export function useSnapshots() {
+export function useSnapshots(configSet: string) {
   const [snapshots, setSnapshots] = useState<ConfigSnapshot[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -22,7 +22,9 @@ export function useSnapshots() {
     setLoading(true);
     setError(null);
     try {
-      const res = await fetch(apiUrl("/api/settings/strategy/smc/snapshots"));
+      const res = await fetch(
+        apiUrl(`/api/settings/strategy/smc/snapshots?config_set=${encodeURIComponent(configSet)}`)
+      );
       if (!res.ok) throw new Error("Failed to load snapshots");
       const data = await res.json();
       setSnapshots(data.snapshots ?? []);
@@ -31,14 +33,14 @@ export function useSnapshots() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [configSet]);
 
   const createSnapshot = useCallback(
     async (name: string, description?: string, tags?: string[]) => {
       const res = await fetch(apiUrl("/api/settings/strategy/smc/snapshots"), {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name, description, tags, created_by: "admin" }),
+        body: JSON.stringify({ name, description, tags, created_by: "admin", config_set: configSet }),
       });
       if (!res.ok) {
         const err = await res.json().catch(() => null);
@@ -48,7 +50,7 @@ export function useSnapshots() {
       await load();
       return data.snapshot as ConfigSnapshot;
     },
-    [load]
+    [configSet, load]
   );
 
   const deleteSnapshot = useCallback(
@@ -81,12 +83,12 @@ export function useSnapshots() {
   const compareSnapshot = useCallback(
     async (id: number): Promise<SnapshotCompareResult> => {
       const res = await fetch(
-        apiUrl(`/api/settings/strategy/smc/snapshots/${id}/compare`)
+        apiUrl(`/api/settings/strategy/smc/snapshots/${id}/compare?config_set=${encodeURIComponent(configSet)}`)
       );
       if (!res.ok) throw new Error("Failed to compare snapshot");
       return res.json();
     },
-    []
+    [configSet]
   );
 
   return {
