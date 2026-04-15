@@ -184,7 +184,7 @@ const CLAUDE_LONG_ONLY_CONTEXT = {
   allowed_trade_side: "buy",
   disallowed_trade_side: "sell",
   instruction:
-    "Analyze this stock strictly from a long-only perspective. The user can only take buy trades. Do not recommend short or sell-side entries. If the setup is unattractive for a long entry, respond with HOLD, AVOID, or equivalent no-trade guidance."
+    "Analyze this stock strictly from a long-only perspective. The user can only take buy trades. Do not recommend short or sell-side entries. If the setup is unattractive for a long entry, respond with HOLD, AVOID, or equivalent no-trade guidance. Treat Relative Strength carefully: high rs_percentile supports long candidates, rs_trend='improving' or 'gaining strength' is bullish confirmation, and rs_trend='deteriorating' or 'weakening' should be treated as a real risk that reduces conviction for fresh long entries, especially when the stock is extended or only has middling relative strength. Treat DAQ as a setup-quality score: high DAQ supports long conviction, while low DAQ should be treated as a warning that the setup quality is weaker even if some other metrics look good."
 } as const;
 
 type NoteEntry = {
