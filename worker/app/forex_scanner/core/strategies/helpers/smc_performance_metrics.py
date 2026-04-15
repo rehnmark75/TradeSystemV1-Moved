@@ -162,18 +162,23 @@ class SMCPerformanceMetricsCalculator:
         metrics = PerformanceMetrics()
 
         try:
-            # Use the most granular available timeframe for calculations
+            # Most granular TF (1m in scalp, 5m in swing) — used only for entry-candle metrics
             df_primary = df_5m if df_5m is not None and len(df_5m) > 0 else df_15m
 
             if df_primary is None or len(df_primary) < 20:
                 self.logger.warning(f"Insufficient data for metrics calculation: {epic}")
                 return metrics
 
-            # 1. Kaufman Efficiency Ratio
-            metrics.efficiency_ratio, metrics.er_period = self._calculate_efficiency_ratio(df_primary)
+            # Decision TF for regime/ADX/ER/volatility. Prefer trigger TF (df_15m, which is
+            # the 5m trigger in scalp mode / 15m in swing mode) so we never classify regime
+            # on 1m noise. Fall back to df_primary only if trigger df is missing.
+            df_decision = df_15m if df_15m is not None and len(df_15m) >= 20 else df_primary
 
-            # 2. Market Regime Detection
-            regime_result = self._detect_market_regime(df_primary, df_4h)
+            # 1. Kaufman Efficiency Ratio (decision TF)
+            metrics.efficiency_ratio, metrics.er_period = self._calculate_efficiency_ratio(df_decision)
+
+            # 2. Market Regime Detection (decision TF)
+            regime_result = self._detect_market_regime(df_decision, df_4h)
             metrics.market_regime = regime_result['regime']
             metrics.regime_confidence = regime_result['confidence']
             metrics.adx_value = regime_result.get('adx')
@@ -181,28 +186,28 @@ class SMCPerformanceMetricsCalculator:
             metrics.adx_minus_di = regime_result.get('minus_di')
             metrics.adx_trend_strength = regime_result.get('trend_strength', 'unknown')
 
-            # 3. Volatility Context
-            vol_result = self._calculate_volatility_context(df_primary)
+            # 3. Volatility Context (decision TF)
+            vol_result = self._calculate_volatility_context(df_decision)
             metrics.bb_width_percentile = vol_result['bb_percentile']
             metrics.atr_percentile = vol_result['atr_percentile']
             metrics.volatility_state = vol_result['state']
 
-            # 4. Entry Quality (if signal data provided)
+            # 4. Entry Quality — entry-candle metric, stays on most-granular TF
             if signal_data:
                 entry_result = self._calculate_entry_quality(df_primary, signal_data)
                 metrics.entry_quality_score = entry_result['score']
                 metrics.distance_from_optimal_fib = entry_result['fib_distance']
                 metrics.entry_candle_momentum = entry_result['candle_momentum']
 
-            # 5. Multi-Timeframe Confluence
+            # 5. Multi-Timeframe Confluence (uses all TFs explicitly)
             if df_4h is not None and signal_data:
                 mtf_result = self._calculate_mtf_confluence(df_5m, df_15m, df_4h, signal_data)
                 metrics.mtf_confluence_score = mtf_result['score']
                 metrics.htf_candle_position = mtf_result['htf_position']
                 metrics.all_timeframes_aligned = mtf_result['aligned']
 
-            # 6. Volume Profile
-            vol_profile = self._calculate_volume_profile(df_primary, signal_data)
+            # 6. Volume Profile — swing breaks happen on trigger TF, use decision df
+            vol_profile = self._calculate_volume_profile(df_decision, signal_data)
             metrics.volume_at_swing_break = vol_profile['at_break']
             metrics.volume_trend = vol_profile['trend']
             metrics.volume_quality_score = vol_profile['quality_score']

@@ -7240,11 +7240,12 @@ class SMCSimpleStrategy:
 
             calculator = get_performance_metrics_calculator(self.logger)
 
-            # Use the most available dataframe
-            df_primary = df_entry if df_entry is not None and len(df_entry) > 0 else df_trigger
+            # Quick metrics (regime/ER/ATR%) must run on the decision TF (trigger,
+            # typically 5m in scalp / 15m in swing) — never on the 1m entry df.
+            df_decision = df_trigger if df_trigger is not None and len(df_trigger) >= 20 else df_entry
 
-            if df_primary is not None and len(df_primary) >= 20:
-                quick_metrics = calculator.calculate_quick_metrics(df_primary)
+            if df_decision is not None and len(df_decision) >= 20:
+                quick_metrics = calculator.calculate_quick_metrics(df_decision)
 
                 context['efficiency_ratio'] = quick_metrics.get('efficiency_ratio')
                 context['market_regime_detected'] = quick_metrics.get('market_regime')
