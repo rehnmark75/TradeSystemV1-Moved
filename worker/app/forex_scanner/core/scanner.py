@@ -648,10 +648,20 @@ class IntelligentForexScanner:
                 market_regime = intelligence_report.get('market_regime', {})
                 session_analysis = intelligence_report.get('session_analysis', {})
                 trading_recs = intelligence_report.get('trading_recommendations', {})
+                # Keys must match what alert_history._extract_market_intelligence_data() reads:
+                # regime_analysis, session_analysis, market_context, strategy_adaptation
                 formatted_intel = {
-                    'market_regime': market_regime,
+                    'regime_analysis': {
+                        'dominant_regime': market_regime.get('dominant_regime', 'unknown'),
+                        'confidence': market_regime.get('confidence', 0.5),
+                        'regime_scores': market_regime.get('regime_scores', {}),
+                    },
                     'session_analysis': session_analysis,
-                    'trading_recommendations': trading_recs,
+                    'market_context': {
+                        'market_strength': market_regime.get('market_strength', {}),
+                        'correlation_analysis': market_regime.get('correlation_analysis', {}),
+                    },
+                    'strategy_adaptation': trading_recs,
                     'intelligence_source': 'live_scan',
                     'scan_timestamp': scan_start.isoformat() if scan_start else None,
                 }
