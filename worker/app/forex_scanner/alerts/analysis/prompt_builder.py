@@ -1090,7 +1090,8 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - 1-3: Poor setup - counter-trend to 4H structure, entry AT resistance/support, or technical breakdown
 
 **HARD SCORE CAPS (cannot exceed these regardless of other factors):**
-- Counter-trend to 4H structure (BUY in LH/LL downtrend, SELL in HH/HL uptrend): MAX SCORE 4, REJECT
+- Counter-trend to 4H structure AND MTF Confluence < 0.6 (BUY in LH/LL downtrend, SELL in HH/HL uptrend, WITHOUT multi-timeframe agreement): MAX SCORE 4, REJECT
+  ⚠️ EXCEPTION: If MTF Confluence ≥ 0.6 OR "All TFs aligned" flag is present, the strategy's multi-timeframe system has already validated direction. Do NOT apply counter-trend cap based on 4H structure alone — score on entry quality and S/R location instead.
 - Entry within 10 pips of major resistance (for BUY) or support (for SELL): MAX SCORE 4, REJECT
 - Entry at round number psychological level (x.x000, x.x500) against HTF trend: MAX SCORE 3, REJECT
 - Entry at TOP of local recovery in a downtrend (or BOTTOM of local selloff in uptrend): MAX SCORE 4, REJECT
@@ -1118,7 +1119,7 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - MI Confidence Modifier strongly negative (< -10%): market intelligence is bearish on this signal
 
 **AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
-- **4H trend structure opposes signal** — BUY when 4H shows Lower Highs/Lower Lows, or SELL when 4H shows Higher Highs/Higher Lows. Look at the CANDLE STRUCTURE, not just EMA position.
+- **4H trend structure opposes signal AND MTF Confluence < 0.6** — BUY when 4H shows Lower Highs/Lower Lows, or SELL when 4H shows Higher Highs/Higher Lows, WITHOUT multi-timeframe agreement. If MTF Confluence ≥ 0.6 or "All TFs aligned", skip this rejection — the strategy's own MTF system has validated direction; evaluate on entry quality/S-R instead.
 - **Entry AT resistance (BUY) or AT support (SELL)** — If price is within 10 pips of a visible resistance/support zone, swing high/low, or round number (x.x000, x.x500), REJECT. This is the #1 reason good-looking setups fail.
 - **Entry at top of local recovery in downtrend** — If 4H is bearish but 15m/5m show a rally, and entry is near the TOP of that rally (not at a pullback), this is buying into supply. REJECT.
 - Counter-trend trades (price on wrong side of 4H EMA with confirming bearish/bullish candle structure)
