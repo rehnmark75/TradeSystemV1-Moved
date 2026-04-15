@@ -47,3 +47,7 @@ export function validateScannerUpdates(updates: unknown) {
 export function validateSmcUpdates(updates: unknown) {
   return smcUpdateSchema.safeParse(updates);
 }
+
+export function validateXauGoldUpdates(updates: unknown) {
+  return smcUpdateSchema.safeParse(updates);
+}

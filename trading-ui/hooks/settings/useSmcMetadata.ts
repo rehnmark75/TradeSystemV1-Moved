@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { apiUrl } from "../../lib/settings/api";
 import type { SmcParameterMetadata } from "../../types/settings";
 
-export function useSmcMetadata() {
+export function useStrategyMetadata(endpoint: string) {
   const [metadata, setMetadata] = useState<SmcParameterMetadata[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -10,7 +10,7 @@ export function useSmcMetadata() {
   useEffect(() => {
     let mounted = true;
     setLoading(true);
-    fetch(apiUrl("/api/settings/strategy/smc/metadata"))
+    fetch(apiUrl(endpoint))
       .then(async (res) => {
         if (!res.ok) {
           const payload = await res.json().catch(() => null);
@@ -39,4 +39,8 @@ export function useSmcMetadata() {
   }, []);
 
   return { metadata, loading, error };
+}
+
+export function useSmcMetadata() {
+  return useStrategyMetadata("/api/settings/strategy/smc/metadata");
 }

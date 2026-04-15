@@ -31,6 +31,7 @@ interface SettingsToolbarProps {
   onSave: () => void;
   onSnapshot: () => void;
   onDiscard: () => void;
+  showSnapshotAction?: boolean;
 }
 
 const MODE_OPTIONS = [
@@ -53,6 +54,7 @@ export default function SettingsToolbar({
   onSave,
   onSnapshot,
   onDiscard,
+  showSnapshotAction = true,
 }: SettingsToolbarProps) {
   const toggleFilter = (key: keyof FilterState) => {
     onFiltersChange({ ...filters, [key]: !filters[key] });
@@ -139,14 +141,16 @@ export default function SettingsToolbar({
             Discard
           </button>
         ) : null}
-        <button
-          type="button"
-          className="btn-secondary"
-          onClick={onSnapshot}
-          title="Save current config as a named snapshot"
-        >
-          ⊡ Snapshot
-        </button>
+        {showSnapshotAction ? (
+          <button
+            type="button"
+            className="btn-secondary"
+            onClick={onSnapshot}
+            title="Save current config as a named snapshot"
+          >
+            ⊡ Snapshot
+          </button>
+        ) : null}
         <button
           type="button"
           className={`btn-primary ${pendingCount === 0 ? "disabled" : ""}`}

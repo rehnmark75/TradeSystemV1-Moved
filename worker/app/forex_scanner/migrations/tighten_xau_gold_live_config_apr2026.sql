@@ -37,7 +37,8 @@ WHERE parameter_name IN (
     'entry_check_bars',
     'macd_filter_enabled',
     'require_ob_or_fvg'
-);
+)
+AND COALESCE(config_set, 'live') IN ('demo', 'live');
 
 UPDATE trailing_pair_config
 SET early_breakeven_trigger_points = 25,

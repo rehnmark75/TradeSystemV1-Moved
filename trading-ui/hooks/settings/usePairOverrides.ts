@@ -9,7 +9,7 @@ interface PairOverride {
   [key: string]: unknown;
 }
 
-export function usePairOverrides(configSet?: string) {
+export function useStrategyPairOverrides(baseEndpoint: string, configSet?: string) {
   const effectiveConfigSet = configSet ?? "demo";
   const [overrides, setOverrides] = useState<PairOverride[]>([]);
   const [loading, setLoading] = useState(true);
@@ -20,7 +20,7 @@ export function usePairOverrides(configSet?: string) {
     setError(null);
     try {
       const response = await fetch(
-        apiUrl(`/api/settings/strategy/smc/pairs?config_set=${encodeURIComponent(effectiveConfigSet)}`)
+        apiUrl(`${baseEndpoint}/pairs?config_set=${encodeURIComponent(effectiveConfigSet)}`)
       );
       const payload = await response.json();
       if (!response.ok) {
@@ -45,7 +45,7 @@ export function usePairOverrides(configSet?: string) {
     updatedAt: string;
   }) => {
     const response = await fetch(
-      apiUrl(`/api/settings/strategy/smc/pairs/${epic}?config_set=${encodeURIComponent(effectiveConfigSet)}`),
+      apiUrl(`${baseEndpoint}/pairs/${epic}?config_set=${encodeURIComponent(effectiveConfigSet)}`),
       {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
@@ -76,7 +76,7 @@ export function usePairOverrides(configSet?: string) {
       changeReason: string;
     }
   ) => {
-    const response = await fetch(apiUrl("/api/settings/strategy/smc/pairs"), {
+    const response = await fetch(apiUrl(`${baseEndpoint}/pairs`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -97,7 +97,7 @@ export function usePairOverrides(configSet?: string) {
 
   const deleteOverride = async (epic: string, meta: { updatedBy: string; changeReason: string }) => {
     const response = await fetch(
-      apiUrl(`/api/settings/strategy/smc/pairs/${epic}`),
+      apiUrl(`${baseEndpoint}/pairs/${epic}`),
       {
       method: "DELETE",
       headers: { "Content-Type": "application/json" },
@@ -121,7 +121,7 @@ export function usePairOverrides(configSet?: string) {
     changeReason: string;
     sourceEpic?: string;
   }) => {
-    const response = await fetch(apiUrl("/api/settings/strategy/smc/bulk"), {
+    const response = await fetch(apiUrl(`${baseEndpoint}/bulk`), {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -151,4 +151,8 @@ export function usePairOverrides(configSet?: string) {
     deleteOverride,
     bulkAction
   };
+}
+
+export function usePairOverrides(configSet?: string) {
+  return useStrategyPairOverrides("/api/settings/strategy/smc", configSet);
 }

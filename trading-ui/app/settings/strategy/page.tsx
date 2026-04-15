@@ -8,10 +8,10 @@ import SettingsField from "../../../components/settings/SettingsField";
 import SaveModal from "../../../components/settings/SaveModal";
 import SnapshotPanel from "../../../components/settings/SnapshotPanel";
 import ConflictModal from "../../../components/settings/ConflictModal";
-import { useSmcConfig } from "../../../hooks/settings/useSmcConfig";
-import { useSmcMetadata } from "../../../hooks/settings/useSmcMetadata";
+import { useStrategyConfig } from "../../../hooks/settings/useSmcConfig";
+import { useStrategyMetadata } from "../../../hooks/settings/useSmcMetadata";
 import { useSettingsSearch } from "../../../hooks/settings/useSettingsSearch";
-import { usePairOverrides } from "../../../hooks/settings/usePairOverrides";
+import { useStrategyPairOverrides } from "../../../hooks/settings/usePairOverrides";
 import { apiUrl } from "../../../lib/settings/api";
 import { logTelemetry } from "../../../lib/settings/telemetry";
 import { useEnvironment } from "../../../lib/environment";
@@ -41,14 +41,6 @@ const META_FIELDS = new Set([
 
 const STATUS_FIELDS = new Set(["is_enabled", "monitor_only"]);
 
-type PairStatus = "inherit" | "active" | "monitor" | "disabled";
-const STATUS_LABELS: Record<PairStatus, string> = {
-  inherit: "Inherit",
-  active: "Active",
-  monitor: "Monitor",
-  disabled: "Disabled",
-};
-
 const PREFERRED_ORDER = [
   "Tier 1: 4H Directional Bias",
   "Tier 2: 15m Entry Trigger",
@@ -66,6 +58,59 @@ const PREFERRED_ORDER = [
   "Enabled Trading Pairs",
   "Other",
 ];
+
+type StrategyKey = "smc" | "xau-gold";
+
+const STRATEGIES: Record<StrategyKey, {
+  label: string;
+  apiBase: string;
+  draftKey: string;
+  effectiveBase: string;
+  columnEndpoint: string;
+  snapshotCapable: boolean;
+  preferredOrder: string[];
+}> = {
+  smc: {
+    label: "SMC_SIMPLE",
+    apiBase: "/api/settings/strategy/smc",
+    draftKey: "smc-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/smc/effective",
+    columnEndpoint: "/api/settings/strategy/smc/pairs/columns",
+    snapshotCapable: true,
+    preferredOrder: PREFERRED_ORDER,
+  },
+  "xau-gold": {
+    label: "XAU_GOLD",
+    apiBase: "/api/settings/strategy/xau-gold",
+    draftKey: "xau-gold-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/xau-gold/effective",
+    columnEndpoint: "/api/settings/strategy/xau-gold/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "general",
+      "timeframes",
+      "indicators",
+      "confidence",
+      "confluence",
+      "risk",
+      "regime",
+      "session",
+      "structure",
+      "limits",
+      "filters",
+      "pairs",
+      "Other",
+    ],
+  },
+};
+
+type PairStatus = "inherit" | "active" | "monitor" | "disabled";
+const STATUS_LABELS: Record<PairStatus, string> = {
+  inherit: "Inherit",
+  active: "Active",
+  monitor: "Monitor",
+  disabled: "Disabled",
+};
 
 function toLabel(value: string) {
   return value.replace(/_/g, " ").replace(/\b\w/g, (c) => c.toUpperCase());
@@ -85,6 +130,8 @@ function hasKey(obj: Record<string, unknown>, key: string) {
 
 export default function UnifiedStrategySettings() {
   const { environment } = useEnvironment();
+  const [strategy, setStrategy] = useState<StrategyKey>("smc");
+  const strategyDef = STRATEGIES[strategy];
 
   // Mode
   const [mode, setMode] = useState<SettingsMode>("global");
@@ -101,10 +148,10 @@ export default function UnifiedStrategySettings() {
     conflict,
     setConflict,
     setChanges,
-  } = useSmcConfig(environment);
+  } = useStrategyConfig(strategyDef.apiBase, strategyDef.draftKey, environment);
 
   // Metadata
-  const { metadata, loading: metadataLoading } = useSmcMetadata();
+  const { metadata, loading: metadataLoading } = useStrategyMetadata(`${strategyDef.apiBase}/metadata`);
 
   // Pair overrides
   const {
@@ -115,7 +162,7 @@ export default function UnifiedStrategySettings() {
     saveOverride,
     createOverride,
     reload: reloadOverrides,
-  } = usePairOverrides(environment);
+  } = useStrategyPairOverrides(strategyDef.apiBase, environment);
 
   // Pair state
   const [selectedEpic, setSelectedEpic] = useState("");
@@ -151,11 +198,11 @@ export default function UnifiedStrategySettings() {
 
   // Load override columns
   useEffect(() => {
-    fetch(apiUrl("/api/settings/strategy/smc/pairs/columns"))
+    fetch(apiUrl(strategyDef.columnEndpoint))
       .then((r) => r.json())
       .then((p) => setOverrideColumns(Array.isArray(p?.columns) ? p.columns : []))
       .catch(() => setOverrideColumns([]));
-  }, []);
+  }, [strategyDef.columnEndpoint]);
 
   // Derive all pairs
   const globalConfig = effectiveData as Record<string, unknown> | null;
@@ -178,7 +225,13 @@ export default function UnifiedStrategySettings() {
 
   // Auto-select first pair
   useEffect(() => {
-    if (!selectedEpic && allPairs.length) setSelectedEpic(allPairs[0]);
+    if (!allPairs.length) {
+      setSelectedEpic("");
+      return;
+    }
+    if (!selectedEpic || !allPairs.includes(selectedEpic)) {
+      setSelectedEpic(allPairs[0]);
+    }
   }, [allPairs, selectedEpic]);
 
   // Load effective config for selected pair
@@ -186,14 +239,14 @@ export default function UnifiedStrategySettings() {
     if (!selectedEpic) { setEffective(null); return; }
     const controller = new AbortController();
     fetch(
-      apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`),
+      apiUrl(`${strategyDef.effectiveBase}/${selectedEpic}?config_set=${encodeURIComponent(environment)}`),
       { signal: controller.signal }
     )
       .then((r) => r.json())
       .then(setEffective)
       .catch(() => {});
     return () => controller.abort();
-  }, [selectedEpic, environment]);
+  }, [selectedEpic, environment, strategyDef.effectiveBase]);
 
   // Sync draft overrides when effective config changes
   useEffect(() => {
@@ -324,8 +377,8 @@ export default function UnifiedStrategySettings() {
 
     return [...sectionsMap.values()]
       .sort((a, b) => {
-        const ia = PREFERRED_ORDER.indexOf(a.category);
-        const ib = PREFERRED_ORDER.indexOf(b.category);
+        const ia = strategyDef.preferredOrder.indexOf(a.category);
+        const ib = strategyDef.preferredOrder.indexOf(b.category);
         return (ia === -1 ? 999 : ia) - (ib === -1 ? 999 : ib);
       })
       .map((s) => ({
@@ -333,7 +386,7 @@ export default function UnifiedStrategySettings() {
         items: sortItems(s.items),
         subgroups: new Map([...s.subgroups.entries()].map(([k, v]) => [k, sortItems(v)])),
       }));
-  }, [visibleKeys, metadata, metadataMap, filters.showAdvanced, sourceData]);
+  }, [visibleKeys, metadata, metadataMap, filters.showAdvanced, sourceData, strategyDef.preferredOrder]);
 
   // Category nav items
   const categoryNavItems: CategoryNavItem[] = useMemo(() => {
@@ -467,7 +520,7 @@ export default function UnifiedStrategySettings() {
         await createOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason });
       }
       await reloadOverrides();
-      const refreshed = await fetch(apiUrl(`/api/settings/strategy/smc/effective/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)).then((r) => r.json());
+      const refreshed = await fetch(apiUrl(`${strategyDef.effectiveBase}/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)).then((r) => r.json());
       setEffective(refreshed);
       setShowSaveModal(false);
     } catch (error) {
@@ -572,7 +625,21 @@ export default function UnifiedStrategySettings() {
         onSave={handleSave}
         onSnapshot={() => setShowSnapshotPanel(true)}
         onDiscard={handleDiscard}
+        showSnapshotAction={strategyDef.snapshotCapable}
       />
+
+      <div className="settings-segment" style={{ marginBottom: 16 }}>
+        {(["smc", "xau-gold"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={`pair-status-btn ${strategy === key ? "selected" : ""}`}
+            onClick={() => setStrategy(key)}
+          >
+            {STRATEGIES[key].label}
+          </button>
+        ))}
+      </div>
 
       {mode === "pair" && selectedEpic ? (
         <div className="pair-status-bar">
@@ -605,7 +672,7 @@ export default function UnifiedStrategySettings() {
           items={categoryNavItems}
           activeCategory={activeCategory ?? undefined}
           onSelect={scrollToCategory}
-          showSnapshots
+          showSnapshots={strategyDef.snapshotCapable}
           onSnapshotsClick={() => setShowSnapshotPanel(true)}
         />
 
@@ -688,7 +755,7 @@ export default function UnifiedStrategySettings() {
         />
       ) : null}
 
-      {showSnapshotPanel ? (
+      {showSnapshotPanel && strategyDef.snapshotCapable ? (
         <SnapshotPanel
           configSet={environment}
           onClose={() => setShowSnapshotPanel(false)}

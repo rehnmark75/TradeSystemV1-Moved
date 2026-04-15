@@ -25,7 +25,7 @@ export default function SettingsSidebar() {
       </div>
       <div className="settings-sidebar-section">
         <h3>Strategy</h3>
-        <Link href="/settings/strategy">SMC Settings</Link>
+        <Link href="/settings/strategy">Strategy Settings</Link>
         <Link href="/settings/strategy/effective">Effective View</Link>
       </div>
       <div className="settings-sidebar-section">

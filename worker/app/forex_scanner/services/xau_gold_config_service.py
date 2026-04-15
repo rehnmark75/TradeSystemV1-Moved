@@ -34,6 +34,7 @@ class XAUGoldConfig:
     strategy_name: str = "XAU_GOLD"
     version: str = "1.0.0"
     enabled: bool = True
+    config_set: str = "demo"
 
     # Timeframes
     htf_timeframe: str = "4h"
@@ -246,6 +247,8 @@ class XAUGoldConfigService:
         self._cached: Optional[XAUGoldConfig] = None
         self._cache_ts: Optional[datetime] = None
         self._last_known_good: Optional[XAUGoldConfig] = None
+        self.config_set = os.getenv("TRADING_CONFIG_SET", "demo")
+        self._trading_env = os.getenv("TRADING_ENVIRONMENT", "demo")
         self._db_url = os.getenv(
             "STRATEGY_CONFIG_DATABASE_URL",
             "postgresql://postgres:postgres@postgres:5432/strategy_config",
@@ -272,15 +275,21 @@ class XAUGoldConfigService:
                 self._last_known_good = copy.deepcopy(cfg)
                 return cfg
             except Exception as e:
-                logger.warning(f"XAU_GOLD config DB load failed: {e}")
+                logger.warning(f"XAU_GOLD config DB load failed (config_set={self.config_set}): {e}")
                 if self._last_known_good is not None:
                     cfg = copy.deepcopy(self._last_known_good)
                     cfg.source = "cache"
                     self._cached = cfg
                     self._cache_ts = datetime.now()
                     return cfg
+                if self._trading_env == "live":
+                    raise RuntimeError(
+                        f"Refusing to use default XAU_GOLD config in live mode "
+                        f"(config_set={self.config_set}): {e}"
+                    ) from e
                 cfg = XAUGoldConfig()
                 cfg.source = "default"
+                cfg.config_set = self.config_set
                 self._cached = cfg
                 self._cache_ts = datetime.now()
                 return cfg
@@ -295,11 +304,14 @@ class XAUGoldConfigService:
 
     def _load_from_db(self) -> XAUGoldConfig:
         cfg = XAUGoldConfig()
+        cfg.config_set = self.config_set
         with self._conn() as conn:
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                 cur.execute(
                     "SELECT parameter_name, parameter_value, value_type "
-                    "FROM xau_gold_global_config WHERE is_active = TRUE"
+                    "FROM xau_gold_global_config "
+                    "WHERE is_active = TRUE AND config_set = %s",
+                    (self.config_set,),
                 )
                 for row in cur.fetchall():
                     name = row["parameter_name"]
@@ -311,7 +323,10 @@ class XAUGoldConfigService:
                     else:
                         setattr(cfg, name, val)
 
-                cur.execute("SELECT * FROM xau_gold_pair_overrides WHERE is_enabled = TRUE")
+                cur.execute(
+                    "SELECT * FROM xau_gold_pair_overrides WHERE config_set = %s",
+                    (self.config_set,),
+                )
                 for row in cur.fetchall():
                     epic = row["epic"]
                     data = dict(row)
@@ -328,7 +343,7 @@ class XAUGoldConfigService:
         cfg.loaded_at = datetime.now()
         logger.info(
             f"XAU_GOLD config loaded from DB "
-            f"(pairs={len(cfg.pair_overrides)}, enabled_pairs={cfg.enabled_pairs})"
+            f"(config_set={self.config_set}, pairs={len(cfg.pair_overrides)}, enabled_pairs={cfg.enabled_pairs})"
         )
         return cfg
 

@@ -12,8 +12,16 @@ interface EffectivePayload {
   effective: Record<string, unknown>;
 }
 
+type StrategyKey = "smc" | "xau-gold";
+
+const STRATEGIES: Record<StrategyKey, { label: string; endpoint: string }> = {
+  smc: { label: "SMC_SIMPLE", endpoint: "/api/settings/strategy/smc/effective" },
+  "xau-gold": { label: "XAU_GOLD", endpoint: "/api/settings/strategy/xau-gold/effective" },
+};
+
 export default function EffectiveConfigLanding() {
   const { environment } = useEnvironment();
+  const [strategy, setStrategy] = useState<StrategyKey>("smc");
   const [epic, setEpic] = useState("");
   const [data, setData] = useState<EffectivePayload | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -27,7 +35,7 @@ export default function EffectiveConfigLanding() {
     const load = async () => {
       try {
         const response = await fetch(
-          apiUrl(`/api/settings/strategy/smc/effective/${epic}?config_set=${encodeURIComponent(environment)}`)
+          apiUrl(`${STRATEGIES[strategy].endpoint}/${epic}?config_set=${encodeURIComponent(environment)}`)
         );
         const payload = await response.json();
         if (!response.ok) {
@@ -41,7 +49,7 @@ export default function EffectiveConfigLanding() {
       }
     };
     load();
-  }, [epic, environment]);
+  }, [epic, environment, strategy]);
 
   return (
     <div className="settings-panel">
@@ -50,6 +58,16 @@ export default function EffectiveConfigLanding() {
         <p>Select a pair to compare global vs overrides.</p>
       </div>
       <div className="settings-form-actions">
+        {(["smc", "xau-gold"] as const).map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={`pair-status-btn ${strategy === key ? "selected" : ""}`}
+            onClick={() => setStrategy(key)}
+          >
+            {STRATEGIES[key].label}
+          </button>
+        ))}
         <input
           placeholder="Epic (e.g. CS.D.EURUSD.MINI.IP)"
           value={epic}
