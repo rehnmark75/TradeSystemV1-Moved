@@ -1899,9 +1899,9 @@ class SMCSimpleStrategy:
             )
             calculator = get_performance_metrics_calculator(self.logger)
             metrics = calculator.calculate_metrics(
-                df_5m=df_entry,
-                df_15m=df_trigger,
-                df_4h=df_4h,
+                df_entry=df_entry,
+                df_trigger=df_trigger,
+                df_htf=df_4h,
                 signal_data={'signal_type': direction, 'pullback_depth': pullback_depth},
                 epic=epic
             )
@@ -2240,9 +2240,9 @@ class SMCSimpleStrategy:
                     )
                     _cont_calc = get_performance_metrics_calculator(self.logger)
                     _cont_metrics = _cont_calc.calculate_metrics(
-                        df_5m=entry_df,
-                        df_15m=df_trigger,
-                        df_4h=df_4h,
+                        df_entry=entry_df,
+                        df_trigger=df_trigger,
+                        df_htf=df_4h,
                         signal_data={'signal_type': direction},
                         epic=epic
                     )
@@ -2458,12 +2458,14 @@ class SMCSimpleStrategy:
                     )
                     return None
 
-                # Precompute RSI value for scalp filters and reversal override
+                # Precompute RSI value for scalp filters and reversal override.
+                # Use trigger TF (5m scalp / 15m swing) — 1m RSI in scalp mode is too noisy
+                # and caused false rejections from the confidence-penalty logic.
                 rsi_value = None
-                if 'rsi' in entry_df.columns and len(entry_df) > 0:
-                    rsi_value = entry_df['rsi'].iloc[-1]
-                elif 'rsi' in df_trigger.columns and len(df_trigger) > 0:
+                if 'rsi' in df_trigger.columns and len(df_trigger) > 0:
                     rsi_value = df_trigger['rsi'].iloc[-1]
+                elif 'rsi' in entry_df.columns and len(entry_df) > 0:
+                    rsi_value = entry_df['rsi'].iloc[-1]
 
                 # Filter 2: HTF Bias Score System (v2.35.0 - replaces binary HTF alignment)
                 # Professional approach: continuous bias measurement instead of binary filter
@@ -3037,9 +3039,9 @@ class SMCSimpleStrategy:
                     )
                     _calc = get_performance_metrics_calculator(self.logger)
                     _pre_metrics = _calc.calculate_metrics(
-                        df_5m=entry_df,
-                        df_15m=df_trigger,
-                        df_4h=df_4h,
+                        df_entry=entry_df,
+                        df_trigger=df_trigger,
+                        df_htf=df_4h,
                         signal_data={'signal_type': direction},
                         epic=epic
                     )
@@ -3158,8 +3160,10 @@ class SMCSimpleStrategy:
                     )
                     if _atr_norm_enabled and fixed_sl_pips and fixed_tp_pips and pip_value > 0:
                         try:
-                            # Get current ATR in pips from entry_df (1m data) or df_trigger (5m)
-                            _atr_df = entry_df if (entry_df is not None and 'atr' in entry_df.columns and len(entry_df) > 0) else df_trigger
+                            # Get current ATR in pips from trigger TF (5m scalp / 15m swing).
+                            # Entry-TF ATR (1m in scalp) understates true volatility by ~50%
+                            # and would shrink SL/TP below safe whipsaw distance.
+                            _atr_df = df_trigger if (df_trigger is not None and 'atr' in df_trigger.columns and len(df_trigger) > 0) else entry_df
                             if 'atr' in _atr_df.columns and len(_atr_df) > 0:
                                 _current_atr_pips = float(_atr_df['atr'].iloc[-1]) / pip_value
                                 _ref_atr = self._get_pair_param(epic, 'atr_reference_pips',
@@ -7151,9 +7155,9 @@ class SMCSimpleStrategy:
 
                 # Calculate full metrics
                 metrics = calculator.calculate_metrics(
-                    df_5m=df_entry,
-                    df_15m=df_trigger,
-                    df_4h=df_4h,
+                    df_entry=df_entry,
+                    df_trigger=df_trigger,
+                    df_htf=df_4h,
                     signal_data=signal,
                     epic=epic
                 )
@@ -7255,9 +7259,9 @@ class SMCSimpleStrategy:
                 # Also calculate BB percentile if possible
                 if df_4h is not None:
                     full_metrics = calculator.calculate_metrics(
-                        df_5m=df_entry,
-                        df_15m=df_trigger,
-                        df_4h=df_4h
+                        df_entry=df_entry,
+                        df_trigger=df_trigger,
+                        df_htf=df_4h
                     )
                     context['bb_width_percentile'] = full_metrics.bb_width_percentile
                     context['adx_value'] = full_metrics.adx_value

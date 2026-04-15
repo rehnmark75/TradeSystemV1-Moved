@@ -114,9 +114,9 @@ class SMCPerformanceMetricsCalculator:
     Usage:
         calculator = SMCPerformanceMetricsCalculator()
         metrics = calculator.calculate_metrics(
-            df_5m=df_5m,
-            df_15m=df_15m,
-            df_4h=df_4h,
+            df_entry=df_entry,
+            df_trigger=df_trigger,
+            df_htf=df_htf,
             signal_data=signal_dict,
             epic=epic
         )
@@ -140,9 +140,9 @@ class SMCPerformanceMetricsCalculator:
 
     def calculate_metrics(
         self,
-        df_5m: Optional[pd.DataFrame] = None,
-        df_15m: Optional[pd.DataFrame] = None,
-        df_4h: Optional[pd.DataFrame] = None,
+        df_entry: Optional[pd.DataFrame] = None,
+        df_trigger: Optional[pd.DataFrame] = None,
+        df_htf: Optional[pd.DataFrame] = None,
         signal_data: Optional[Dict] = None,
         epic: str = ""
     ) -> PerformanceMetrics:
@@ -150,9 +150,9 @@ class SMCPerformanceMetricsCalculator:
         Calculate all enhanced performance metrics.
 
         Args:
-            df_5m: 5-minute OHLCV DataFrame
-            df_15m: 15-minute OHLCV DataFrame
-            df_4h: 4-hour OHLCV DataFrame
+            df_entry: 5-minute OHLCV DataFrame
+            df_trigger: 15-minute OHLCV DataFrame
+            df_htf: 4-hour OHLCV DataFrame
             signal_data: Signal dictionary from detect_signal()
             epic: Trading pair epic code
 
@@ -163,22 +163,22 @@ class SMCPerformanceMetricsCalculator:
 
         try:
             # Most granular TF (1m in scalp, 5m in swing) — used only for entry-candle metrics
-            df_primary = df_5m if df_5m is not None and len(df_5m) > 0 else df_15m
+            df_primary = df_entry if df_entry is not None and len(df_entry) > 0 else df_trigger
 
             if df_primary is None or len(df_primary) < 20:
                 self.logger.warning(f"Insufficient data for metrics calculation: {epic}")
                 return metrics
 
-            # Decision TF for regime/ADX/ER/volatility. Prefer trigger TF (df_15m, which is
+            # Decision TF for regime/ADX/ER/volatility. Prefer trigger TF (df_trigger, which is
             # the 5m trigger in scalp mode / 15m in swing mode) so we never classify regime
             # on 1m noise. Fall back to df_primary only if trigger df is missing.
-            df_decision = df_15m if df_15m is not None and len(df_15m) >= 20 else df_primary
+            df_decision = df_trigger if df_trigger is not None and len(df_trigger) >= 20 else df_primary
 
             # 1. Kaufman Efficiency Ratio (decision TF)
             metrics.efficiency_ratio, metrics.er_period = self._calculate_efficiency_ratio(df_decision)
 
             # 2. Market Regime Detection (decision TF)
-            regime_result = self._detect_market_regime(df_decision, df_4h)
+            regime_result = self._detect_market_regime(df_decision, df_htf)
             metrics.market_regime = regime_result['regime']
             metrics.regime_confidence = regime_result['confidence']
             metrics.adx_value = regime_result.get('adx')
@@ -200,8 +200,8 @@ class SMCPerformanceMetricsCalculator:
                 metrics.entry_candle_momentum = entry_result['candle_momentum']
 
             # 5. Multi-Timeframe Confluence (uses all TFs explicitly)
-            if df_4h is not None and signal_data:
-                mtf_result = self._calculate_mtf_confluence(df_5m, df_15m, df_4h, signal_data)
+            if df_htf is not None and signal_data:
+                mtf_result = self._calculate_mtf_confluence(df_entry, df_trigger, df_htf, signal_data)
                 metrics.mtf_confluence_score = mtf_result['score']
                 metrics.htf_candle_position = mtf_result['htf_position']
                 metrics.all_timeframes_aligned = mtf_result['aligned']
@@ -269,7 +269,7 @@ class SMCPerformanceMetricsCalculator:
     def _detect_market_regime(
         self,
         df: pd.DataFrame,
-        df_4h: Optional[pd.DataFrame] = None
+        df_htf: Optional[pd.DataFrame] = None
     ) -> Dict[str, Any]:
         """
         Detect current market regime using ADX and efficiency ratio.
@@ -506,9 +506,9 @@ class SMCPerformanceMetricsCalculator:
 
     def _calculate_mtf_confluence(
         self,
-        df_5m: Optional[pd.DataFrame],
-        df_15m: Optional[pd.DataFrame],
-        df_4h: pd.DataFrame,
+        df_entry: Optional[pd.DataFrame],
+        df_trigger: Optional[pd.DataFrame],
+        df_htf: pd.DataFrame,
         signal_data: Dict
     ) -> Dict[str, Any]:
         """
@@ -528,8 +528,8 @@ class SMCPerformanceMetricsCalculator:
             total_checks = 0
 
             # 4H candle position (where are we in the HTF candle?)
-            if len(df_4h) > 0:
-                htf_candle = df_4h.iloc[-1]
+            if len(df_htf) > 0:
+                htf_candle = df_htf.iloc[-1]
                 htf_range = htf_candle['high'] - htf_candle['low']
                 if htf_range > 0:
                     # Current price position in 4H candle
@@ -550,16 +550,16 @@ class SMCPerformanceMetricsCalculator:
                 total_checks += 1
 
             # 15m alignment
-            if df_15m is not None and len(df_15m) > 0:
-                mtf_candle = df_15m.iloc[-1]
+            if df_trigger is not None and len(df_trigger) > 0:
+                mtf_candle = df_trigger.iloc[-1]
                 mtf_bullish = mtf_candle['close'] > mtf_candle['open']
                 if (is_bullish and mtf_bullish) or (not is_bullish and not mtf_bullish):
                     alignment_count += 1
                 total_checks += 1
 
             # 5m alignment
-            if df_5m is not None and len(df_5m) > 0:
-                ltf_candle = df_5m.iloc[-1]
+            if df_entry is not None and len(df_entry) > 0:
+                ltf_candle = df_entry.iloc[-1]
                 ltf_bullish = ltf_candle['close'] > ltf_candle['open']
                 if (is_bullish and ltf_bullish) or (not is_bullish and not ltf_bullish):
                     alignment_count += 1
@@ -693,7 +693,7 @@ def get_performance_metrics_calculator(
         )
 
         calculator = get_performance_metrics_calculator()
-        metrics = calculator.calculate_metrics(df_5m, df_15m, df_4h, signal_data, epic)
+        metrics = calculator.calculate_metrics(df_entry, df_trigger, df_htf, signal_data, epic)
     """
     global _calculator_instance
     if _calculator_instance is None:
