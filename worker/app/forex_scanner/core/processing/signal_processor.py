@@ -621,7 +621,8 @@ class SignalProcessor:
             'mean_reversion': False,
             'ranging_market': False,
             'zero_lag': False,
-            'zero_lag_squeeze': False
+            'zero_lag_squeeze': False,
+            'xau_gold': False
         }
 
         # Check explicit mapping first

@@ -1124,6 +1124,8 @@ class TradeValidator:
                 pair = pair_part.strip().upper()
                 if len(pair) == 6:  # Valid forex pair like EURUSD
                     return pair
+                if pair_part.upper() == 'CFEGOLD':
+                    return 'XAUUSD'
             return None
         except Exception:
             return None
