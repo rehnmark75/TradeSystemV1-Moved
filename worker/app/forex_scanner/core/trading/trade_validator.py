@@ -597,7 +597,7 @@ class TradeValidator:
             if candles is None and hasattr(self, 'data_fetcher') and self.data_fetcher:
                 try:
                     self.logger.info(f"📊 Fetching candles for vision analysis: {epic}")
-                    candles = self._fetch_candles_for_vision(epic)
+                    candles = self._fetch_candles_for_vision(epic, signal=signal)
                     if candles:
                         self.logger.info(f"📊 Fetched candles for {epic}: {list(candles.keys())}")
                     else:
@@ -990,51 +990,103 @@ class TradeValidator:
         except Exception as e:
             self.logger.warning(f"⚠️ Failed to save reversal rejection to DB: {e}")
 
-    def _fetch_candles_for_vision(self, epic: str) -> Optional[Dict]:
+    def _fetch_candles_for_vision(self, epic: str, signal: Dict = None) -> Optional[Dict]:
         """
         Fetch candle data for vision analysis chart generation.
 
+        Scalp-aware: reads tier timeframes from signal['strategy_indicators'] and
+        fetches the set the chart generator's role map expects
+        (4h macro + strategy HTF + trigger + entry). Also attaches
+        ``_macro_structure`` to the signal so HH/HL markers render on the 4H panel.
+
         Args:
             epic: Trading pair epic (e.g., 'CS.D.EURUSD.CEEM.IP')
+            signal: Signal dict (optional) — drives scalp-mode timeframe selection.
 
         Returns:
-            Dictionary of DataFrames {'4h': df, '15m': df, '5m': df} or None
+            Dictionary of DataFrames keyed by timeframe, or None.
         """
         try:
             if not hasattr(self, 'data_fetcher') or not self.data_fetcher:
                 self.logger.debug("No data_fetcher available for vision candles")
                 return None
 
-            # Extract pair from epic (e.g., 'CS.D.EURUSD.CEEM.IP' -> 'EURUSD')
             pair = self._extract_pair_from_epic(epic)
             if not pair:
                 self.logger.warning(f"⚠️ Could not extract pair from epic: {epic}")
                 return None
 
-            candles = {}
+            # Resolve tier timeframes from the signal (match claude_analyzer fetcher)
+            strategy_htf = '4h'
+            strategy_trigger = '15m'
+            strategy_entry = '5m'
+            is_scalp = False
+            if signal:
+                si = signal.get('strategy_indicators', {}) or {}
+                # strategy_indicators may arrive as a repr-string in some code paths
+                if isinstance(si, str):
+                    try:
+                        import ast
+                        si = ast.literal_eval(si)
+                    except Exception:
+                        si = {}
+                strategy_htf = (si.get('tier1_ema', {}) or {}).get('timeframe') or '4h'
+                strategy_trigger = (si.get('tier2_swing', {}) or {}).get('timeframe') or '15m'
+                strategy_entry = (si.get('tier3_entry', {}) or {}).get('timeframe') or '5m'
+                if 'scalp_mode' in signal:
+                    is_scalp = bool(signal.get('scalp_mode'))
+                else:
+                    is_scalp = strategy_htf != '4h' or strategy_entry != '5m'
 
-            # Fetch multiple timeframes for comprehensive chart
-            # Using lookback_hours instead of num_candles (DataFetcher uses get_enhanced_data)
-            # SMC Simple uses: 4H (bias), 15m (swing break), 5m (entry)
-            timeframes = [
-                ('4h', 400),   # 400 hours = ~16 days of 4h candles (~100 candles)
-                ('15m', 50),   # 50 hours = ~200 15m candles
-                ('5m', 24),    # 24 hours = ~288 5m candles (entry timeframe)
-            ]
+            candles: Dict = {}
 
-            for timeframe, lookback_hours in timeframes:
+            def _fetch(tf: str, lookback_hours: int, min_bars: int, label: str):
                 try:
                     df = self.data_fetcher.get_enhanced_data(
-                        epic=epic,
-                        pair=pair,
-                        timeframe=timeframe,
-                        lookback_hours=lookback_hours
+                        epic=epic, pair=pair, timeframe=tf, lookback_hours=lookback_hours
                     )
-                    if df is not None and len(df) > 0:
-                        candles[timeframe] = df
-                        self.logger.debug(f"📊 Fetched {timeframe}: {len(df)} candles")
+                    if df is not None and len(df) >= min_bars:
+                        candles[tf] = df
+                        self.logger.info(f"📊 Fetched {tf} {label}: {len(df)} bars")
+                    else:
+                        n = len(df) if df is not None else 'None'
+                        self.logger.warning(f"📊 {tf} {label} fetch failed or thin: {n} bars (need >={min_bars})")
                 except Exception as tf_err:
-                    self.logger.debug(f"Could not fetch {timeframe} candles: {tf_err}")
+                    self.logger.warning(f"📊 Could not fetch {tf} {label}: {tf_err}")
+
+            # 4H macro — always
+            _fetch('4h', 400, 20, 'macro')
+
+            # Attach authoritative macro structure so chart + prompt render HH/HL
+            if signal is not None and '4h' in candles:
+                try:
+                    try:
+                        from alerts.claude_analyzer import ClaudeAnalyzer
+                    except ImportError:
+                        from forex_scanner.alerts.claude_analyzer import ClaudeAnalyzer
+                    signal['_macro_structure'] = ClaudeAnalyzer._compute_4h_macro_structure(self, candles['4h'])
+                except Exception as macro_err:
+                    self.logger.debug(f"Macro structure computation skipped: {macro_err}")
+
+            if is_scalp:
+                self.logger.info(
+                    f"📊 [SCALP] Chart timeframes: 4h(macro)+{strategy_htf}(htf)"
+                    f"+{strategy_trigger}(trigger)+{strategy_entry}(entry)"
+                )
+                htf_lookback = 120 if strategy_htf == '1h' else 50
+                if strategy_htf not in candles:
+                    _fetch(strategy_htf, htf_lookback, 20, 'HTF')
+                _fetch(strategy_trigger, 24, 50, 'trigger')
+                _fetch(strategy_entry, 2, 30, 'entry')
+            else:
+                self.logger.info(
+                    f"📊 [SWING] Chart timeframes: 4h+{strategy_trigger}+{strategy_entry}"
+                )
+                if strategy_htf != '4h' and strategy_htf not in candles:
+                    htf_lookback = 120 if strategy_htf == '1h' else 50
+                    _fetch(strategy_htf, htf_lookback, 20, 'HTF')
+                _fetch(strategy_trigger, 100, 50, 'trigger')
+                _fetch(strategy_entry, 24, 50, 'entry')
 
             if candles:
                 self.logger.info(f"📊 Fetched candles for vision: {list(candles.keys())}")
