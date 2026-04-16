@@ -1,13 +1,13 @@
 import type { ReactNode } from "react";
-import SettingsSidebar from "../../components/settings/SettingsSidebar";
 import SettingsEnvBanner from "../../components/settings/SettingsEnvBanner";
+import SettingsSectionNav from "../../components/settings/SettingsSectionNav";
 
 export default function SettingsLayout({ children }: { children: ReactNode }) {
   return (
     <div className="settings-shell">
-      <SettingsSidebar />
-      <div className="settings-content">
+      <div className="settings-content settings-content-wide">
         <SettingsEnvBanner />
+        <SettingsSectionNav />
         {children}
       </div>
     </div>
