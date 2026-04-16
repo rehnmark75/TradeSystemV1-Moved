@@ -163,7 +163,16 @@ export default function TrailingSettingsPage() {
           <table className="trailing-config-table" style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.85rem" }}>
             <thead>
               <tr>
-                <th style={{ textAlign: "left", position: "sticky", left: 0, background: "#fff" }}>Epic</th>
+                <th
+                  style={{
+                    textAlign: "left",
+                    position: "sticky",
+                    left: 0,
+                    background: "linear-gradient(180deg, rgba(17, 28, 46, 0.98), rgba(12, 21, 36, 0.98))",
+                  }}
+                >
+                  Epic
+                </th>
                 {NUMERIC_FIELDS.map((f) => (
                   <th key={f} title={FIELD_LABELS[f]} style={{ textAlign: "right", padding: "6px 8px", whiteSpace: "nowrap" }}>
                     {FIELD_LABELS[f]}
@@ -185,8 +194,8 @@ export default function TrailingSettingsPage() {
                   <tr
                     key={key}
                     style={{
-                      background: row.epic === "DEFAULT" ? "#f7f7fa" : undefined,
-                      borderBottom: "1px solid #eee",
+                      background: row.epic === "DEFAULT" ? "rgba(255, 255, 255, 0.03)" : undefined,
+                      borderBottom: "1px solid var(--border)",
                     }}
                   >
                     <td style={{ padding: "4px 8px", fontWeight: 600, position: "sticky", left: 0, background: row.epic === "DEFAULT" ? "#f7f7fa" : "#fff" }}>

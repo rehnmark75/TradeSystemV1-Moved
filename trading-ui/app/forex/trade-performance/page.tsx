@@ -261,6 +261,10 @@ export default function ForexTradePerformancePage() {
             <strong>{metrics.win_rate.toFixed(1)}%</strong>
           </div>
           <div className="summary-card">
+            Profit Factor
+            <strong>{Number.isFinite(metrics.profit_factor) ? formatNumber(metrics.profit_factor) : "∞"}</strong>
+          </div>
+          <div className="summary-card">
             Completed Trades
             <strong>{metrics.completed_trades}</strong>
           </div>
@@ -269,10 +273,6 @@ export default function ForexTradePerformancePage() {
             <strong>
               {metrics.pending_trades}/{metrics.open_trades}
             </strong>
-          </div>
-          <div className="summary-card">
-            Profit Factor
-            <strong>{Number.isFinite(metrics.profit_factor) ? formatNumber(metrics.profit_factor) : "∞"}</strong>
           </div>
         </div>
 

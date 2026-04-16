@@ -98,6 +98,13 @@ function InfraPageInner() {
     return scoreB - scoreA;
   });
 
+  const freshAlertCount = (alerts ?? []).filter((alert) => {
+    if (!alert.created_at || alert.status === "resolved") return false;
+    const timestamp = new Date(alert.created_at).getTime();
+    if (Number.isNaN(timestamp)) return false;
+    return Date.now() - timestamp <= 15 * 60 * 1000;
+  }).length;
+
   const handleRestart = async (name: string) => {
     await fetch(`${BASE}/api/infra/containers/${encodeURIComponent(name)}/restart`, {
       method: "POST",
@@ -235,6 +242,20 @@ function InfraPageInner() {
               Active only
             </label>
             <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}>{(alerts ?? []).length} alert{(alerts?.length ?? 0) !== 1 ? "s" : ""}</span>
+            <span
+              style={{
+                fontSize: "0.76rem",
+                color: freshAlertCount ? "#8fd5ff" : "var(--muted)",
+                border: `1px solid ${freshAlertCount ? "rgba(143, 213, 255, 0.28)" : "var(--border)"}`,
+                background: freshAlertCount ? "rgba(79, 171, 255, 0.08)" : "transparent",
+                borderRadius: "999px",
+                padding: "4px 10px",
+                fontWeight: 600,
+                letterSpacing: "0.04em",
+              }}
+            >
+              {freshAlertCount} fresh
+            </span>
           </div>
           {alertsLoading && <p style={{ color: "var(--muted)" }}>Loading alerts…</p>}
           {!alertsLoading && (alerts ?? []).length === 0 && (
@@ -266,7 +287,20 @@ function InfraPageInner() {
                     <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "6px", fontWeight: 600 }}>CRITICAL CONTAINERS</div>
                     <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
                       {config.critical_containers.map(c => (
-                        <span key={c} style={{ background: "#fff0f0", border: "1px solid #fcc", borderRadius: "6px", padding: "2px 10px", fontSize: "0.82rem", fontFamily: "monospace" }}>{c}</span>
+                        <span
+                          key={c}
+                          style={{
+                            background: "rgba(255, 124, 124, 0.08)",
+                            border: "1px solid rgba(255, 124, 124, 0.22)",
+                            color: "rgba(255, 205, 205, 0.9)",
+                            borderRadius: "6px",
+                            padding: "2px 10px",
+                            fontSize: "0.82rem",
+                            fontFamily: "monospace",
+                          }}
+                        >
+                          {c}
+                        </span>
                       ))}
                     </div>
                   </div>
@@ -276,7 +310,18 @@ function InfraPageInner() {
                     <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "6px", fontWeight: 600 }}>THRESHOLDS</div>
                     <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(200px,1fr))", gap: "8px" }}>
                       {Object.entries(config.thresholds).map(([k, v]) => (
-                        <div key={k} style={{ display: "flex", justifyContent: "space-between", fontSize: "0.82rem", background: "#fafaf8", border: "1px solid var(--border)", borderRadius: "6px", padding: "6px 10px" }}>
+                        <div
+                          key={k}
+                          style={{
+                            display: "flex",
+                            justifyContent: "space-between",
+                            fontSize: "0.82rem",
+                            background: "rgba(255, 255, 255, 0.03)",
+                            border: "1px solid rgba(125, 162, 214, 0.16)",
+                            borderRadius: "6px",
+                            padding: "6px 10px",
+                          }}
+                        >
                           <span style={{ color: "var(--muted)" }}>{k}</span>
                           <span style={{ fontWeight: 600 }}>{v}</span>
                         </div>
@@ -289,7 +334,19 @@ function InfraPageInner() {
                     <div style={{ fontSize: "0.8rem", color: "var(--muted)", marginBottom: "6px", fontWeight: 600 }}>NOTIFICATION CHANNELS</div>
                     <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
                       {config.notification_channels.map(c => (
-                        <span key={c} style={{ background: "#f0f8ff", border: "1px solid #cde", borderRadius: "6px", padding: "3px 10px", fontSize: "0.82rem" }}>{c}</span>
+                        <span
+                          key={c}
+                          style={{
+                            background: "rgba(79, 171, 255, 0.1)",
+                            border: "1px solid rgba(143, 213, 255, 0.22)",
+                            color: "#c9e8ff",
+                            borderRadius: "6px",
+                            padding: "3px 10px",
+                            fontSize: "0.82rem",
+                          }}
+                        >
+                          {c}
+                        </span>
                       ))}
                       <button
                         onClick={testNotification}
@@ -307,8 +364,16 @@ function InfraPageInner() {
               <p style={{ color: "var(--muted)" }}>Loading config…</p>
             )}
           </div>
-          <div style={{ background: "#fafaf8", border: "1px solid var(--border)", borderRadius: "8px", padding: "12px 16px" }}>
-            <pre style={{ margin: 0, fontSize: "0.75rem", color: "var(--muted)", overflow: "auto", maxHeight: "300px" }}>
+          <div
+            style={{
+              background: "linear-gradient(180deg, rgba(17, 28, 46, 0.96), rgba(9, 18, 33, 0.98))",
+              border: "1px solid rgba(125, 162, 214, 0.18)",
+              borderRadius: "8px",
+              padding: "12px 16px",
+              boxShadow: "inset 0 1px 0 rgba(255,255,255,0.03)",
+            }}
+          >
+            <pre style={{ margin: 0, fontSize: "0.75rem", color: "#b8c7d9", overflow: "auto", maxHeight: "300px" }}>
               {JSON.stringify(config, null, 2)}
             </pre>
           </div>

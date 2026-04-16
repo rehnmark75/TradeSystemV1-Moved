@@ -149,7 +149,7 @@ export default function ForexEntryTimingPage() {
   }, [slippageTrades]);
 
   return (
-    <div className="page">
+    <div className="page entry-timing-page">
       <div className="topbar">
         <Link href="/" className="brand">
           K.L.I.R.R

@@ -97,7 +97,21 @@ export default function ContainerCard({ container: c, onViewLogs, onRestart }: P
             </button>
           )}
           {onRestart && (
-            <button onClick={() => setConfirmOpen(true)} disabled={restarting} style={{ flex: 1, padding: "5px 0", fontSize: "0.78rem", border: "1px solid #ecc", borderRadius: "6px", background: "#fff5f5", color: "var(--bad)", cursor: "pointer", fontWeight: 500 }}>
+            <button
+              onClick={() => setConfirmOpen(true)}
+              disabled={restarting}
+              style={{
+                flex: 1,
+                padding: "5px 0",
+                fontSize: "0.78rem",
+                border: "1px solid rgba(255, 124, 124, 0.28)",
+                borderRadius: "6px",
+                background: "rgba(255, 124, 124, 0.06)",
+                color: "rgba(255, 190, 190, 0.82)",
+                cursor: "pointer",
+                fontWeight: 500,
+              }}
+            >
               {restarting ? "…" : "Restart"}
             </button>
           )}

@@ -276,7 +276,15 @@ export default function TrailingRatiosPage() {
           >
             <thead>
               <tr>
-                <th style={{ textAlign: "left", position: "sticky", left: 0, background: "#fff", padding: "6px 8px" }}>
+                <th
+                  style={{
+                    textAlign: "left",
+                    position: "sticky",
+                    left: 0,
+                    background: "linear-gradient(180deg, rgba(17, 28, 46, 0.98), rgba(12, 21, 36, 0.98))",
+                    padding: "6px 8px",
+                  }}
+                >
                   Epic
                 </th>
                 {ALL_FIELDS.map((f) => (

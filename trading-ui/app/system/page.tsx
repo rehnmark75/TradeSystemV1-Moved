@@ -12,6 +12,7 @@ import HealthCheckGrid, { type HealthCheckItem } from "../../components/ops/Heal
 
 const BASE = "/trading";
 const REFRESH_MS = 10_000;
+const STREAM_TIMEFRAME = "1";
 
 const TABS = [
   { id: "overview", label: "Overview" },
@@ -27,6 +28,8 @@ interface OpsEvent {
   severity?: string;
   at?: string;
   created_at?: string;
+  timestamp?: string;
+  time?: string;
   service?: string;
   kind?: string;
   [key: string]: unknown;
@@ -58,6 +61,14 @@ interface EpicCandle {
   open?: number; high?: number; low?: number; close?: number; volume?: number;
   timestamp?: string; start_time?: string;
   age_seconds?: number; stale?: boolean;
+}
+
+interface CandleListPayload {
+  candles?: EpicCandle[];
+  rows?: EpicCandle[];
+  data?: EpicCandle[];
+  items?: EpicCandle[];
+  [key: string]: unknown;
 }
 
 interface LogLine {
@@ -112,6 +123,16 @@ function fmtPrice(n?: number) {
   return n.toFixed(5);
 }
 
+function normalizeCandleList(payload: EpicCandle[] | CandleListPayload | null): EpicCandle[] {
+  if (!payload) return [];
+  if (Array.isArray(payload)) return payload;
+  if (Array.isArray(payload.candles)) return payload.candles;
+  if (Array.isArray(payload.rows)) return payload.rows;
+  if (Array.isArray(payload.data)) return payload.data;
+  if (Array.isArray(payload.items)) return payload.items;
+  return [];
+}
+
 function severityColor(s?: string) {
   if (!s) return "var(--muted)";
   if (/crit/i.test(s)) return "#8b1e2b";
@@ -129,6 +150,30 @@ function toHealthState(s?: string): HealthState {
   if (/degraded|warn|market_closed|closed|idle|issues/.test(v)) return "degraded";
   if (/down|error|err|stopped|unavailable/.test(v) || v === "false") return "down";
   return "unknown";
+}
+
+function getEventTimestamp(event: OpsEvent): string {
+  return event.at ?? event.created_at ?? event.timestamp ?? "";
+}
+
+function getEventHour(event: OpsEvent): number | null {
+  const raw = getEventTimestamp(event);
+  if (raw) {
+    const parsed = new Date(raw);
+    if (!Number.isNaN(parsed.getTime())) return parsed.getHours();
+  }
+
+  const fallbackTime = event.time;
+  if (fallbackTime) {
+    const match = fallbackTime.match(/^(\d{1,2}):/);
+    if (match) return Number(match[1]);
+  }
+
+  return null;
+}
+
+function normalizeSeverity(value?: string): string {
+  return (value ?? "info").toLowerCase();
 }
 
 // ─── Sub-page: Overview ──────────────────────────────────────────────────────
@@ -228,7 +273,7 @@ function OverviewTab() {
           {(ops ?? []).map((op, i) => (
             <div key={i} style={{
               display: "flex", gap: "10px", alignItems: "flex-start",
-              padding: "7px 12px", background: i % 2 ? "#fafaf8" : "transparent",
+              padding: "7px 12px", background: i % 2 ? "rgba(255, 255, 255, 0.02)" : "transparent",
               borderRadius: "6px", fontSize: "0.82rem",
             }}>
               <span style={{ color: severityColor(op.severity), fontSize: "0.65rem", paddingTop: "3px", minWidth: "8px" }}>●</span>
@@ -284,7 +329,18 @@ function HealthTab() {
       {health && (
         <details style={{ marginTop: "16px" }}>
           <summary style={{ cursor: "pointer", fontSize: "0.8rem", color: "var(--muted)" }}>Raw health data</summary>
-          <pre style={{ fontSize: "0.72rem", background: "#fafaf8", padding: "12px", borderRadius: "8px", overflow: "auto", maxHeight: "300px" }}>
+          <pre
+            style={{
+              fontSize: "0.72rem",
+              background: "linear-gradient(180deg, rgba(17, 28, 46, 0.96), rgba(9, 18, 33, 0.98))",
+              border: "1px solid rgba(125, 162, 214, 0.18)",
+              color: "#b8c7d9",
+              padding: "12px",
+              borderRadius: "8px",
+              overflow: "auto",
+              maxHeight: "300px",
+            }}
+          >
             {JSON.stringify(health, null, 2)}
           </pre>
         </details>
@@ -304,16 +360,19 @@ const TRACKED_EPICS = [
 function StreamsTab() {
   const [selectedEpic, setSelectedEpic] = useState(TRACKED_EPICS[0]);
   const { data: gaps } = useAutoRefresh<BackfillGapItem[]>(`${BASE}/api/stream/backfill/gaps`);
-  const { data: candles, loading } = useAutoRefresh<EpicCandle[]>(
-    `${BASE}/api/stream/candles/${encodeURIComponent(selectedEpic)}?limit=20`
+  const { data: candlesPayload, loading } = useAutoRefresh<EpicCandle[] | CandleListPayload>(
+    `${BASE}/api/stream/candles/${encodeURIComponent(selectedEpic)}?timeframe=${STREAM_TIMEFRAME}&limit=20`
   );
   const { data: latest } = useAutoRefresh<EpicCandle>(
-    `${BASE}/api/stream/candle/latest/${encodeURIComponent(selectedEpic)}`,
+    `${BASE}/api/stream/candle/latest/${encodeURIComponent(selectedEpic)}?timeframe=${STREAM_TIMEFRAME}`,
     5000
   );
 
+  const candles = normalizeCandleList(candlesPayload);
+  const fallbackLatest = candles[0];
+  const latestCandle = latest?.close != null ? latest : fallbackLatest;
   const epicGaps = (gaps ?? []).filter(g => g.epic === selectedEpic);
-  const ageS = latest?.age_seconds;
+  const ageS = latestCandle?.age_seconds;
   const isStale = ageS !== undefined ? ageS > 600 : false;
 
   return (
@@ -323,7 +382,7 @@ function StreamsTab() {
         <select value={selectedEpic} onChange={e => setSelectedEpic(e.target.value)} style={{ maxWidth: "280px" }}>
           {TRACKED_EPICS.map(e => <option key={e} value={e}>{e}</option>)}
         </select>
-        {latest && (
+        {latestCandle && (
           <StatusPill
             state={isStale ? "degraded" : "healthy"}
             label={isStale ? `Stale (${Math.round((ageS ?? 0) / 60)}m ago)` : "Fresh"}
@@ -332,19 +391,27 @@ function StreamsTab() {
       </div>
 
       {/* Latest candle */}
-      {latest && (
+      {latestCandle && (
         <div className="panel" style={{ marginBottom: "16px" }}>
-          <h3 style={{ margin: "0 0 12px", fontFamily: "'Space Grotesk',sans-serif", fontSize: "1rem" }}>Latest Candle</h3>
+          <h3 style={{ margin: "0 0 12px", fontFamily: "'Space Grotesk',sans-serif", fontSize: "1rem" }}>Latest {STREAM_TIMEFRAME}m Candle</h3>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill,minmax(140px,1fr))", gap: "10px" }}>
             {[
-              ["Open", fmtPrice(latest.open)],
-              ["High", fmtPrice(latest.high)],
-              ["Low", fmtPrice(latest.low)],
-              ["Close", fmtPrice(latest.close)],
-              ["Volume", String(latest.volume ?? "—")],
-              ["Time", fmtTime(latest.timestamp ?? latest.start_time)],
+              ["Open", fmtPrice(latestCandle.open)],
+              ["High", fmtPrice(latestCandle.high)],
+              ["Low", fmtPrice(latestCandle.low)],
+              ["Close", fmtPrice(latestCandle.close)],
+              ["Volume", String(latestCandle.volume ?? "—")],
+              ["Time", fmtTime(latestCandle.timestamp ?? latestCandle.start_time)],
             ].map(([k, v]) => (
-              <div key={k} style={{ background: "#fafaf8", border: "1px solid var(--border)", borderRadius: "8px", padding: "8px 12px" }}>
+              <div
+                key={k}
+                style={{
+                  background: "rgba(255, 255, 255, 0.03)",
+                  border: "1px solid rgba(125, 162, 214, 0.16)",
+                  borderRadius: "8px",
+                  padding: "8px 12px",
+                }}
+              >
                 <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginBottom: "2px" }}>{k}</div>
                 <div style={{ fontFamily: "monospace", fontWeight: 600, fontSize: "0.9rem" }}>{v}</div>
               </div>
@@ -355,14 +422,24 @@ function StreamsTab() {
 
       {/* Gap alerts */}
       {epicGaps.length > 0 && (
-        <div style={{ background: "#fff9e6", border: "1px solid #f0c040", borderRadius: "8px", padding: "10px 14px", marginBottom: "16px", fontSize: "0.83rem" }}>
+        <div
+          style={{
+            background: "rgba(255, 184, 77, 0.08)",
+            border: "1px solid rgba(255, 184, 77, 0.28)",
+            color: "#ffd89a",
+            borderRadius: "8px",
+            padding: "10px 14px",
+            marginBottom: "16px",
+            fontSize: "0.83rem",
+          }}
+        >
           ⚠️ {epicGaps.length} data gap{epicGaps.length > 1 ? "s" : ""} detected for this epic
         </div>
       )}
 
       {/* Candles table */}
       <div className="panel">
-        <h3 style={{ margin: "0 0 12px", fontFamily: "'Space Grotesk',sans-serif", fontSize: "1rem" }}>Recent Candles</h3>
+        <h3 style={{ margin: "0 0 12px", fontFamily: "'Space Grotesk',sans-serif", fontSize: "1rem" }}>Recent {STREAM_TIMEFRAME}m Candles</h3>
         {loading && <p style={{ color: "var(--muted)" }}>Loading…</p>}
         {!loading && (!candles || candles.length === 0) && <p style={{ color: "var(--muted)" }}>No candle data available.</p>}
         {(candles ?? []).length > 0 && (
@@ -377,7 +454,7 @@ function StreamsTab() {
               </thead>
               <tbody>
                 {(candles ?? []).map((c, i) => (
-                  <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#fafaf8" : "transparent" }}>
+                  <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "rgba(255, 255, 255, 0.02)" : "transparent" }}>
                     <td style={{ padding: "5px 10px", color: "var(--muted)" }}>{fmtTime(c.timestamp ?? c.start_time)}</td>
                     <td style={{ padding: "5px 10px", textAlign: "right" }}>{fmtPrice(c.open)}</td>
                     <td style={{ padding: "5px 10px", textAlign: "right", color: "var(--good)" }}>{fmtPrice(c.high)}</td>
@@ -539,15 +616,15 @@ function AnalyticsTab() {
 
   const byHour = Array.from({ length: 24 }, (_, h) => ({
     hour: h,
-    ops: (ops ?? []).filter(o => new Date(o.at ?? o.created_at ?? "").getUTCHours() === h).length,
-    alerts: (alerts ?? []).filter(a => new Date(a.at ?? a.created_at ?? "").getUTCHours() === h).length,
+    ops: (ops ?? []).filter((o) => getEventHour(o) === h).length,
+    alerts: (alerts ?? []).filter((a) => getEventHour(a) === h).length,
   }));
 
   const maxCount = Math.max(1, ...byHour.map(h => h.ops + h.alerts));
 
   const bySeverity = ["info", "warning", "error", "critical"].map(s => ({
     label: s,
-    count: (alerts ?? []).filter(a => (a.severity ?? "info") === s).length,
+    count: (alerts ?? []).filter((a) => normalizeSeverity(a.severity) === s).length,
   }));
 
   return (
@@ -555,7 +632,7 @@ function AnalyticsTab() {
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "20px", alignItems: "start" }}>
         {/* Hourly ops histogram */}
         <div className="panel">
-          <h3 style={{ margin: "0 0 14px", fontFamily: "'Space Grotesk',sans-serif", fontSize: "1rem" }}>Hourly Activity (UTC, last 200 events)</h3>
+          <h3 style={{ margin: "0 0 14px", fontFamily: "'Space Grotesk',sans-serif", fontSize: "1rem" }}>Hourly Activity (local time, last 200 events)</h3>
           <div style={{ display: "flex", alignItems: "flex-end", gap: "3px", height: "80px" }}>
             {byHour.map(({ hour, ops: o, alerts: a }) => (
               <div key={hour} title={`${hour}:00 — ops:${o} alerts:${a}`}
@@ -581,7 +658,16 @@ function AnalyticsTab() {
             {bySeverity.map(({ label, count }) => (
               <div key={label} style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <span style={{ minWidth: "60px", fontSize: "0.78rem", fontWeight: 600, color: severityColor(label), textTransform: "capitalize" }}>{label}</span>
-                <div style={{ flex: 1, height: "16px", background: "#e4ddd2", borderRadius: "8px", overflow: "hidden" }}>
+                <div
+                  style={{
+                    flex: 1,
+                    height: "16px",
+                    background: "rgba(255, 255, 255, 0.05)",
+                    border: "1px solid rgba(125, 162, 214, 0.12)",
+                    borderRadius: "8px",
+                    overflow: "hidden",
+                  }}
+                >
                   <div style={{ height: "100%", width: `${Math.round((count / Math.max(1, (alerts ?? []).length)) * 100)}%`, background: severityColor(label), borderRadius: "8px", transition: "width 0.4s ease" }} />
                 </div>
                 <span style={{ minWidth: "28px", textAlign: "right", fontSize: "0.82rem", fontWeight: 700 }}>{count}</span>

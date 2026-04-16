@@ -36,8 +36,9 @@ export default function HealthCheckGrid({ checks }: Props) {
         <tbody>
           {checks.map((c, i) => {
             const color = statusColor(c.status);
+            const rowBackground = i % 2 ? "rgba(255, 255, 255, 0.02)" : "transparent";
             return (
-              <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: i % 2 ? "#fafaf8" : "transparent" }}>
+              <tr key={i} style={{ borderBottom: "1px solid var(--border)", background: rowBackground }}>
                 <td style={{ padding: "8px 12px", fontWeight: 500 }}>{c.service ?? c.name}</td>
                 <td style={{ padding: "8px 12px" }}>
                   <span style={{ color, fontWeight: 700, fontSize: "0.8rem" }}>{(c.status ?? "—").toUpperCase()}</span>

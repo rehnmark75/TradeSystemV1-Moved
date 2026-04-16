@@ -22,6 +22,7 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/", label: "Overview", shortLabel: "Home" },
       { href: "/watchlists", label: "Equity Watchlists", shortLabel: "Watchlists" },
+      { href: "/signals", label: "Signal Inspection", shortLabel: "Signals" },
       { href: "/broker", label: "Broker Ledger", shortLabel: "Broker" },
       { href: "/market", label: "Market Regime", shortLabel: "Market" },
     ],
@@ -31,7 +32,6 @@ const NAV_SECTIONS: NavSection[] = [
     items: [
       { href: "/forex", label: "Forex Overview", shortLabel: "Forex" },
       { href: "/chart", label: "Execution Charting", shortLabel: "Chart" },
-      { href: "/signals", label: "Signal Inspection", shortLabel: "Signals" },
     ],
   },
   {

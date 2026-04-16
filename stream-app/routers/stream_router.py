@@ -3,7 +3,7 @@ from fastapi import APIRouter, BackgroundTasks, HTTPException, Depends, Query, R
 from pydantic import BaseModel
 from datetime import datetime
 from sqlalchemy.orm import Session
-from services.models import Candle
+from services.models import IGCandle
 from services.db import get_db
 from services.old_services.stream_manager import track_trade_subscription, tracked_trades_by_epic
 
@@ -74,9 +74,9 @@ async def stop_stream():
 @router.get("/candles/{epic}")
 def get_recent_candles(epic: str, timeframe: int = 5, db: Session = Depends(get_db)):
     candles = (
-        db.query(Candle)
-        .filter(Candle.epic == epic, Candle.timeframe == timeframe)
-        .order_by(Candle.start_time.desc())
+        db.query(IGCandle)
+        .filter(IGCandle.epic == epic, IGCandle.timeframe == timeframe)
+        .order_by(IGCandle.start_time.desc())
         .limit(15)
         .all()
     )
@@ -85,9 +85,9 @@ def get_recent_candles(epic: str, timeframe: int = 5, db: Session = Depends(get_
 @router.get("/candle/latest/{epic}")
 def get_latest_candle(epic: str, timeframe: int = Query(5), db: Session = Depends(get_db)):
     candle = (
-        db.query(Candle)
-        .filter(Candle.epic == epic, Candle.timeframe == timeframe)
-        .order_by(Candle.start_time.desc())
+        db.query(IGCandle)
+        .filter(IGCandle.epic == epic, IGCandle.timeframe == timeframe)
+        .order_by(IGCandle.start_time.desc())
         .first()
     )
 

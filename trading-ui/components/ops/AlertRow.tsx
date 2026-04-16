@@ -29,11 +29,32 @@ function fmtTs(ts?: string) {
   try { return new Date(ts).toLocaleString(); } catch { return ts; }
 }
 
+function getAlertAgeMinutes(ts?: string) {
+  if (!ts) return null;
+  const parsed = new Date(ts);
+  const value = parsed.getTime();
+  if (Number.isNaN(value)) return null;
+  return Math.max(0, Math.floor((Date.now() - value) / 60000));
+}
+
+function formatRelativeAge(minutes: number | null) {
+  if (minutes === null) return "";
+  if (minutes < 1) return "just now";
+  if (minutes < 60) return `${minutes}m ago`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h ago`;
+  const days = Math.floor(hours / 24);
+  return `${days}d ago`;
+}
+
 export default function AlertRow({ alert: a, onAck, onResolve }: Props) {
   const [dialog, setDialog] = useState<"ack" | "resolve" | null>(null);
   const [loading, setLoading] = useState(false);
   const color = SEV_COLOR[a.severity] ?? "var(--muted)";
   const isResolved = a.status === "resolved";
+  const ageMinutes = getAlertAgeMinutes(a.created_at);
+  const isFresh = ageMinutes !== null && ageMinutes <= 15;
+  const relativeAge = formatRelativeAge(ageMinutes);
 
   const act = async (fn?: (id: string) => Promise<void>) => {
     if (!fn) return;
@@ -46,7 +67,7 @@ export default function AlertRow({ alert: a, onAck, onResolve }: Props) {
       <div style={{
         display: "flex", gap: "12px", alignItems: "flex-start",
         padding: "10px 14px", borderRadius: "8px",
-        background: isResolved ? "#fafaf8" : `${color}08`,
+        background: isResolved ? "rgba(255, 255, 255, 0.03)" : `${color}08`,
         border: `1px solid ${color}33`,
         opacity: isResolved ? 0.55 : 1,
         marginBottom: "6px",
@@ -55,9 +76,30 @@ export default function AlertRow({ alert: a, onAck, onResolve }: Props) {
           {a.severity}
         </span>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "0.85rem", fontWeight: 500, wordBreak: "break-word" }}>{a.message}</div>
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+            <div style={{ fontSize: "0.85rem", fontWeight: 500, wordBreak: "break-word" }}>{a.message}</div>
+            {isFresh && !isResolved && (
+              <span
+                style={{
+                  fontSize: "0.68rem",
+                  fontWeight: 700,
+                  letterSpacing: "0.08em",
+                  textTransform: "uppercase",
+                  color: "#8fd5ff",
+                  border: "1px solid rgba(143, 213, 255, 0.32)",
+                  background: "rgba(79, 171, 255, 0.1)",
+                  borderRadius: "999px",
+                  padding: "2px 7px",
+                }}
+              >
+                Fresh
+              </span>
+            )}
+          </div>
           <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: "2px" }}>
-            {a.source && <span>{a.source} · </span>}{fmtTs(a.created_at)}
+            {a.source && <span>{a.source} · </span>}
+            {fmtTs(a.created_at)}
+            {relativeAge && <span> · {relativeAge}</span>}
           </div>
         </div>
         {!isResolved && (
@@ -66,7 +108,20 @@ export default function AlertRow({ alert: a, onAck, onResolve }: Props) {
               <button onClick={() => setDialog("ack")} style={{ fontSize: "0.75rem", padding: "3px 9px", border: "1px solid var(--border)", borderRadius: "5px", background: "transparent", cursor: "pointer" }}>Ack</button>
             )}
             {onResolve && (
-              <button onClick={() => setDialog("resolve")} style={{ fontSize: "0.75rem", padding: "3px 9px", border: "1px solid #c5e8d0", borderRadius: "5px", background: "#f0faf5", color: "var(--good)", cursor: "pointer" }}>Resolve</button>
+              <button
+                onClick={() => setDialog("resolve")}
+                style={{
+                  fontSize: "0.75rem",
+                  padding: "3px 9px",
+                  border: "1px solid rgba(255, 124, 124, 0.28)",
+                  borderRadius: "5px",
+                  background: "rgba(255, 124, 124, 0.06)",
+                  color: "rgba(255, 190, 190, 0.82)",
+                  cursor: "pointer",
+                }}
+              >
+                Resolve
+              </button>
             )}
           </div>
         )}
