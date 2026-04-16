@@ -82,8 +82,7 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <aside className="app-sidebar">
         <div className="app-brand-block">
           <Link href="/" className="app-brand-mark">
-            <span className="app-brand-kicker">TradeSystem</span>
-            <span className="app-brand-name">Operator Terminal</span>
+            <span className="app-brand-name">TradeSystem</span>
           </Link>
           <p className="app-brand-copy">
             Institutional-grade monitoring for discretionary and automated execution.
@@ -112,17 +111,6 @@ export default function AppShell({ children }: { children: ReactNode }) {
             </div>
           ))}
         </nav>
-
-        <div className="app-sidebar-footer">
-          <div className="app-sidebar-stat">
-            <span>Stack</span>
-            <strong>Trading UI</strong>
-          </div>
-          <div className="app-sidebar-stat">
-            <span>Mode</span>
-            <strong>Multi-Desk</strong>
-          </div>
-        </div>
       </aside>
 
       <div className="app-main">

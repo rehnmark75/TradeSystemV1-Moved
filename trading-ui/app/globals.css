@@ -337,8 +337,8 @@ input {
   --surface-glow: rgba(71, 116, 201, 0.14);
   --panel: rgba(10, 22, 38, 0.86);
   --ink: #f4f7fb;
-  --muted: #8f9eb4;
-  --muted-2: #66758c;
+  --muted: #a9b8cc;
+  --muted-2: #8395ad;
   --accent: #7cc7ff;
   --accent-strong: #24a9ff;
   --accent-2: #88ffd2;
@@ -393,12 +393,29 @@ a {
   position: sticky;
   top: 0;
   height: 100vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+  scrollbar-color: rgba(124, 199, 255, 0.28) transparent;
   padding: 28px 20px 24px;
   border-right: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(15, 29, 49, 0.98), rgba(8, 17, 31, 0.98)),
     radial-gradient(circle at top, rgba(124, 199, 255, 0.08), transparent 32%);
   backdrop-filter: blur(16px);
+}
+
+.app-sidebar::-webkit-scrollbar {
+  width: 6px;
+}
+
+.app-sidebar::-webkit-scrollbar-thumb {
+  background: rgba(124, 199, 255, 0.28);
+  border-radius: 3px;
+}
+
+.app-sidebar::-webkit-scrollbar-track {
+  background: transparent;
 }
 
 .app-brand-block {
@@ -461,6 +478,8 @@ a {
   border-radius: 16px;
   background: rgba(255, 255, 255, 0.02);
   color: var(--muted);
+  --app-nav-main-color: #e1e9f5;
+  --app-nav-sub-color: #c4d1e0;
 }
 
 .app-nav-link:hover {
@@ -470,45 +489,29 @@ a {
 }
 
 .app-nav-link.active {
-  background: linear-gradient(135deg, rgba(19, 36, 58, 0.98), rgba(15, 29, 49, 0.95));
-  border-color: rgba(124, 199, 255, 0.35);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05), 0 18px 40px rgba(0, 0, 0, 0.22);
+  background:
+    linear-gradient(90deg, rgba(124, 199, 255, 0.2), rgba(124, 199, 255, 0.02) 14%, transparent 28%),
+    linear-gradient(135deg, rgba(25, 50, 79, 0.99), rgba(14, 32, 54, 0.97));
+  border-color: rgba(124, 199, 255, 0.58);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    inset 3px 0 0 rgba(124, 199, 255, 0.95),
+    0 0 0 1px rgba(124, 199, 255, 0.14),
+    0 18px 40px rgba(0, 0, 0, 0.24);
   color: var(--ink);
+  --app-nav-main-color: var(--ink);
+  --app-nav-sub-color: #e0e9f4;
 }
 
 .app-nav-link-main {
   font-weight: 600;
   font-size: 0.96rem;
+  color: var(--app-nav-main-color);
 }
 
 .app-nav-link-sub {
   font-size: 0.8rem;
-  color: var(--muted);
-}
-
-.app-sidebar-footer {
-  position: absolute;
-  bottom: 24px;
-  left: 20px;
-  right: 20px;
-  display: grid;
-  gap: 10px;
-}
-
-.app-sidebar-stat {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  padding: 12px 14px;
-  border-radius: 14px;
-  border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.02);
-}
-
-.app-sidebar-stat strong {
-  font-size: 0.84rem;
-  font-weight: 600;
-  color: var(--ink);
+  color: var(--app-nav-sub-color);
 }
 
 .app-main {
@@ -820,7 +823,7 @@ textarea {
   border: 1px solid var(--line);
   border-radius: 10px;
   background: rgba(255, 255, 255, 0.03);
-  color: var(--muted);
+  color: #d7e2f0;
   cursor: pointer;
   padding: 8px 12px;
   font-size: 0.78rem;
@@ -5137,8 +5140,9 @@ table {
 }
 
 .filter-pill.active {
-  background: var(--surface);
-  border-color: var(--line-strong);
+  background: linear-gradient(180deg, rgba(124, 199, 255, 0.22), rgba(124, 199, 255, 0.12));
+  border-color: rgba(124, 199, 255, 0.46);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), 0 0 0 1px rgba(124, 199, 255, 0.1);
   color: var(--ink);
 }
 
@@ -5201,7 +5205,7 @@ table {
   border-radius: 8px;
   font-size: 0.875rem;
   font-family: "IBM Plex Sans", sans-serif;
-  color: var(--muted);
+  color: #d5e0ee;
   cursor: pointer;
 }
 
@@ -5263,7 +5267,8 @@ table {
 }
 
 .segmented-control-btn.active {
-  background: var(--accent);
+  background: linear-gradient(180deg, #4eb8ff 0%, #1c88d3 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.18);
   color: #fff;
 }
 
@@ -5311,9 +5316,10 @@ table {
 }
 
 .category-nav-item.active {
-  border-left-color: var(--accent);
-  background: rgba(124, 199, 255, 0.12);
-  color: var(--accent);
+  border-left-color: #8fd5ff;
+  background: linear-gradient(90deg, rgba(124, 199, 255, 0.2), rgba(124, 199, 255, 0.06));
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.05);
+  color: #dff1ff;
 }
 
 .category-nav-icon {
