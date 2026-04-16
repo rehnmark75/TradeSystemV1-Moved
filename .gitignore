@@ -80,6 +80,10 @@ docs/
 # Claude Code local settings (user-specific)
 .claude/settings.local.json
 
+# Vendored Claude Code skills (reinstallable from skills-lock.json)
+.claude/skills/
+.agents/skills/
+
 # claude-mem auto-generated activity logs (all subdirectory CLAUDE.md files)
 # Root CLAUDE.md (project instructions) is kept via negation below
 **/CLAUDE.md
