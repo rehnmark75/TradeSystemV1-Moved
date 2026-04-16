@@ -197,6 +197,15 @@ export default function ScannerSettingsPage() {
 
   return (
     <div className="strategy-page">
+      <div className="settings-hero">
+        <div className="mission-kicker">Scanner Governance</div>
+        <h1>Scanner Settings</h1>
+        <p>
+          Tune validation, cooldown, confidence, and downstream filter behavior from a structured control surface
+          built for safe operational changes.
+        </p>
+      </div>
+
       <ScannerToolbar
         query={query}
         onQueryChange={setQuery}

@@ -854,20 +854,48 @@ export default function Page() {
         </div>
       </div>
 
-      <div className="header">
+      <div className="desk-intro">
         <div>
-          <h1>Watchlist Fast</h1>
-          <p>Virtualized list with on-demand detail expansion.</p>
+          <div className="mission-kicker">Equity Discovery Desk</div>
+          <h2>Watchlists built for triage speed, thesis clarity, and position-ready validation.</h2>
+          <p>
+            This workspace is optimized for fast ranking, deep drill-in, and clean separation between
+            idea generation, validation, and execution readiness.
+          </p>
         </div>
-        <div className="header-chip">
-          {watchlistInfo.icon} {watchlistInfo.name}
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Active board</span>
+            <strong>{watchlistInfo.icon} {watchlistInfo.name}</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Workflow</span>
+            <strong>Scan, validate, size, and archive from one surface.</strong>
+          </div>
         </div>
       </div>
 
       <div className="panel">
         <PositionSizingCalculator />
 
-        <div className="controls">
+        <div className="desk-toolbar">
+          <div className="header-chip">{watchlistInfo.icon} {watchlistInfo.name}</div>
+          <div className="desk-toolbar-actions">
+            <button
+              className="subtle-button"
+              onClick={() => {
+                setShowExperimental((v) => !v);
+                if (showExperimental && WATCHLIST_DEFINITIONS[watchlist]?.tier === "experimental") {
+                  setWatchlist(primaryKeys[0] ?? watchlistKeys[0]);
+                }
+              }}
+            >
+              {showExperimental ? "Hide experimental lists" : "Show experimental lists"}
+            </button>
+          </div>
+        </div>
+
+        <div className="controls control-grid-compact">
           <div>
             <label>Watchlist</label>
             <select value={watchlist} onChange={(e) => setWatchlist(e.target.value)}>
@@ -882,17 +910,6 @@ export default function Page() {
                 </option>
               ))}
             </select>
-            <button
-              style={{ marginLeft: 6, fontSize: "0.75rem", opacity: 0.6, background: "none", border: "1px solid var(--border)", borderRadius: 4, cursor: "pointer", padding: "2px 6px" }}
-              onClick={() => {
-                setShowExperimental((v) => !v);
-                if (showExperimental && WATCHLIST_DEFINITIONS[watchlist]?.tier === "experimental") {
-                  setWatchlist(primaryKeys[0] ?? watchlistKeys[0]);
-                }
-              }}
-            >
-              {showExperimental ? "Hide experimental" : "Show experimental"}
-            </button>
           </div>
           <div>
             <label>Event Date</label>
@@ -1176,7 +1193,7 @@ export default function Page() {
                     })()}
                     {(() => {
                       const grade = row.claude_grade;
-                      if (!grade) return <span style={{ color: "var(--text-muted)", fontSize: "0.8rem" }}>—</span>;
+                      if (!grade) return <span style={{ color: "var(--muted)", fontSize: "0.8rem" }}>—</span>;
                       const tone = grade === "A+" || grade === "A" ? "good" : grade === "B" ? "warn" : "bad";
                       return (
                         <span
@@ -1283,16 +1300,16 @@ export default function Page() {
                               <div className="detail-grid">
                                 <div className="detail-item">Entry Low: {formatValue(details[row.ticker]?.suggested_entry_low)}</div>
                                 <div className="detail-item">Entry High: {formatValue(details[row.ticker]?.suggested_entry_high)}</div>
-                                <div className="detail-item" style={{ fontWeight: 600, color: "#e74c3c" }}>
+                                <div className="detail-item" style={{ fontWeight: 600, color: "var(--bad)" }}>
                                   Stop Loss: {formatValue(details[row.ticker]?.structure_stop_loss ?? details[row.ticker]?.suggested_stop_loss)}
                                   {details[row.ticker]?.price && details[row.ticker]?.structure_stop_loss
                                     ? ` (${((Number(details[row.ticker]?.price) - Number(details[row.ticker]?.structure_stop_loss)) / Number(details[row.ticker]?.price) * 100).toFixed(1)}%)`
                                     : ""}
                                 </div>
-                                <div className="detail-item" style={{ fontWeight: 600, color: "#27ae60" }}>
+                                <div className="detail-item" style={{ fontWeight: 600, color: "var(--good)" }}>
                                   Target 1: {formatValue(details[row.ticker]?.structure_target_1 ?? details[row.ticker]?.suggested_target_1)}
                                 </div>
-                                <div className="detail-item" style={{ color: "#27ae60" }}>
+                                <div className="detail-item" style={{ color: "var(--good)" }}>
                                   Target 2: {formatValue(details[row.ticker]?.structure_target_2 ?? details[row.ticker]?.suggested_target_2)}
                                 </div>
                                 <div className="detail-item" style={{ fontWeight: 600 }}>
@@ -1322,7 +1339,7 @@ export default function Page() {
                                   BT Stops: <strong>{row.bt_stop_method ? row.bt_stop_method.toUpperCase() : "—"}</strong>
                                 </div>
                                 {row.signal_validation_reasons && row.signal_validation_reasons !== "validated" ? (
-                                  <div className="detail-item" style={{ gridColumn: "1 / -1", fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                  <div className="detail-item" style={{ gridColumn: "1 / -1", fontSize: "0.8rem", color: "var(--muted)" }}>
                                     {row.signal_validation_reasons}
                                   </div>
                                 ) : null}
@@ -1387,25 +1404,25 @@ export default function Page() {
                                     </div>
                                     <div className="bt-stats-row">
                                       <div className="bt-stat">
-                                        <div className="bt-stat-value" style={{ color: winRate != null && Number(winRate) >= 60 ? "#1e7e34" : winRate != null && Number(winRate) < 45 ? "#c0392b" : "#856404" }}>
+                                        <div className="bt-stat-value" style={{ color: winRate != null && Number(winRate) >= 60 ? "var(--good)" : winRate != null && Number(winRate) < 45 ? "var(--bad)" : "var(--warn)" }}>
                                           {winRate != null ? `${Number(winRate).toFixed(1)}%` : "-"}
                                         </div>
                                         <div className="bt-stat-label">Win Rate</div>
                                       </div>
                                       <div className="bt-stat">
-                                        <div className="bt-stat-value" style={{ color: pf != null && Number(pf) >= 1.5 ? "#1e7e34" : pf != null && Number(pf) < 1.0 ? "#c0392b" : "#856404" }}>
+                                        <div className="bt-stat-value" style={{ color: pf != null && Number(pf) >= 1.5 ? "var(--good)" : pf != null && Number(pf) < 1.0 ? "var(--bad)" : "var(--warn)" }}>
                                           {pf != null ? Number(pf).toFixed(2) : "-"}
                                         </div>
                                         <div className="bt-stat-label">Profit Factor</div>
                                       </div>
                                       <div className="bt-stat">
-                                        <div className="bt-stat-value" style={{ color: avgPnl != null && Number(avgPnl) > 0 ? "#1e7e34" : avgPnl != null && Number(avgPnl) < 0 ? "#c0392b" : "#856404" }}>
+                                        <div className="bt-stat-value" style={{ color: avgPnl != null && Number(avgPnl) > 0 ? "var(--good)" : avgPnl != null && Number(avgPnl) < 0 ? "var(--bad)" : "var(--warn)" }}>
                                           {avgPnl != null ? `${Number(avgPnl) >= 0 ? "+" : ""}${Number(avgPnl).toFixed(2)}%` : "-"}
                                         </div>
                                         <div className="bt-stat-label">Avg PnL</div>
                                       </div>
                                       <div className="bt-stat">
-                                        <div className="bt-stat-value" style={{ color: totalPnl != null && Number(totalPnl) > 0 ? "#1e7e34" : totalPnl != null && Number(totalPnl) < 0 ? "#c0392b" : "#856404" }}>
+                                        <div className="bt-stat-value" style={{ color: totalPnl != null && Number(totalPnl) > 0 ? "var(--good)" : totalPnl != null && Number(totalPnl) < 0 ? "var(--bad)" : "var(--warn)" }}>
                                           {totalPnl != null ? `${Number(totalPnl) >= 0 ? "+" : ""}${Number(totalPnl).toFixed(1)}%` : "-"}
                                         </div>
                                         <div className="bt-stat-label">Total PnL</div>
@@ -1420,7 +1437,7 @@ export default function Page() {
                                       </div>
                                     </div>
                                     {useFullSetup && score != null ? (
-                                      <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginTop: 4 }}>
+                                      <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginTop: 4 }}>
                                         Composite score: {score} | {filteredCount ?? 0} crossovers found, {signals ?? 0} passed RS ≥ {minRs ?? 60} + DAQ ≥ {minDaq ?? 50}
                                       </div>
                                     ) : null}
@@ -1439,7 +1456,7 @@ export default function Page() {
                                       try {
                                         const reasons = JSON.parse(details[row.ticker]?.trade_ready_reasons || "[]");
                                         return reasons.map((r: { criterion: string; passed: boolean }, i: number) => (
-                                          <div className="detail-item" key={i} style={{ color: r.passed ? "#27ae60" : "#e74c3c" }}>
+                                          <div className="detail-item" key={i} style={{ color: r.passed ? "var(--good)" : "var(--bad)" }}>
                                             {r.passed ? "✓" : "✗"} {r.criterion}
                                           </div>
                                         ));
@@ -1869,7 +1886,7 @@ export default function Page() {
                             </button>
                           </div>
                           {details[row.ticker]?.latest_scanner_name ? (
-                            <div style={{ fontSize: "0.75rem", color: "var(--text-muted)", marginBottom: 8 }}>
+                            <div style={{ fontSize: "0.75rem", color: "var(--muted)", marginBottom: 8 }}>
                               Scanner: <strong>{details[row.ticker]?.latest_scanner_name}</strong>
                               {details[row.ticker]?.latest_scanner_timestamp ? (
                                 <> &nbsp;·&nbsp; {new Date(details[row.ticker]?.latest_scanner_timestamp!).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })}</>
@@ -1879,10 +1896,10 @@ export default function Page() {
                           {details[row.ticker]?.claude_grade ? (
                             <>
                               <p>
-                                <strong style={{ color: details[row.ticker]?.claude_grade === "A+" || details[row.ticker]?.claude_grade === "A" ? "#1e7e34" : details[row.ticker]?.claude_grade === "B" ? "#856404" : "#c0392b" }}>
+                                <strong style={{ color: details[row.ticker]?.claude_grade === "A+" || details[row.ticker]?.claude_grade === "A" ? "var(--good)" : details[row.ticker]?.claude_grade === "B" ? "var(--warn)" : "var(--bad)" }}>
                                   {details[row.ticker]?.claude_grade} — {details[row.ticker]?.claude_action ?? ""}
                                 </strong>
-                                {details[row.ticker]?.claude_conviction ? <span style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}> ({details[row.ticker]?.claude_conviction} conviction)</span> : null}
+                                {details[row.ticker]?.claude_conviction ? <span style={{ fontSize: "0.8rem", color: "var(--muted)" }}> ({details[row.ticker]?.claude_conviction} conviction)</span> : null}
                               </p>
                               {details[row.ticker]?.claude_thesis ? <p style={{ lineHeight: 1.5 }}>{details[row.ticker]?.claude_thesis}</p> : null}
                               {details[row.ticker]?.claude_key_strengths ? (
@@ -1892,7 +1909,7 @@ export default function Page() {
                                 <p><strong>Risks:</strong> {formatList(details[row.ticker]?.claude_key_risks)}</p>
                               ) : null}
                               {details[row.ticker]?.claude_position_rec ? (
-                                <p style={{ fontSize: "0.8rem", color: "var(--text-muted)" }}>
+                                <p style={{ fontSize: "0.8rem", color: "var(--muted)" }}>
                                   Position: {details[row.ticker]?.claude_position_rec} &nbsp;·&nbsp;
                                   Horizon: {details[row.ticker]?.claude_time_horizon ?? "-"}
                                 </p>
@@ -1913,7 +1930,7 @@ export default function Page() {
                               <iframe
                                 src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
                                   tvSymbol(details[row.ticker]?.exchange, row.ticker)
-                                )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                                )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
                                 className="tv-frame"
                                 loading="lazy"
                                 title={`${row.ticker} daily chart`}
@@ -1930,7 +1947,7 @@ export default function Page() {
                               <iframe
                                 src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
                                   tvSymbol(details[row.ticker]?.exchange, row.ticker)
-                                )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                                )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
                                 className="tv-frame"
                                 loading="lazy"
                                 title={`${row.ticker} weekly chart`}

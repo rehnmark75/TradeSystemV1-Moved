@@ -155,6 +155,12 @@ function Sparkline({
 
   const ticks = [minV, (minV + maxV) / 2, maxV];
 
+  const gridColor = "rgba(159, 185, 227, 0.14)";
+  const axisColor = "#8f9eb4";
+  const splitColor = "#7cc7ff";
+  const thresholdColor = "#ff6f91";
+  const lineColor = "#88ffd2";
+
   return (
     <svg className="adx-spark" width={width} height={height}>
       {/* y-axis ticks */}
@@ -165,10 +171,10 @@ function Sparkline({
             x2={width - padR}
             y1={yAt(v)}
             y2={yAt(v)}
-            stroke="#eadfca"
+            stroke={gridColor}
             strokeDasharray="2 4"
           />
-          <text x={padL - 4} y={yAt(v) + 3} textAnchor="end" fontSize="9" fill="#8a6f48">
+          <text x={padL - 4} y={yAt(v) + 3} textAnchor="end" fontSize="9" fill={axisColor}>
             {v.toFixed(0)}
           </text>
         </g>
@@ -181,9 +187,9 @@ function Sparkline({
           x2={splitX}
           y1={padT}
           y2={height - padB}
-          stroke="#b88a55"
+          stroke={splitColor}
           strokeDasharray="3 3"
-          opacity={0.8}
+          opacity={0.7}
         />
       )}
 
@@ -195,7 +201,7 @@ function Sparkline({
             x2={width - padR}
             y1={thresholdY}
             y2={thresholdY}
-            stroke="#c43d3d"
+            stroke={thresholdColor}
             strokeWidth={1}
             strokeDasharray="4 3"
           />
@@ -204,7 +210,7 @@ function Sparkline({
             y={thresholdY - 3}
             textAnchor="end"
             fontSize="9"
-            fill="#c43d3d"
+            fill={thresholdColor}
           >
             {pair.threshold?.toFixed(0)}
           </text>
@@ -212,13 +218,13 @@ function Sparkline({
       )}
 
       {/* ADX line */}
-      <path d={path} fill="none" stroke="#2b6cb0" strokeWidth={1.5} />
+      <path d={path} fill="none" stroke={lineColor} strokeWidth={1.5} />
 
       {/* x labels */}
-      <text x={padL} y={height - 4} fontSize="9" fill="#8a6f48">
+      <text x={padL} y={height - 4} fontSize="9" fill={axisColor}>
         {new Date(series[0].t).toLocaleDateString(undefined, { month: "short", day: "numeric" })}
       </text>
-      <text x={width - padR} y={height - 4} fontSize="9" fill="#8a6f48" textAnchor="end">
+      <text x={width - padR} y={height - 4} fontSize="9" fill={axisColor} textAnchor="end">
         {new Date(series[series.length - 1].t).toLocaleDateString(undefined, {
           month: "short",
           day: "numeric"
@@ -306,10 +312,15 @@ export default function AdxRegimePage() {
         </div>
       </div>
 
-      <div className="header">
+      <div className="header adx-header">
         <div>
-          <h1>ADX Regime — Week vs Week</h1>
-          <p>
+          <div className="adx-eyebrow">Market Regime · Forex Scalp</div>
+          <h1 className="adx-title">
+            ADX <span className="adx-title-accent">Regime</span>
+            <span className="adx-title-sep"> · </span>
+            <span className="adx-title-sub">Week vs Week</span>
+          </h1>
+          <p className="adx-lede">
             Rolling ADX(14) on 5m candles per enabled pair, overlaid with the per-pair{" "}
             <code>scalp_min_adx</code> threshold. Vertical dashed line = start of current week.
           </p>
@@ -342,6 +353,39 @@ export default function AdxRegimePage() {
         </div>
 
         {error && <div className="error-banner">Error: {error}</div>}
+
+        {summary && summary.total > 0 && (
+          <div className="adx-stat-strip">
+            <div className="adx-stat adx-stat-compressed">
+              <span className="adx-stat-value">{summary.compressed}</span>
+              <span className="adx-stat-label">Compressing</span>
+              <span className="adx-stat-sub">ADX falling wk/wk</span>
+            </div>
+            <div className="adx-stat adx-stat-expanded">
+              <span className="adx-stat-value">{summary.expanded}</span>
+              <span className="adx-stat-label">Expanding</span>
+              <span className="adx-stat-sub">ADX rising wk/wk</span>
+            </div>
+            <div className="adx-stat adx-stat-neutral">
+              <span className="adx-stat-value">{summary.neutral}</span>
+              <span className="adx-stat-label">Flat</span>
+              <span className="adx-stat-sub">Δ &lt; 0.5</span>
+            </div>
+            <div className="adx-stat adx-stat-avg">
+              <span className={`adx-stat-value ${summary.avgDelta < 0 ? "val-bad" : "val-good"}`}>
+                {summary.avgDelta >= 0 ? "+" : ""}
+                {summary.avgDelta.toFixed(1)}
+              </span>
+              <span className="adx-stat-label">Avg Δ</span>
+              <span className="adx-stat-sub">mean ADX shift</span>
+            </div>
+            <div className="adx-stat adx-stat-total">
+              <span className="adx-stat-value">{summary.total}</span>
+              <span className="adx-stat-label">Pairs</span>
+              <span className="adx-stat-sub">with full data</span>
+            </div>
+          </div>
+        )}
 
         {overview && <div className="adx-overview">{overview}</div>}
 

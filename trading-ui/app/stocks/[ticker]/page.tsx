@@ -645,7 +645,7 @@ export default function StockDeepDivePage() {
                   <iframe
                     src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
                       tvSymbol(data?.instrument?.exchange, ticker)
-                    )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                    )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
                     className="tv-frame"
                     loading="lazy"
                     title={`${ticker} daily chart`}
@@ -658,7 +658,7 @@ export default function StockDeepDivePage() {
                   <iframe
                     src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
                       tvSymbol(data?.instrument?.exchange, ticker)
-                    )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                    )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
                     className="tv-frame"
                     loading="lazy"
                     title={`${ticker} weekly chart`}

@@ -238,12 +238,25 @@ export default function ForexAnalyticsPage() {
         </div>
       </div>
 
-      <div className="header">
+      <div className="desk-intro">
         <div>
-          <h1>Forex Unified Analytics</h1>
-          <p>Performance overview and strategy diagnostics for the live book.</p>
+          <div className="mission-kicker">FX Command Desk</div>
+          <h2>Scanner performance, pair behavior, and execution review in one operator-grade overview.</h2>
+          <p>
+            This surface is the anchor for the forex workflow: assess the book, inspect quality drift,
+            and decide whether to drill into strategy, chart, or rejection analysis.
+          </p>
         </div>
-        <div className="header-chip">Forex</div>
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Environment</span>
+            <strong>{environment.toUpperCase()}</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Scope</span>
+            <strong>Performance, diagnostics, and live operational review</strong>
+          </div>
+        </div>
       </div>
 
       <div className="section-tabs">

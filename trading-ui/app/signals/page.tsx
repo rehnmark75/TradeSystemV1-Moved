@@ -530,10 +530,24 @@ export default function SignalsPage() {
         </div>
       </div>
 
-      <div className="header">
+      <div className="desk-intro">
         <div>
-          <h1>Signals</h1>
-          <p>Unified view of scanner signals with Claude analysis and DAQ context.</p>
+          <div className="mission-kicker">Signal Inspection</div>
+          <h2>Unified scanner inventory with ranking, quality filters, and AI context for validation work.</h2>
+          <p>
+            This is the audit surface for incoming ideas. It should help you sort signal quality quickly,
+            inspect AI analysis, and decide whether a setup belongs in active review or in the archive.
+          </p>
+        </div>
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Scope</span>
+            <strong>Scanner output, Claude analysis, RS and DAQ context</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Goal</span>
+            <strong>Fast validation and clean signal triage</strong>
+          </div>
         </div>
       </div>
 
@@ -979,7 +993,7 @@ export default function SignalsPage() {
                             <iframe
                               src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
                                 tvSymbol(signal.exchange, signal.ticker)
-                              )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                              )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
                               className="tv-frame"
                               loading="lazy"
                               title={`${signal.ticker} daily chart`}
@@ -992,7 +1006,7 @@ export default function SignalsPage() {
                             <iframe
                               src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
                                 tvSymbol(signal.exchange, signal.ticker)
-                              )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=f1f3f6&studies=[]&theme=light&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                              )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
                               className="tv-frame"
                               loading="lazy"
                               title={`${signal.ticker} weekly chart`}

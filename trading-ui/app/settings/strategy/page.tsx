@@ -610,6 +610,15 @@ export default function UnifiedStrategySettings() {
 
   return (
     <div className="strategy-page">
+      <div className="settings-hero">
+        <div className="mission-kicker">Strategy Governance</div>
+        <h1>Strategy Settings</h1>
+        <p>
+          Control global and pair-specific strategy behavior with explicit context for overrides, effective values,
+          and change risk across environments.
+        </p>
+      </div>
+
       <SettingsToolbar
         mode={mode}
         onModeChange={setMode}

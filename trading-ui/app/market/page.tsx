@@ -193,10 +193,24 @@ export default function MarketPage() {
         </div>
       </div>
 
-      <div className="header">
+      <div className="desk-intro">
         <div>
-          <h1>Market Context</h1>
-          <p>Regime, sector rotation, and relative strength leadership.</p>
+          <div className="mission-kicker">Top-Down Context</div>
+          <h2>Macro tape, breadth, and sector rotation packaged for fast directional decisions.</h2>
+          <p>
+            This surface should answer the institutional question first: what environment are we allocating risk
+            into, and which leadership pockets are actually worth attention?
+          </p>
+        </div>
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Focus</span>
+            <strong>Regime, sector strength, RS leadership</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Output</span>
+            <strong>Bias confirmation and capital rotation cues</strong>
+          </div>
         </div>
       </div>
 

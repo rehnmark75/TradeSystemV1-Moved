@@ -146,36 +146,45 @@ function InfraPageInner() {
         </div>
       </div>
 
-      {/* Header */}
-      <div className="header" style={{ marginBottom: "20px" }}>
+      <div className="desk-intro">
         <div>
-          <h1 style={{ margin: 0, display: "flex", alignItems: "center", gap: "12px" }}>
-            Infrastructure
-            <StatusPill
-              state={healthScore >= 90 ? "healthy" : healthScore >= 70 ? "degraded" : "down"}
-              label={`${Math.round(healthScore)}% health`}
-            />
-          </h1>
-          <p style={{ margin: "6px 0 0", opacity: 0.85, fontSize: "0.9rem" }}>
-            Container health, alerts, and system monitoring — internal network only
+          <div className="mission-kicker">Platform Operations</div>
+          <h2>Infrastructure oversight for the trading stack, with intervention controls and live system context.</h2>
+          <p>
+            Monitor the full service estate, identify degradation quickly, and act from the same surface used to
+            supervise the rest of the trading platform.
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Health score</span>
+            <strong>{Math.round(healthScore)}%</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Status</span>
+            <strong>
+              <StatusPill
+                state={healthScore >= 90 ? "healthy" : healthScore >= 70 ? "degraded" : "down"}
+                label={`${Math.round(healthScore)}% health`}
+              />
+            </strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="desk-toolbar">
+        <div className="header-chip">Internal operator console</div>
+        <div className="desk-toolbar-actions">
           <LiveBadge lastUpdated={lastUpdated} />
           <button onClick={refetch} className="refresh-btn" title="Refresh">↻</button>
         </div>
       </div>
 
-      {/* Disclaimer */}
-      <div style={{
-        background: "#fff9e6", border: "1px solid #f0c040", borderRadius: "8px",
-        padding: "8px 14px", marginBottom: "16px", fontSize: "0.8rem", color: "#6b5000",
-      }}>
+      <div className="ops-banner">
         ⚠️ Operator console — actions like restart and notification test are internal-network only with no auth layer. Handle with care.
       </div>
 
-      {/* KPI Row */}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(5,1fr)", gap: "10px", marginBottom: "20px" }}>
+      <div className="kpi-grid-5">
         <KpiTile label="Running" value={statusLoading ? "…" : status?.containers_running ?? 0} accent="var(--good)" />
         <KpiTile label="Stopped" value={statusLoading ? "…" : status?.containers_stopped ?? 0} accent={status?.containers_stopped ? "var(--warn)" : "var(--border)"} />
         <KpiTile label="Unhealthy" value={statusLoading ? "…" : status?.containers_unhealthy ?? 0} accent={status?.containers_unhealthy ? "var(--bad)" : "var(--border)"} />

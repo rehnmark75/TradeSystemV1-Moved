@@ -1,6 +1,7 @@
 import "./globals.css";
 import type { ReactNode } from "react";
 import { EnvironmentProvider } from "../lib/environment";
+import AppShell from "../components/AppShell";
 
 export const metadata = {
   title: "Watchlist Fast",
@@ -11,7 +12,9 @@ export default function RootLayout({ children }: { children: ReactNode }) {
   return (
     <html lang="en">
       <body>
-        <EnvironmentProvider>{children}</EnvironmentProvider>
+        <EnvironmentProvider>
+          <AppShell>{children}</AppShell>
+        </EnvironmentProvider>
       </body>
     </html>
   );

@@ -134,6 +134,7 @@ export default function TrailingSettingsPage() {
   return (
     <div className="settings-panel">
       <div className="settings-hero">
+        <div className="mission-kicker">Risk Mechanics</div>
         <h1>Trailing Stop Settings</h1>
         <p>
           Per-pair trailing stop stages. Demo and live are independent — changes
@@ -158,7 +159,7 @@ export default function TrailingSettingsPage() {
       ) : error ? (
         <div className="settings-placeholder">Error: {error}</div>
       ) : (
-        <div style={{ overflowX: "auto" }}>
+        <div className="settings-card" style={{ overflowX: "auto" }}>
           <table className="trailing-config-table" style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.85rem" }}>
             <thead>
               <tr>

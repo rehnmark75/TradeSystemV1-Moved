@@ -1,112 +1,128 @@
 import Link from "next/link";
 
+const deskGroups = [
+  {
+    title: "Equity Desk",
+    intro: "Long-bias watchlist discovery, broker oversight, and market regime tracking for discretionary stock operators.",
+    cards: [
+      {
+        href: "/watchlists",
+        title: "Watchlists",
+        meta: "Discovery",
+        body: "High-conviction scan boards with thesis context, validation state, and execution-ready detail panels.",
+      },
+      {
+        href: "/broker",
+        title: "Broker Ledger",
+        meta: "Execution",
+        body: "Performance, open exposure, and account telemetry framed like a professional dealing blotter.",
+      },
+      {
+        href: "/market",
+        title: "Market Regime",
+        meta: "Context",
+        body: "Breadth, sector rotation, and relative-strength leadership for top-down timing and capital allocation.",
+      },
+    ],
+  },
+  {
+    title: "FX Desk",
+    intro: "Scanner-driven workflow for live and demo FX operations, from market context to post-trade forensics.",
+    cards: [
+      {
+        href: "/forex",
+        title: "Forex Overview",
+        meta: "Command",
+        body: "Performance, strategy mix, and recent execution in one overview built for senior intraday operators.",
+      },
+      {
+        href: "/chart",
+        title: "Execution Charting",
+        meta: "Monitoring",
+        body: "Rejection overlays, trade markers, and context review for real-time scanner diagnostics.",
+      },
+      {
+        href: "/signals",
+        title: "Signal Inspection",
+        meta: "Audit",
+        body: "Raw scanner output and edge-case validation for systematic debugging and parameter review.",
+      },
+    ],
+  },
+  {
+    title: "Platform Control",
+    intro: "Infrastructure awareness and parameter governance so the trading stack feels like one coordinated system.",
+    cards: [
+      {
+        href: "/infrastructure",
+        title: "Infrastructure",
+        meta: "Ops",
+        body: "Containers, service health, alerts, and restart surfaces designed for fast operational decisions.",
+      },
+      {
+        href: "/system",
+        title: "System Pulse",
+        meta: "Reliability",
+        body: "Stream health, freshness checks, and platform events for monitoring data integrity under load.",
+      },
+      {
+        href: "/settings",
+        title: "Strategy Settings",
+        meta: "Governance",
+        body: "Centralized control of scanner, SMC, and trailing behavior with audit-friendly structure.",
+      },
+    ],
+  },
+];
+
 export default function Page() {
   return (
     <div className="page">
-      <div className="topbar">
-        <Link href="/" className="brand">
-          Trading Hub
-        </Link>
-        <div className="nav-links">
-          <Link href="/watchlists">Watchlists</Link>
-          <Link href="/broker">Broker</Link>
-          <Link href="/market">Market</Link>
-          <Link href="/chart">Chart</Link>
-          <Link href="/forex">Forex Analytics</Link>
-          <Link href="/infrastructure">Infrastructure</Link>
-          <Link href="/system">System Status</Link>
-          <Link href="/settings">Settings</Link>
-          <Link href="/signals" style={{ opacity: 0.4, fontSize: "0.8rem" }} title="Scanner debug view">Signals</Link>
-        </div>
-      </div>
-
-      <div className="hero">
-        <h1>Trading Command Center</h1>
-        <p>Stocks, forex, and market context in one fast, focused workspace.</p>
-      </div>
-
-      <section className="landing-section">
-        <div className="section-header">
-          <h2>Stocks</h2>
-          <p>Scanner intelligence, market context, and broker execution.</p>
-        </div>
-        <div className="landing-grid">
-          <Link href="/watchlists" className="landing-card">
-            <div className="landing-icon">📋</div>
-            <div>
-              <h3>Watchlists</h3>
-              <p>EMA 50 crossover with Claude AI thesis, full-setup backtest (RS+DAQ), and quality filter.</p>
-            </div>
-          </Link>
-          <Link href="/broker" className="landing-card">
-            <div className="landing-icon">💼</div>
-            <div>
-              <h3>Broker Stats</h3>
-              <p>Account performance, open positions, and trade analytics synced from RoboMarkets.</p>
-            </div>
-          </Link>
-          <Link href="/market" className="landing-card">
-            <div className="landing-icon">🧭</div>
-            <div>
-              <h3>Market Context</h3>
-              <p>Regime, breadth, sector rotation, and RS leadership in one view.</p>
-            </div>
-          </Link>
+      <section className="hero">
+        <div className="mission-kicker">Institutional Command Surface</div>
+        <h1>Built for senior day traders and bot operators who need signal clarity, not dashboard noise.</h1>
+        <p>
+          The platform is organized as a deliberate operating flow: discover opportunity, validate market context,
+          inspect execution quality, then govern the stack with the same visual language across every desk.
+        </p>
+        <div className="mission-grid">
+          <div className="mission-stat">
+            <span>Flow</span>
+            <strong>Discover → Validate → Execute → Audit</strong>
+          </div>
+          <div className="mission-stat">
+            <span>Audience</span>
+            <strong>Discretionary and systematic traders</strong>
+          </div>
+          <div className="mission-stat">
+            <span>Standard</span>
+            <strong>Commercial-grade operating environment</strong>
+          </div>
         </div>
       </section>
 
-      <section className="landing-section">
-        <div className="section-header">
-          <h2>Forex</h2>
-          <p>Unified analytics for performance, strategy, and trade execution.</p>
-        </div>
-        <div className="landing-grid">
-          <Link href="/forex" className="landing-card">
-            <div className="landing-icon">📊</div>
+      {deskGroups.map((group) => (
+        <section key={group.title} className="landing-section">
+          <div className="section-header">
             <div>
-              <h3>Unified Analytics</h3>
-              <p>Overview and analysis dashboards for the live trading book.</p>
+              <h2>{group.title}</h2>
+              <p>{group.intro}</p>
             </div>
-          </Link>
-          <Link href="/settings" className="landing-card">
-            <div className="landing-icon">🛠️</div>
-            <div>
-              <h3>Settings Center</h3>
-              <p>Scanner + SMC configuration, overrides, and audit trail.</p>
-            </div>
-          </Link>
-        </div>
-      </section>
-
-      <section className="landing-section">
-        <div className="section-header">
-          <h2>Operations</h2>
-          <p>Infrastructure health, stream monitoring, and log intelligence.</p>
-        </div>
-        <div className="landing-grid">
-          <Link href="/infrastructure" className="landing-card">
-            <div className="landing-icon">🖥️</div>
-            <div>
-              <h3>Infrastructure</h3>
-              <p>Container health, alerts, metrics, and restart actions via system-monitor.</p>
-            </div>
-          </Link>
-          <Link href="/system" className="landing-card">
-            <div className="landing-icon">📡</div>
-            <div>
-              <h3>System Status</h3>
-              <p>Stream health, candle data freshness, operations feed, and log search.</p>
-            </div>
-          </Link>
-          <Link href="/signals" className="landing-card" style={{ opacity: 0.55 }}>
-            <div className="landing-icon">🔬</div>
-            <div>
-              <h3>Signals Debug</h3>
-              <p>Raw scanner signal output for validation. Thesis and Claude analysis now shown in Watchlists.</p>
-            </div>
-          </Link>
-        </div>
-      </section>
+          </div>
+          <div className="landing-grid">
+            {group.cards.map((card) => (
+              <Link href={card.href} className="landing-card" key={card.href}>
+                <div className="landing-card-meta">{card.meta}</div>
+                <div>
+                  <h3>{card.title}</h3>
+                  <p>{card.body}</p>
+                </div>
+                <span className="landing-card-cta">Open desk</span>
+              </Link>
+            ))}
+          </div>
+        </section>
+      ))}
     </div>
   );
 }

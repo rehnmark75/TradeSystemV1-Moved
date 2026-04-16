@@ -48,8 +48,9 @@ export default function SettingsDashboard() {
     <div className="settings-panel">
       <HealthIndicator />
       <div className="settings-hero">
+        <div className="mission-kicker">Configuration Governance</div>
         <h1>Settings Dashboard</h1>
-        <p>Scanner + SMC configuration with audit visibility.</p>
+        <p>Scanner, strategy, and audit controls with one commercial-grade governance surface.</p>
       </div>
       <div className="settings-dashboard-grid">
         <div className="settings-card">

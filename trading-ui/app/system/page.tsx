@@ -630,27 +630,36 @@ function SystemStatusInner() {
         </div>
       </div>
 
-      {/* Header */}
-      <div className="header" style={{ marginBottom: "20px" }}>
+      <div className="desk-intro">
         <div>
-          <h1 style={{ margin: 0 }}>System Status</h1>
-          <p style={{ margin: "6px 0 0", opacity: 0.85, fontSize: "0.9rem" }}>
-            Stream health, candle data, operations, and log intelligence
+          <div className="mission-kicker">System Telemetry</div>
+          <h2>Data-stream health, freshness, and operational telemetry for the live application fabric.</h2>
+          <p>
+            This desk should answer whether the trading platform can be trusted right now: streams flowing,
+            candles fresh, backfill healthy, and logs quiet enough to operate with confidence.
           </p>
         </div>
-        <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Refresh cadence</span>
+            <strong>Auto-refresh with manual override</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Focus</span>
+            <strong>Stream health, data freshness, runtime intelligence</strong>
+          </div>
+        </div>
+      </div>
+
+      <div className="desk-toolbar">
+        <div className="header-chip">Runtime surveillance</div>
+        <div className="desk-toolbar-actions">
           <LiveBadge lastUpdated={lastUpdated} />
           <button onClick={refetch} className="refresh-btn" title="Refresh">↻</button>
         </div>
       </div>
 
-      {/* Service health strip */}
-      <div style={{
-        display: "flex", gap: "8px", flexWrap: "wrap", alignItems: "center",
-        background: "var(--panel)", border: "1px solid var(--border)",
-        borderRadius: "10px", padding: "10px 16px", marginBottom: "20px",
-        fontSize: "0.82rem",
-      }}>
+      <div className="status-strip">
         <span style={{ color: "var(--muted)", fontWeight: 600, marginRight: "4px" }}>Services:</span>
         <StatusPill state={streamState} label={`Stream ${health?.status ?? "unknown"}`} size="sm" />
         <StatusPill state={backfillState} label={`Backfill ${backfill?.running ? "running" : (backfill?.status ?? "unknown")}`} size="sm" />

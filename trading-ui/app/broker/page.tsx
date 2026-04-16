@@ -151,15 +151,33 @@ export default function BrokerPage() {
         </div>
       </div>
 
-      <div className="header">
+      <div className="desk-intro">
         <div>
-          <h1>Broker Trading Statistics</h1>
-          <p>Performance data synced from RoboMarkets.</p>
+          <div className="mission-kicker">Execution Ledger</div>
+          <h2>Broker performance framed like a professional account and risk review terminal.</h2>
+          <p>
+            Use this desk to review capital deployment, realized expectancy, open exposure, and equity-curve
+            behavior without leaving the platform workflow.
+          </p>
+        </div>
+        <div className="desk-intro-meta">
+          <div className="desk-intro-stat">
+            <span>Source</span>
+            <strong>RoboMarkets sync</strong>
+          </div>
+          <div className="desk-intro-stat">
+            <span>Use</span>
+            <strong>Capital review, P&amp;L diagnostics, open-book supervision</strong>
+          </div>
         </div>
       </div>
 
       <div className="panel">
-        <div className="controls">
+        <div className="desk-toolbar">
+          <div className="header-chip">Account review</div>
+        </div>
+
+        <div className="controls control-grid-compact">
           <div>
             <label>Analysis Period</label>
             <select value={days} onChange={(e) => setDays(Number(e.target.value))}>
