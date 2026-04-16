@@ -8,7 +8,9 @@ export type CategoryKey =
   | "time"
   | "market"
   | "scalp"
-  | "filters";
+  | "filters"
+  | "lpf"
+  | "claude";
 
 export interface CategoryDef {
   label: string;
@@ -78,6 +80,18 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
     color: "#22d3ee",
     stages: ["EMA200_FILTER", "CLAUDE_FILTER", "NEWS_FILTER"],
   },
+  lpf: {
+    label: "LPF",
+    description: "Loss Prevention Filter blocked the signal based on penalty rules",
+    color: "#f97316",
+    stages: ["LPF_BLOCKED"],
+  },
+  claude: {
+    label: "Claude",
+    description: "Claude AI rejected the signal after chart analysis",
+    color: "#c084fc",
+    stages: ["CLAUDE_REJECTED"],
+  },
 };
 
 export const CATEGORY_ORDER: CategoryKey[] = [
@@ -91,6 +105,8 @@ export const CATEGORY_ORDER: CategoryKey[] = [
   "market",
   "scalp",
   "filters",
+  "lpf",
+  "claude",
 ];
 
 export const STAGE_DESCRIPTIONS: Record<string, string> = {
@@ -123,6 +139,8 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   EMA200_FILTER: "Blocked by 200 EMA filter",
   CLAUDE_FILTER: "Claude AI flagged trade",
   NEWS_FILTER: "Blocked by news filter",
+  LPF_BLOCKED: "Loss Prevention Filter: signal blocked by penalty rules",
+  CLAUDE_REJECTED: "Claude AI rejected signal after chart analysis",
 };
 
 export function describeStage(stage: string): string {

@@ -143,6 +143,8 @@ function countByCategory(
     market: 0,
     scalp: 0,
     filters: 0,
+    lpf: 0,
+    claude: 0,
   };
   for (const r of rejections) {
     if (!selected.has(r.rejection_stage)) continue;
@@ -312,6 +314,7 @@ export default function CandlestickChart() {
         setRejections([]);
         setRejectionsTruncated(false);
         setRejectionsTotal(0);
+
         setTradeCount(0);
         setLoading(false);
         return;
@@ -349,12 +352,18 @@ export default function CandlestickChart() {
         candleData[candleData.length - 1].timestamp ??
         "";
 
-      const [tradeRes, rejRes] = await Promise.all([
+      const [tradeRes, rejRes, lpfRes, claudeRes] = await Promise.all([
         fetch(
           `/trading/api/chart/trades?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}&environment=${configSet}`
         ),
         fetch(
           `/trading/api/chart/smc-rejections?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}`
+        ),
+        fetch(
+          `/trading/api/chart/lpf-rejections?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}`
+        ),
+        fetch(
+          `/trading/api/chart/claude-rejections?epic=${encodeURIComponent(selectedEpic)}&from=${firstTs}&to=${lastTs}`
         ),
       ]);
 
@@ -367,16 +376,30 @@ export default function CandlestickChart() {
       setTradeCount(nextTrades.length);
 
       let nextRejections: RejectionRow[] = [];
-      let nextTruncated = false;
       let nextTotal = 0;
       if (rejRes.ok) {
         const rejData = await rejRes.json();
         nextRejections = rejData.rejections ?? [];
-        nextTruncated = Boolean(rejData.truncated);
-        nextTotal = rejData.total ?? nextRejections.length;
+        nextTotal += rejData.total ?? nextRejections.length;
       }
+      if (lpfRes.ok) {
+        const lpfData = await lpfRes.json();
+        const lpfRows: RejectionRow[] = lpfData.rejections ?? [];
+        nextRejections = [...nextRejections, ...lpfRows];
+        nextTotal += lpfData.total ?? lpfRows.length;
+      }
+      if (claudeRes.ok) {
+        const claudeData = await claudeRes.json();
+        const claudeRows: RejectionRow[] = claudeData.rejections ?? [];
+        nextRejections = [...nextRejections, ...claudeRows];
+        nextTotal += claudeData.total ?? claudeRows.length;
+      }
+      // Sort combined rejections chronologically for consistent bucket lookup
+      nextRejections.sort(
+        (a, b) => new Date(a.scan_timestamp).getTime() - new Date(b.scan_timestamp).getTime()
+      );
       setRejections(nextRejections);
-      setRejectionsTruncated(nextTruncated);
+      setRejectionsTruncated(nextTotal > nextRejections.length);
       setRejectionsTotal(nextTotal);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Unknown error");
