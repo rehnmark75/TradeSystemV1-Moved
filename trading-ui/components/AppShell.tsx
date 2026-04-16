@@ -20,7 +20,7 @@ const NAV_SECTIONS: NavSection[] = [
   {
     title: "Command",
     items: [
-      { href: "/", label: "Mission Control", shortLabel: "Home" },
+      { href: "/", label: "Overview", shortLabel: "Home" },
       { href: "/watchlists", label: "Equity Watchlists", shortLabel: "Watchlists" },
       { href: "/broker", label: "Broker Ledger", shortLabel: "Broker" },
       { href: "/market", label: "Market Regime", shortLabel: "Market" },
@@ -59,7 +59,7 @@ function prettifySegment(segment: string): string {
 
 function buildBreadcrumbs(pathname: string): string[] {
   const segments = pathname.split("/").filter(Boolean);
-  if (segments.length === 0) return ["Mission Control"];
+  if (segments.length === 0) return ["Overview"];
   return segments.map(prettifySegment);
 }
 
@@ -82,10 +82,10 @@ export default function AppShell({ children }: { children: ReactNode }) {
       <aside className="app-sidebar">
         <div className="app-brand-block">
           <Link href="/" className="app-brand-mark">
-            <span className="app-brand-name">TradeSystem</span>
+            <span className="app-brand-name">K.L.I.R.R</span>
           </Link>
           <p className="app-brand-copy">
-            Institutional-grade monitoring for discretionary and automated execution.
+            Knew Losses Incoming, Re-entered Regardless.
           </p>
         </div>
 

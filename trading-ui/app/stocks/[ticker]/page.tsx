@@ -470,7 +470,7 @@ export default function StockDeepDivePage() {
     <div className="page deepdive-page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Trading Hub
+          K.L.I.R.R
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>

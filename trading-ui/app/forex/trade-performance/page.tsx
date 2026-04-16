@@ -26,6 +26,7 @@ type TradesPayload = {
 };
 
 const PRESETS = [
+  { label: "24h", value: 1 },
   { label: "7d", value: 7 },
   { label: "30d", value: 30 },
   { label: "90d", value: 90 }
@@ -65,32 +66,30 @@ function calculateMetrics(rows: TradeRow[]) {
   const tradesWithPnl = rows.filter((row) => row.profit_loss != null);
   const pendingTrades = rows.filter((row) => ["pending", "pending_limit"].includes(row.status));
   const openTrades = rows.filter((row) => row.status === "tracking");
-  const expiredTrades = rows.filter((row) => row.status === "limit_not_filled");
-  const rejectedTrades = rows.filter((row) =>
-    ["limit_rejected", "limit_cancelled"].includes(row.status)
-  );
   const winningTrades = tradesWithPnl.filter((row) => (row.profit_loss ?? 0) > 0);
   const losingTrades = tradesWithPnl.filter((row) => (row.profit_loss ?? 0) < 0);
   const totalPnl = tradesWithPnl.reduce((acc, row) => acc + (row.profit_loss ?? 0), 0);
+  const grossProfit = winningTrades.reduce((acc, row) => acc + Math.max(row.profit_loss ?? 0, 0), 0);
+  const grossLoss = losingTrades.reduce((acc, row) => acc + Math.abs(Math.min(row.profit_loss ?? 0, 0)), 0);
   const winRate = tradesWithPnl.length
     ? (winningTrades.length / tradesWithPnl.length) * 100
     : 0;
+  const profitFactor = grossLoss > 0 ? grossProfit / grossLoss : grossProfit > 0 ? Number.POSITIVE_INFINITY : 0;
 
   return {
     total_trades: rows.length,
     completed_trades: tradesWithPnl.length,
     pending_trades: pendingTrades.length,
     open_trades: openTrades.length,
-    expired_trades: expiredTrades.length,
-    rejected_trades: rejectedTrades.length,
     total_pnl: totalPnl,
-    win_rate: winRate
+    win_rate: winRate,
+    profit_factor: profitFactor
   };
 }
 
 export default function ForexTradePerformancePage() {
   const { environment } = useEnvironment();
-  const [days, setDays] = useState(30);
+  const [days, setDays] = useState(1);
   const [payload, setPayload] = useState<TradesPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -190,10 +189,10 @@ export default function ForexTradePerformancePage() {
   };
 
   return (
-    <div className="page">
+    <div className="page trade-performance-page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Trading Hub
+          K.L.I.R.R
         </Link>
         <EnvironmentToggle />
         <div className="nav-links">
@@ -231,7 +230,7 @@ export default function ForexTradePerformancePage() {
           <button className="section-tab active" onClick={() => setRefreshTick((tick) => tick + 1)}>
             Refresh
           </button>
-          <label>
+          <label className="trade-performance-toggle">
             <input
               type="checkbox"
               checked={exportEnabled}
@@ -272,10 +271,8 @@ export default function ForexTradePerformancePage() {
             </strong>
           </div>
           <div className="summary-card">
-            Expired/Rejected
-            <strong>
-              {metrics.expired_trades}/{metrics.rejected_trades}
-            </strong>
+            Profit Factor
+            <strong>{Number.isFinite(metrics.profit_factor) ? formatNumber(metrics.profit_factor) : "∞"}</strong>
           </div>
         </div>
 

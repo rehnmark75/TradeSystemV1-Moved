@@ -111,7 +111,7 @@ export default function ForexAlertHistoryPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Trading Hub
+          K.L.I.R.R
         </Link>
         <EnvironmentToggle />
         <div className="nav-links">
@@ -200,7 +200,7 @@ export default function ForexAlertHistoryPage() {
               ))}
             </select>
           </div>
-          <button className="section-tab active" onClick={loadAlerts}>
+          <button className="alert-history-button alert-history-button-active" onClick={loadAlerts}>
             Refresh
           </button>
         </div>
@@ -318,7 +318,7 @@ export default function ForexAlertHistoryPage() {
             <div className="panel">
               <div className="forex-controls">
                 <button
-                  className="section-tab"
+                  className="alert-history-button"
                   disabled={page <= 1}
                   onClick={() => setPage((value) => Math.max(1, value - 1))}
                 >
@@ -328,7 +328,7 @@ export default function ForexAlertHistoryPage() {
                   Page {page} of {totalPages}
                 </div>
                 <button
-                  className="section-tab"
+                  className="alert-history-button"
                   disabled={page >= totalPages}
                   onClick={() => setPage((value) => Math.min(totalPages, value + 1))}
                 >

@@ -259,7 +259,7 @@ export default function ValidatorRejectionsPage() {
     return (
       <div className="page">
         <div className="topbar">
-          <Link href="/" className="brand">Trading Hub</Link>
+          <Link href="/" className="brand">K.L.I.R.R</Link>
         </div>
         <div className="panel">
           <div className="error">
@@ -275,7 +275,7 @@ export default function ValidatorRejectionsPage() {
   return (
     <div className="page">
       <div className="topbar">
-        <Link href="/" className="brand">Trading Hub</Link>
+        <Link href="/" className="brand">K.L.I.R.R</Link>
         <EnvironmentToggle />
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>

@@ -181,7 +181,7 @@ export default function MarketPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Trading Hub
+          K.L.I.R.R
         </Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>

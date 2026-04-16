@@ -133,7 +133,7 @@ function InfraPageInner() {
     <div className="page">
       {/* Topbar */}
       <div className="topbar">
-        <Link href="/" className="brand">Trading Hub</Link>
+        <Link href="/" className="brand">K.L.I.R.R</Link>
         <div className="nav-links">
           <Link href="/watchlists">Watchlists</Link>
           <Link href="/signals">Signals</Link>

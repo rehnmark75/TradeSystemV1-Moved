@@ -82,7 +82,7 @@ export default function AlertDataPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Trading Hub
+          K.L.I.R.R
         </Link>
         <EnvironmentToggle />
         <div className="nav-links">

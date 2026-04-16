@@ -542,7 +542,7 @@ export default function SMCRejectionsPage() {
       <div className="page">
         <div className="topbar">
           <Link href="/" className="brand">
-            Trading Hub
+            K.L.I.R.R
           </Link>
         </div>
         <div className="panel">
@@ -558,7 +558,7 @@ export default function SMCRejectionsPage() {
     <div className="page">
       <div className="topbar">
         <Link href="/" className="brand">
-          Trading Hub
+          K.L.I.R.R
         </Link>
         <EnvironmentToggle />
         <div className="nav-links">
