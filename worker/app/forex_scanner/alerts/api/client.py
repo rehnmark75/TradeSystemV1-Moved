@@ -42,10 +42,13 @@ class APIClient:
 
     # Available models
     MODELS = {
-        'haiku': 'claude-3-haiku-20240307',
-        'sonnet': 'claude-sonnet-4-20250514',
-        'sonnet-old': 'claude-3-5-sonnet-20241022',
-        'opus': 'claude-opus-4-20250514',
+        'haiku': 'claude-haiku-4-5-20251001',
+        'sonnet': 'claude-sonnet-4-6',
+        'opus': 'claude-opus-4-7',
+        'sonnet-4': 'claude-sonnet-4-20250514',
+        'opus-4': 'claude-opus-4-20250514',
+        'sonnet-3.5': 'claude-3-5-sonnet-20241022',
+        'haiku-3': 'claude-3-haiku-20240307',
     }
 
     # Default model for trade validation
