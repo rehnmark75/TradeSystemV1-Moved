@@ -162,6 +162,8 @@ class XAUGoldStrategy(StrategyInterface):
         self._last_bos: Dict[str, Dict[str, Any]] = {}
         self._scan_count: int = 0
         self._rej_counts: Dict[str, int] = {}
+        self._rej_last_log: datetime = datetime.now(timezone.utc)
+        self._rej_log_interval_minutes: int = 15
         self.logger.info(f"XAU_GOLD strategy v{self.config.version} initialized")
 
     # ---- interface --------------------------------------------------------
@@ -178,8 +180,25 @@ class XAUGoldStrategy(StrategyInterface):
         self._cooldowns.clear()
 
     def flush_rejections(self) -> None:
-        # Persistence deferred; just clear for now.
+        # Clear the per-scan rejection list. Counters in self._rej_counts keep
+        # accumulating across scans so the rollup below can report an aggregate.
         self._rejections.clear()
+
+        if not self._rej_counts:
+            return
+
+        now = datetime.now(timezone.utc)
+        elapsed = (now - self._rej_last_log).total_seconds() / 60.0
+        if elapsed < self._rej_log_interval_minutes:
+            return
+
+        top = sorted(self._rej_counts.items(), key=lambda x: -x[1])[:6]
+        total = sum(self._rej_counts.values())
+        self.logger.info(
+            f"[XAU_GOLD] Rejection rollup (last {int(elapsed)}min, {total} rejections): {dict(top)}"
+        )
+        self._rej_counts.clear()
+        self._rej_last_log = now
 
     # ---- main dispatch ----------------------------------------------------
 
@@ -234,11 +253,7 @@ class XAUGoldStrategy(StrategyInterface):
             hour_utc = current_time.hour
 
         if not self._check_cooldown(epic, current_time):
-            self._rej_counts['cooldown'] = self._rej_counts.get('cooldown', 0) + 1
-            self._scan_count += 1
-            if self._scan_count % 2000 == 0:
-                top = sorted(self._rej_counts.items(), key=lambda x: -x[1])[:8]
-                self.logger.info(f"[XAU_GOLD] Scan #{self._scan_count} stats: {dict(top)}")
+            self._reject(epic, "cooldown", "")
             return None
 
         if not cfg.is_session_allowed(hour_utc):
@@ -670,10 +685,6 @@ class XAUGoldStrategy(StrategyInterface):
         )
         self._rej_counts[reason] = self._rej_counts.get(reason, 0) + 1
         self._scan_count += 1
-        # Log rejection stats every 2000 scans
-        if self._scan_count % 2000 == 0:
-            top = sorted(self._rej_counts.items(), key=lambda x: -x[1])[:6]
-            self.logger.info(f"[XAU_GOLD] Scan #{self._scan_count} rejection stats: {dict(top)}")
         self.logger.debug(f"[XAU_GOLD] {epic} rejected: {reason} ({detail})")
 
 
