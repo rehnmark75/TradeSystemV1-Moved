@@ -7722,3 +7722,203 @@ table {
   border-radius: 4px;
   color: var(--bad);
 }
+
+/* Claude Rejection Validation page */
+.rej-good,
+.rej-good-text {
+  color: var(--good, #3fb37f);
+}
+
+.rej-bad,
+.rej-bad-text {
+  color: var(--bad, #c43d3d);
+}
+
+.rej-verdict strong {
+  font-size: 1rem;
+  line-height: 1.3;
+}
+
+.rej-verdict-good {
+  border-left: 3px solid var(--good, #3fb37f);
+}
+
+.rej-verdict-bad {
+  border-left: 3px solid var(--bad, #c43d3d);
+}
+
+.rej-verdict-warn {
+  border-left: 3px solid var(--warn, #d8a23b);
+}
+
+.rej-pair-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.rej-pair-header,
+.rej-pair-row {
+  display: grid;
+  grid-template-columns: 1.3fr 0.5fr 0.5fr 1fr 0.8fr 1fr;
+  gap: 12px;
+  padding: 8px 12px;
+  align-items: center;
+}
+
+.rej-pair-header {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.rej-pair-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+  font-variant-numeric: tabular-nums;
+}
+
+.rej-pair-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.rej-table {
+  display: flex;
+  flex-direction: column;
+}
+
+.rej-table-header,
+.rej-row {
+  display: grid;
+  grid-template-columns: 30px 1.1fr 0.9fr 0.5fr 0.6fr 0.6fr 0.8fr 0.7fr 0.7fr 0.6fr 1.4fr 0.7fr 0.6fr;
+  gap: 8px;
+  padding: 8px 10px;
+  align-items: center;
+  font-size: 0.85rem;
+  font-variant-numeric: tabular-nums;
+}
+
+.rej-table-header {
+  font-size: 0.7rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  color: var(--muted);
+  border-bottom: 1px solid var(--border);
+}
+
+.rej-row {
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rej-row:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.rej-row-open {
+  background: rgba(255, 200, 107, 0.05);
+}
+
+.rej-outcome {
+  display: inline-block;
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 0.72rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  text-align: center;
+}
+
+.rej-outcome-good {
+  background: rgba(63, 179, 127, 0.18);
+  color: var(--good, #3fb37f);
+}
+
+.rej-outcome-bad {
+  background: rgba(196, 61, 61, 0.18);
+  color: var(--bad, #c43d3d);
+}
+
+.rej-outcome-mixed {
+  background: rgba(102, 180, 255, 0.18);
+  color: #66b4ff;
+}
+
+.rej-outcome-neutral {
+  background: rgba(180, 180, 180, 0.18);
+  color: #b4b4b4;
+}
+
+.rej-outcome-open {
+  background: rgba(216, 162, 59, 0.18);
+  color: var(--warn, #d8a23b);
+}
+
+.rej-detail {
+  padding: 12px 18px 18px 42px;
+  background: rgba(255, 255, 255, 0.015);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+}
+
+.rej-detail-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.8fr) minmax(280px, 1.4fr);
+  gap: 18px;
+}
+
+.rej-detail-grid h5 {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.rej-detail-item {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 4px 0;
+  border-bottom: 1px dashed rgba(255, 255, 255, 0.04);
+  font-size: 0.85rem;
+}
+
+.rej-detail-item span {
+  color: var(--muted);
+}
+
+.rej-reason {
+  margin: 0;
+  color: var(--ink);
+  font-size: 0.85rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.rej-stop-path {
+  margin-top: 14px;
+}
+
+.rej-stop-path h5 {
+  margin: 0 0 8px;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+}
+
+.rej-stop-path-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.rej-stop-path-row {
+  display: grid;
+  grid-template-columns: 80px 120px 1fr;
+  gap: 12px;
+  padding: 4px 8px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.8rem;
+  font-variant-numeric: tabular-nums;
+}
