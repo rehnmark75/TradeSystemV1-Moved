@@ -302,7 +302,10 @@ export default function MarketConditionsPage() {
       p.adx_delta == null ? "No ADX change" : p.adx_delta >= 0 ? "ADX strengthening" : "ADX fading";
 
     return (
-      <div key={p.epic} className={`mc-pair-card ${cardCls}`}>
+      <div
+        key={p.epic}
+        className={`mc-pair-card ${cardCls} ${isOpen ? "mc-pair-card-open" : ""}`}
+      >
         <div
           className="mc-pair-head"
           onClick={() => setExpanded(isOpen ? null : p.epic)}
@@ -785,30 +788,55 @@ export default function MarketConditionsPage() {
           overflow: hidden;
           border: 1px solid rgba(123, 147, 179, 0.14);
           border-radius: 20px;
-          padding: 16px 18px 18px;
-          margin-bottom: 14px;
+          padding: 16px 18px 18px 24px;
+          margin-bottom: 16px;
           background:
-            radial-gradient(circle at top right, rgba(45, 212, 191, 0.1), transparent 28%),
+            linear-gradient(180deg, rgba(10, 18, 33, 0.985), rgba(8, 13, 24, 0.965)),
+            radial-gradient(circle at top right, rgba(45, 212, 191, 0.07), transparent 28%),
             linear-gradient(180deg, rgba(10, 18, 33, 0.98), rgba(8, 13, 24, 0.96));
           box-shadow:
             inset 0 1px 0 rgba(255, 255, 255, 0.04),
             0 14px 28px rgba(0, 0, 0, 0.18);
+          isolation: isolate;
+        }
+        .mc-pair-card:nth-of-type(even) {
+          background:
+            linear-gradient(180deg, rgba(11, 20, 36, 0.99), rgba(7, 12, 23, 0.97)),
+            radial-gradient(circle at top right, rgba(45, 212, 191, 0.05), transparent 28%),
+            linear-gradient(180deg, rgba(10, 18, 33, 0.98), rgba(8, 13, 24, 0.96));
+          transform: translateX(6px);
+        }
+        .mc-pair-card-open,
+        .mc-pair-card:hover {
+          border-color: rgba(159, 185, 227, 0.22);
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.05),
+            0 18px 34px rgba(0, 0, 0, 0.22);
         }
         .mc-pair-card::before {
           content: "";
           position: absolute;
-          inset: 0;
+          left: 0;
+          top: 0;
+          bottom: 0;
+          width: 7px;
           pointer-events: none;
           background:
-            linear-gradient(90deg, var(--mc-accent-edge) 0%, transparent 20%, transparent 80%, var(--mc-accent-edge) 100%),
-            radial-gradient(circle at top left, var(--mc-accent-glow), transparent 34%),
-            radial-gradient(circle at 85% 20%, var(--mc-accent-glow-soft), transparent 28%);
-          opacity: 0.92;
+            linear-gradient(
+              180deg,
+              var(--mc-accent-line-strong) 0%,
+              var(--mc-accent-line) 35%,
+              rgba(255, 255, 255, 0.02) 100%
+            );
+          box-shadow:
+            0 0 0 1px rgba(255, 255, 255, 0.03),
+            12px 0 24px var(--mc-accent-shadow);
+          opacity: 1;
         }
         .mc-pair-card::after {
           content: "";
           position: absolute;
-          left: 18px;
+          left: 24px;
           right: 18px;
           top: 0;
           height: 3px;
@@ -824,32 +852,24 @@ export default function MarketConditionsPage() {
           opacity: 0.95;
         }
         .mc-card-positive {
-          --mc-accent-glow: rgba(34, 197, 94, 0.18);
-          --mc-accent-glow-soft: rgba(45, 212, 191, 0.12);
-          --mc-accent-edge: rgba(34, 197, 94, 0.08);
           --mc-accent-line: rgba(74, 222, 128, 0.34);
           --mc-accent-line-strong: rgba(110, 231, 183, 0.74);
+          --mc-accent-shadow: rgba(34, 197, 94, 0.14);
         }
         .mc-card-negative {
-          --mc-accent-glow: rgba(244, 63, 94, 0.18);
-          --mc-accent-glow-soft: rgba(251, 146, 60, 0.1);
-          --mc-accent-edge: rgba(244, 63, 94, 0.08);
           --mc-accent-line: rgba(251, 113, 133, 0.32);
           --mc-accent-line-strong: rgba(253, 164, 175, 0.72);
+          --mc-accent-shadow: rgba(244, 63, 94, 0.14);
         }
         .mc-card-stable {
-          --mc-accent-glow: rgba(96, 165, 250, 0.16);
-          --mc-accent-glow-soft: rgba(148, 163, 184, 0.1);
-          --mc-accent-edge: rgba(96, 165, 250, 0.07);
           --mc-accent-line: rgba(125, 211, 252, 0.28);
           --mc-accent-line-strong: rgba(191, 219, 254, 0.64);
+          --mc-accent-shadow: rgba(96, 165, 250, 0.12);
         }
         .mc-card-nodata {
-          --mc-accent-glow: rgba(148, 163, 184, 0.14);
-          --mc-accent-glow-soft: rgba(100, 116, 139, 0.1);
-          --mc-accent-edge: rgba(148, 163, 184, 0.06);
           --mc-accent-line: rgba(148, 163, 184, 0.22);
           --mc-accent-line-strong: rgba(203, 213, 225, 0.46);
+          --mc-accent-shadow: rgba(148, 163, 184, 0.1);
         }
         .mc-pair-head {
           display: flex;
@@ -1064,6 +1084,9 @@ export default function MarketConditionsPage() {
           }
         }
         @media (max-width: 900px) {
+          .mc-pair-card:nth-of-type(even) {
+            transform: none;
+          }
           .mc-overview-grid {
             grid-template-columns: 1fr;
           }
