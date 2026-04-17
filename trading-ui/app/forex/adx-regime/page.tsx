@@ -58,6 +58,10 @@ type Severity = {
   hint?: string;
 };
 
+function getLatestAdx(p: PairResult): number | null {
+  return [...p.series].reverse().find((s) => s.adx != null)?.adx ?? null;
+}
+
 function classifyAdxSeverity(p: PairResult): Severity {
   const mean = p.this_week.mean;
   const pctBelowThresh = p.this_week.pct_below_threshold;
@@ -66,7 +70,7 @@ function classifyAdxSeverity(p: PairResult): Severity {
   if (mean == null) return { level: "nodata", label: "NO DATA" };
 
   // Live (latest) ADX from the series
-  const latest = [...p.series].reverse().find((s) => s.adx != null)?.adx ?? null;
+  const latest = getLatestAdx(p);
   const thresh = p.threshold;
 
   if (thresh != null && latest != null && latest < thresh) {
@@ -438,6 +442,7 @@ export default function AdxRegimePage() {
           <div className="adx-spark-grid">
             {data.pairs.map((p) => {
               const severity = classifyAdxSeverity(p);
+              const latestAdx = getLatestAdx(p);
               return (
                 <div className={`adx-spark-card adx-card-${severity.level}`} key={p.epic}>
                   <div className="adx-spark-head">
@@ -448,8 +453,8 @@ export default function AdxRegimePage() {
                       </span>
                     </div>
                     <span className="muted">
-                      thresh {fmtNum(p.threshold, 0)} • this {fmtNum(p.this_week.mean)} (last{" "}
-                      {fmtNum(p.last_week.mean)})
+                      current {fmtNum(latestAdx)} • thresh {fmtNum(p.threshold, 0)} • this{" "}
+                      {fmtNum(p.this_week.mean)} (last {fmtNum(p.last_week.mean)})
                     </span>
                   </div>
                   {severity.hint && <div className="adx-hint">{severity.hint}</div>}
