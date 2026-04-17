@@ -566,6 +566,14 @@ class TradeValidator:
             self.logger.debug("⏭️ Skipping Claude validation in backtest mode")
             return True, "Claude validation skipped (backtest mode)", None
 
+        # Skip Claude when the signal itself is flagged monitor_only (strategy-level).
+        # Saves API cost for any strategy running in monitor mode (e.g. RANGING_MARKET revival).
+        if signal.get('monitor_only', False):
+            _strat = signal.get('strategy', 'Unknown')
+            _epic_log = signal.get('epic', 'Unknown')
+            self.logger.info(f"⏭️ Skipping Claude for {_epic_log} ({_strat}, signal monitor_only=true) — saves API cost")
+            return True, "Claude skipped (signal monitor_only)", None
+
         # Skip Claude for disabled pairs and monitor-only pairs (saves API cost).
         # Mirrors IntegrationManager.analyze_signals_with_claude gate (integration_manager.py:361-392).
         _epic_check = signal.get('epic', '')

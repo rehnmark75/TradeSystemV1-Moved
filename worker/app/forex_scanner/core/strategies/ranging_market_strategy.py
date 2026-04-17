@@ -978,6 +978,7 @@ class RangingMarketStrategy(StrategyInterface):
             'timestamp': now,
             'version': self.config.version,
             'regime': 'ranging',
+            'monitor_only': bool(self.config.get_for_pair(epic, 'monitor_only', False)),
 
             # Qualification details
             'quality_score': qualification.quality_score,
