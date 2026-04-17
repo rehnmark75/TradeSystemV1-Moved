@@ -298,17 +298,30 @@ async def get_system_summary():
         try:
             stream_health = await get_stream_health_report()
             market_open = stream_health.get("market_open", True) if isinstance(stream_health, dict) else True
-            total_streams = len(stream_health.get("streams", {})) if isinstance(stream_health, dict) else 0
+            streams_map = stream_health.get("streams", {}) if isinstance(stream_health, dict) else {}
+            total_streams = len(streams_map)
+            active_streams = sum(1 for s in streams_map.values() if isinstance(s, dict) and s.get("overall_healthy"))
+            stalled_streams = sum(
+                1 for s in streams_map.values()
+                if isinstance(s, dict) and s.get("task_running") and not s.get("overall_healthy")
+            )
         except:
             market_open = True
             total_streams = 0
+            active_streams = 0
+            stalled_streams = 0
             stream_health = {"status": "unavailable"}
-        
+
         return {
             "status": "healthy" if health_summary["error_count"] == 0 and alert_summary["error_count"] == 0 else "issues",
             "timestamp": datetime.now().isoformat(),
             "market_open": market_open,
             "total_streams": total_streams,
+            "totals": {
+                "epics": total_streams,
+                "active": active_streams,
+                "stalled": stalled_streams,
+            },
             "recent_activity": {
                 "total_log_entries": health_summary["total_entries"],
                 "errors_last_hour": health_summary["error_count"],

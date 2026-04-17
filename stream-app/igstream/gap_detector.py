@@ -385,7 +385,7 @@ class GapDetector:
             "total_gaps": 0,
             "total_missing_candles": 0,
             "gaps_by_epic": {},
-            "gaps_by_timeframe": {5: 0},
+            "gaps_by_timeframe": {1: 0},
             "recent_gaps": 0,
             "largest_gap_minutes": 0,
             "timestamp": datetime.now(timezone.utc).isoformat()

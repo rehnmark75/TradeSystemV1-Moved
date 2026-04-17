@@ -425,8 +425,12 @@ class AutoBackfillService:
                             self.record_failed_gap(gap, 'market_closed')
                             return 'skipped'  # Don't retry market closure gaps
                         else:
-                            logger.debug(f"No candles returned for single-candle gap in {epic} at {gap_start_str} - likely false positive")
-                            return 'failed'
+                            # IG returned no data for this minute during market hours.
+                            # Retrying never works (the candle doesn't exist upstream), so record
+                            # it as permanently unavailable to stop re-alerting every detection cycle.
+                            logger.debug(f"No candles returned for single-candle gap in {epic} at {gap_start_str} - marking as no_data_available")
+                            self.record_failed_gap(gap, 'no_data_available')
+                            return 'skipped'
                     else:
                         if is_closure_time:
                             logger.debug(f"Skipping gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles)")
@@ -516,6 +520,13 @@ class AutoBackfillService:
                         gap_start_str = gap["gap_start"].strftime("%A %H:%M UTC")
                         logger.debug(f"Skipping gap in {epic} during market closure ({gap_start_str}, {gap['missing_candles']} candles) - no data to save")
                         return 'skipped'  # Don't retry market closure gaps
+                    elif gap["missing_candles"] == 1:
+                        # IG returned candle(s) but none were usable (all incomplete/None).
+                        # Retrying won't help for a single missing minute, so mark permanent.
+                        gap_start_str = gap["gap_start"].strftime("%A %H:%M UTC")
+                        logger.debug(f"Single-candle gap in {epic} at {gap_start_str} returned no usable data - marking as no_data_available")
+                        self.record_failed_gap(gap, 'no_data_available')
+                        return 'skipped'
                     else:
                         return 'failed'
                 
