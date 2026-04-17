@@ -71,10 +71,21 @@ export default function FilterEffectivenessPage() {
     fetch(`/trading/api/forex/filter-effectiveness/?days=${days}&env=${environment}`, {
       signal: controller.signal
     })
-      .then((res) => res.json())
-      .then((data) => setPayload(data))
-      .catch(() => setError("Failed to load filter effectiveness analysis."))
-      .finally(() => setLoading(false));
+      .then((res) => {
+        if (!res.ok) throw new Error(`HTTP ${res.status}`);
+        return res.json();
+      })
+      .then((data) => {
+        if (data?.error) throw new Error(data.error);
+        setPayload(data);
+      })
+      .catch((err) => {
+        if (err?.name === "AbortError") return;
+        setError("Failed to load filter effectiveness analysis.");
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
     return () => controller.abort();
   }, [days, environment]);
 
