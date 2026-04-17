@@ -185,6 +185,21 @@ const regimeBadgeClass = (shift: PairBlock["regime_shift"]) => {
   }
 };
 
+const regimeCardClass = (shift: PairBlock["regime_shift"]) => {
+  switch (shift) {
+    case "RANGING→TRENDING":
+    case "MORE_VOLATILE":
+      return "mc-card-positive";
+    case "TRENDING→RANGING":
+    case "LESS_VOLATILE":
+      return "mc-card-negative";
+    case "STABLE":
+      return "mc-card-stable";
+    default:
+      return "mc-card-nodata";
+  }
+};
+
 export default function MarketConditionsPage() {
   const { environment } = useEnvironment();
   const [preset, setPreset] = useState<PresetKey>("this_vs_last_week");
@@ -236,10 +251,45 @@ export default function MarketConditionsPage() {
 
   const fx = (data?.pairs ?? []).filter((p) => !p.is_gold);
   const gold = (data?.pairs ?? []).filter((p) => p.is_gold);
+  const allPairs = data?.pairs ?? [];
+
+  const overview = useMemo(() => {
+    if (!allPairs.length) return null;
+
+    const trendingImproved = allPairs.filter((p) => p.regime_shift === "RANGING→TRENDING").length;
+    const trendingFaded = allPairs.filter((p) => p.regime_shift === "TRENDING→RANGING").length;
+    const moreVolatile = allPairs.filter((p) => p.regime_shift === "MORE_VOLATILE").length;
+    const lessVolatile = allPairs.filter((p) => p.regime_shift === "LESS_VOLATILE").length;
+    const avgAdxShift =
+      allPairs.reduce((sum, p) => sum + (p.adx_delta ?? 0), 0) / allPairs.length;
+
+    const strongestShift = [...allPairs]
+      .filter((p) => p.adx_delta != null)
+      .sort((a, b) => Math.abs(b.adx_delta ?? 0) - Math.abs(a.adx_delta ?? 0))[0];
+
+    const strongestApproval = [...allPairs]
+      .filter((p) => p.a.approval_rate != null && p.b.approval_rate != null)
+      .sort(
+        (a, b) =>
+          (b.a.approval_rate ?? 0) - (b.b.approval_rate ?? 0) - ((a.a.approval_rate ?? 0) - (a.b.approval_rate ?? 0))
+      )[0];
+
+    return {
+      total: allPairs.length,
+      trendingImproved,
+      trendingFaded,
+      moreVolatile,
+      lessVolatile,
+      avgAdxShift,
+      strongestShift,
+      strongestApproval,
+    };
+  }, [allPairs]);
 
   const renderRow = (p: PairBlock) => {
     const isOpen = expanded === p.epic;
     const regimeCls = regimeBadgeClass(p.regime_shift);
+    const cardCls = regimeCardClass(p.regime_shift);
     const signalsDelta = deltaCell(p.b.signals, p.a.signals, { dp: 0 });
     const approvalDelta = deltaCell(p.b.approval_rate, p.a.approval_rate);
     const adxDelta = deltaCell(p.b.avg_adx, p.a.avg_adx);
@@ -248,9 +298,11 @@ export default function MarketConditionsPage() {
       p.b.avg_abs_daily_move_pips,
       p.a.avg_abs_daily_move_pips
     );
+    const adxDirection =
+      p.adx_delta == null ? "No ADX change" : p.adx_delta >= 0 ? "ADX strengthening" : "ADX fading";
 
     return (
-      <div key={p.epic} className="mc-pair-card">
+      <div key={p.epic} className={`mc-pair-card ${cardCls}`}>
         <div
           className="mc-pair-head"
           onClick={() => setExpanded(isOpen ? null : p.epic)}
@@ -263,7 +315,46 @@ export default function MarketConditionsPage() {
             </span>
             <span className="mc-epic">{p.epic}</span>
           </div>
-          <div className="mc-toggle">{isOpen ? "▾" : "▸"}</div>
+          <div className="mc-head-metrics">
+            <div className="mc-head-chip">
+              <span>ADX Δ</span>
+              <strong className={adxDelta.cls}>{adxDelta.text}</strong>
+            </div>
+            <div className="mc-head-chip">
+              <span>Approval</span>
+              <strong className={approvalDelta.cls}>{approvalDelta.text}</strong>
+            </div>
+            <div className="mc-toggle">{isOpen ? "▾" : "▸"}</div>
+          </div>
+        </div>
+
+        <div className="mc-hero-strip">
+          <div className="mc-hero-metric">
+            <span className="mc-hero-label">Current period read</span>
+            <strong>{adxDirection}</strong>
+            <small>
+              ADX {fmt(p.a.avg_adx)} • range {fmt(p.a.avg_daily_range_pips)} pips • move{" "}
+              {fmt(p.a.avg_abs_daily_move_pips)} pips
+            </small>
+          </div>
+          <div className="mc-hero-metric">
+            <span className="mc-hero-label">Signal flow</span>
+            <strong>
+              {p.a.signals} signals / {fmtPct(p.a.approval_rate)} approval
+            </strong>
+            <small>
+              {p.a.bull} bull • {p.a.bear} bear • {p.a.approved} approved
+            </small>
+          </div>
+          <div className="mc-hero-metric">
+            <span className="mc-hero-label">Benchmark</span>
+            <strong>
+              {data?.period_b.label}: {p.b.signals} / {fmtPct(p.b.approval_rate)}
+            </strong>
+            <small>
+              ADX {fmt(p.b.avg_adx)} • trend days {p.b.trend_days}
+            </small>
+          </div>
         </div>
 
         <div className="mc-grid">
@@ -458,7 +549,7 @@ export default function MarketConditionsPage() {
       </div>
 
       <div className="desk-intro">
-        <div>
+        <div className="mc-intro-copy">
           <div className="mission-kicker">FX Command Desk</div>
           <h2>Market Conditions — is it the market or the system?</h2>
           <p>
@@ -466,6 +557,12 @@ export default function MarketConditionsPage() {
             periods. Use this when signal flow feels off: the table below tells you
             whether the pair went quiet, ranged out, or shifted volatility.
           </p>
+          <div className="mc-intro-pills">
+            <span>Regime drift</span>
+            <span>ADX context</span>
+            <span>Approval pressure</span>
+            <span>Volatility shift</span>
+          </div>
         </div>
         <div className="desk-intro-meta">
           <div className="desk-intro-stat">
@@ -549,6 +646,52 @@ export default function MarketConditionsPage() {
           ) : null}
         </div>
 
+        {overview ? (
+          <div className="mc-overview-grid">
+            <div className="mc-overview-card">
+              <span className="mc-overview-label">Trend Rotation</span>
+              <strong>
+                {overview.trendingImproved} improving / {overview.trendingFaded} fading
+              </strong>
+              <small>Pairs moving from range into trend versus losing trend structure.</small>
+            </div>
+            <div className="mc-overview-card">
+              <span className="mc-overview-label">Volatility Tilt</span>
+              <strong>
+                {overview.moreVolatile} louder / {overview.lessVolatile} quieter
+              </strong>
+              <small>Fast read on whether expansion or compression is dominating.</small>
+            </div>
+            <div className="mc-overview-card">
+              <span className="mc-overview-label">Desk Average</span>
+              <strong className={overview.avgAdxShift >= 0 ? "delta-good" : "delta-bad"}>
+                {fmtSigned(overview.avgAdxShift)}
+              </strong>
+              <small>Average ADX change across all tracked pairs.</small>
+            </div>
+            <div className="mc-overview-card">
+              <span className="mc-overview-label">Largest ADX Move</span>
+              <strong>{overview.strongestShift?.pair ?? "—"}</strong>
+              <small>
+                {overview.strongestShift
+                  ? `${fmtSigned(overview.strongestShift.adx_delta)} vs prior period`
+                  : "No ADX comparison available."}
+              </small>
+            </div>
+            <div className="mc-overview-card mc-overview-card-wide">
+              <span className="mc-overview-label">Approval Leader</span>
+              <strong>{overview.strongestApproval?.pair ?? "—"}</strong>
+              <small>
+                {overview.strongestApproval
+                  ? `${fmtPct(overview.strongestApproval.b.approval_rate)} → ${fmtPct(
+                      overview.strongestApproval.a.approval_rate
+                    )} with ${overview.strongestApproval.a.signals} signals in period A`
+                  : "No approval-rate comparison available."}
+              </small>
+            </div>
+          </div>
+        ) : null}
+
         {error ? <div className="error">{error}</div> : null}
         {loading ? <div className="chart-placeholder">Loading…</div> : null}
 
@@ -567,27 +710,156 @@ export default function MarketConditionsPage() {
         ) : null}
       </div>
 
-      <style jsx>{`
-        .mc-section-title {
-          margin: 20px 0 8px 4px;
-          font-size: 0.85rem;
-          letter-spacing: 0.1em;
+      <style jsx global>{`
+        .mc-intro-copy {
+          max-width: 760px;
+        }
+        .mc-intro-pills {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 10px;
+          margin-top: 18px;
+        }
+        .mc-intro-pills span {
+          border: 1px solid rgba(141, 167, 196, 0.24);
+          background:
+            linear-gradient(135deg, rgba(103, 232, 249, 0.09), rgba(244, 114, 182, 0.08)),
+            rgba(10, 18, 34, 0.55);
+          color: #dbe8ff;
+          padding: 8px 12px;
+          border-radius: 999px;
+          font-size: 0.72rem;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
-          color: var(--ink-soft, #64748b);
+        }
+        .mc-overview-grid {
+          display: grid;
+          grid-template-columns: repeat(12, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 18px;
+        }
+        .mc-overview-card {
+          grid-column: span 3;
+          position: relative;
+          overflow: hidden;
+          border: 1px solid rgba(125, 147, 178, 0.14);
+          border-radius: 18px;
+          padding: 16px 18px;
+          background:
+            radial-gradient(circle at top right, rgba(56, 189, 248, 0.16), transparent 40%),
+            linear-gradient(180deg, rgba(18, 29, 52, 0.96), rgba(8, 14, 28, 0.96));
+          box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
+        }
+        .mc-overview-card-wide {
+          grid-column: span 12;
+        }
+        .mc-overview-label {
+          display: block;
+          margin-bottom: 10px;
+          font-size: 0.72rem;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #8ea5c7;
+        }
+        .mc-overview-card strong {
+          display: block;
+          font-size: 1.15rem;
+          letter-spacing: 0.02em;
+          color: #f7fbff;
+        }
+        .mc-overview-card small {
+          display: block;
+          margin-top: 8px;
+          color: #8fa1bb;
+          line-height: 1.45;
+        }
+        .mc-section-title {
+          margin: 26px 0 12px 4px;
+          font-size: 0.78rem;
+          letter-spacing: 0.16em;
+          text-transform: uppercase;
+          color: #90a6c5;
         }
         .mc-pair-card {
-          border: 1px solid var(--line, rgba(255, 255, 255, 0.08));
-          border-radius: 10px;
-          padding: 12px 16px;
-          margin-bottom: 10px;
-          background: var(--panel-soft, rgba(255, 255, 255, 0.02));
+          position: relative;
+          overflow: hidden;
+          border: 1px solid rgba(123, 147, 179, 0.14);
+          border-radius: 20px;
+          padding: 16px 18px 18px;
+          margin-bottom: 14px;
+          background:
+            radial-gradient(circle at top right, rgba(45, 212, 191, 0.1), transparent 28%),
+            linear-gradient(180deg, rgba(10, 18, 33, 0.98), rgba(8, 13, 24, 0.96));
+          box-shadow:
+            inset 0 1px 0 rgba(255, 255, 255, 0.04),
+            0 14px 28px rgba(0, 0, 0, 0.18);
+        }
+        .mc-pair-card::before {
+          content: "";
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          background:
+            linear-gradient(90deg, var(--mc-accent-edge) 0%, transparent 20%, transparent 80%, var(--mc-accent-edge) 100%),
+            radial-gradient(circle at top left, var(--mc-accent-glow), transparent 34%),
+            radial-gradient(circle at 85% 20%, var(--mc-accent-glow-soft), transparent 28%);
+          opacity: 0.92;
+        }
+        .mc-pair-card::after {
+          content: "";
+          position: absolute;
+          left: 18px;
+          right: 18px;
+          top: 0;
+          height: 3px;
+          border-radius: 0 0 999px 999px;
+          background: linear-gradient(
+            90deg,
+            transparent 0%,
+            var(--mc-accent-line) 18%,
+            var(--mc-accent-line-strong) 50%,
+            var(--mc-accent-line) 82%,
+            transparent 100%
+          );
+          opacity: 0.95;
+        }
+        .mc-card-positive {
+          --mc-accent-glow: rgba(34, 197, 94, 0.18);
+          --mc-accent-glow-soft: rgba(45, 212, 191, 0.12);
+          --mc-accent-edge: rgba(34, 197, 94, 0.08);
+          --mc-accent-line: rgba(74, 222, 128, 0.34);
+          --mc-accent-line-strong: rgba(110, 231, 183, 0.74);
+        }
+        .mc-card-negative {
+          --mc-accent-glow: rgba(244, 63, 94, 0.18);
+          --mc-accent-glow-soft: rgba(251, 146, 60, 0.1);
+          --mc-accent-edge: rgba(244, 63, 94, 0.08);
+          --mc-accent-line: rgba(251, 113, 133, 0.32);
+          --mc-accent-line-strong: rgba(253, 164, 175, 0.72);
+        }
+        .mc-card-stable {
+          --mc-accent-glow: rgba(96, 165, 250, 0.16);
+          --mc-accent-glow-soft: rgba(148, 163, 184, 0.1);
+          --mc-accent-edge: rgba(96, 165, 250, 0.07);
+          --mc-accent-line: rgba(125, 211, 252, 0.28);
+          --mc-accent-line-strong: rgba(191, 219, 254, 0.64);
+        }
+        .mc-card-nodata {
+          --mc-accent-glow: rgba(148, 163, 184, 0.14);
+          --mc-accent-glow-soft: rgba(100, 116, 139, 0.1);
+          --mc-accent-edge: rgba(148, 163, 184, 0.06);
+          --mc-accent-line: rgba(148, 163, 184, 0.22);
+          --mc-accent-line-strong: rgba(203, 213, 225, 0.46);
         }
         .mc-pair-head {
           display: flex;
           justify-content: space-between;
-          align-items: center;
+          align-items: flex-start;
           cursor: pointer;
-          margin-bottom: 10px;
+          gap: 16px;
+          margin-bottom: 14px;
+          position: relative;
+          z-index: 1;
         }
         .mc-pair-title {
           display: flex;
@@ -597,57 +869,137 @@ export default function MarketConditionsPage() {
         }
         .mc-pair-name {
           font-weight: 700;
-          font-size: 1rem;
-          letter-spacing: 0.04em;
+          font-size: 1.08rem;
+          letter-spacing: 0.08em;
         }
         .mc-epic {
           font-size: 0.7rem;
-          color: var(--ink-soft, #94a3b8);
+          color: #7f93af;
           font-family: var(--font-mono, monospace);
         }
         .mc-regime-badge {
-          padding: 2px 8px;
-          border-radius: 4px;
+          padding: 5px 10px;
+          border-radius: 999px;
           font-size: 0.7rem;
-          letter-spacing: 0.05em;
-          font-weight: 600;
+          letter-spacing: 0.08em;
+          font-weight: 700;
+          text-transform: uppercase;
+          border: 1px solid transparent;
         }
         .mc-regime-bad {
-          background: rgba(239, 68, 68, 0.15);
-          color: #f87171;
+          background: rgba(239, 68, 68, 0.13);
+          color: #ff8c8c;
+          border-color: rgba(248, 113, 113, 0.18);
         }
         .mc-regime-good {
-          background: rgba(34, 197, 94, 0.15);
-          color: #4ade80;
+          background: rgba(34, 197, 94, 0.12);
+          color: #7ef0a5;
+          border-color: rgba(74, 222, 128, 0.16);
         }
         .mc-regime-neutral {
-          background: rgba(148, 163, 184, 0.15);
-          color: #cbd5e1;
+          background: rgba(148, 163, 184, 0.12);
+          color: #d7dfeb;
+          border-color: rgba(203, 213, 225, 0.14);
         }
         .mc-regime-nodata {
           background: rgba(148, 163, 184, 0.1);
-          color: #64748b;
+          color: #7c8ea8;
+          border-color: rgba(148, 163, 184, 0.12);
+        }
+        .mc-head-metrics {
+          display: flex;
+          align-items: center;
+          gap: 10px;
+          flex-wrap: wrap;
+          justify-content: flex-end;
+        }
+        .mc-head-chip {
+          min-width: 108px;
+          padding: 8px 10px;
+          border-radius: 12px;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(143, 164, 194, 0.12);
+          text-align: right;
+        }
+        .mc-head-chip span {
+          display: block;
+          font-size: 0.62rem;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #8096b5;
+          margin-bottom: 3px;
+        }
+        .mc-head-chip strong {
+          font-size: 0.95rem;
+          color: #edf4ff;
         }
         .mc-toggle {
-          font-size: 1.1rem;
-          color: var(--ink-soft, #94a3b8);
+          display: grid;
+          place-items: center;
+          width: 36px;
+          height: 36px;
+          border-radius: 50%;
+          background: rgba(255, 255, 255, 0.04);
+          border: 1px solid rgba(143, 164, 194, 0.12);
+          font-size: 1.05rem;
+          color: #a7b9d1;
+        }
+        .mc-hero-strip {
+          display: grid;
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+          gap: 12px;
+          margin-bottom: 14px;
+          position: relative;
+          z-index: 1;
+        }
+        .mc-hero-metric {
+          padding: 14px 14px 12px;
+          border-radius: 14px;
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(255, 255, 255, 0.015)),
+            rgba(10, 18, 34, 0.62);
+          border: 1px solid rgba(143, 164, 194, 0.12);
+        }
+        .mc-hero-label {
+          display: block;
+          margin-bottom: 8px;
+          font-size: 0.66rem;
+          letter-spacing: 0.12em;
+          text-transform: uppercase;
+          color: #89a0c0;
+        }
+        .mc-hero-metric strong {
+          display: block;
+          font-size: 1rem;
+          color: #f3f8ff;
+          margin-bottom: 6px;
+        }
+        .mc-hero-metric small {
+          display: block;
+          color: #8ea2bd;
+          line-height: 1.45;
         }
         .mc-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-          gap: 10px;
+          grid-template-columns: repeat(auto-fit, minmax(210px, 1fr));
+          gap: 12px;
+          position: relative;
+          z-index: 1;
         }
         .mc-cell {
-          padding: 8px 10px;
-          border-radius: 6px;
-          background: var(--panel-inner, rgba(255, 255, 255, 0.03));
+          padding: 12px 12px 10px;
+          border-radius: 14px;
+          background:
+            linear-gradient(180deg, rgba(255, 255, 255, 0.025), rgba(255, 255, 255, 0.01)),
+            rgba(8, 15, 28, 0.72);
+          border: 1px solid rgba(143, 164, 194, 0.08);
         }
         .mc-cell-label {
-          font-size: 0.7rem;
-          letter-spacing: 0.08em;
+          font-size: 0.65rem;
+          letter-spacing: 0.12em;
           text-transform: uppercase;
-          color: var(--ink-soft, #94a3b8);
-          margin-bottom: 4px;
+          color: #88a0c0;
+          margin-bottom: 8px;
         }
         .mc-cell-values {
           display: flex;
@@ -656,49 +1008,79 @@ export default function MarketConditionsPage() {
           flex-wrap: wrap;
         }
         .mc-prior {
-          color: var(--ink-soft, #94a3b8);
+          color: #91a5bf;
           font-size: 0.9rem;
         }
         .mc-arrow {
-          color: var(--ink-soft, #64748b);
+          color: #5f748f;
           font-size: 0.8rem;
         }
         .mc-current {
           font-weight: 700;
-          font-size: 1rem;
+          font-size: 1.02rem;
         }
         .mc-delta {
           margin-left: auto;
-          font-weight: 600;
-          font-size: 0.85rem;
+          font-weight: 700;
+          font-size: 0.8rem;
         }
         .mc-cell-sub {
-          margin-top: 4px;
+          margin-top: 8px;
           font-size: 0.7rem;
-          color: var(--ink-soft, #94a3b8);
+          color: #8599b4;
         }
         .mc-drilldown {
           display: grid;
           grid-template-columns: 1fr 1fr;
           gap: 16px;
-          margin-top: 14px;
-          padding-top: 14px;
-          border-top: 1px dashed var(--line, rgba(255, 255, 255, 0.08));
+          margin-top: 18px;
+          padding-top: 18px;
+          border-top: 1px dashed rgba(143, 164, 194, 0.18);
+          position: relative;
+          z-index: 1;
         }
         .mc-drill-title {
           font-size: 0.75rem;
           text-transform: uppercase;
-          letter-spacing: 0.08em;
-          color: var(--ink-soft, #94a3b8);
-          margin-bottom: 6px;
+          letter-spacing: 0.12em;
+          color: #8ea4c2;
+          margin-bottom: 10px;
         }
         .mc-empty {
           padding: 18px;
           text-align: center;
-          color: var(--ink-soft, #94a3b8);
+          color: #8ea2bd;
           font-size: 0.9rem;
         }
+        @media (max-width: 1180px) {
+          .mc-overview-card {
+            grid-column: span 6;
+          }
+          .mc-overview-card-wide {
+            grid-column: span 12;
+          }
+          .mc-hero-strip {
+            grid-template-columns: 1fr;
+          }
+        }
         @media (max-width: 900px) {
+          .mc-overview-grid {
+            grid-template-columns: 1fr;
+          }
+          .mc-overview-card,
+          .mc-overview-card-wide {
+            grid-column: auto;
+          }
+          .mc-pair-head {
+            flex-direction: column;
+          }
+          .mc-head-metrics {
+            width: 100%;
+            justify-content: flex-start;
+          }
+          .mc-head-chip {
+            text-align: left;
+          }
           .mc-drilldown {
             grid-template-columns: 1fr;
           }
