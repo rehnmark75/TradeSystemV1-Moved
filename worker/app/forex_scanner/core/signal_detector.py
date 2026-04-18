@@ -676,6 +676,15 @@ class SignalDetector:
                     self.logger.error(f"❌ [XAU_GOLD] Error for {epic}: {e}")
                     individual_results['xau_gold'] = None
 
+            elif routed_strategy == 'SKIPPED':
+                # Negative-routing rule matched in _get_routed_strategy: the
+                # selected strategy was vetoed by regime_skip_overrides.
+                # Skip is already logged + telemetry captured. Do not fall
+                # through to SMC_SIMPLE — that would defeat the purpose.
+                self.logger.debug(
+                    f"⛔ [{epic}] regime-skip in effect — no FX strategy fires this tick"
+                )
+
             else:
                 # Default: SMC_SIMPLE (always enabled after January 2026 cleanup)
                 if self.smc_simple_enabled:
@@ -1192,6 +1201,37 @@ class SignalDetector:
                     f"🎯 [{epic}] Regime={regime} ADX={f'{adx_value:.1f}' if adx_value else 'N/A'} → SMC_SIMPLE"
                     f"{' [downgraded]' if regime_downgraded else ''}"
                 )
+
+            # Negative-routing: silently block the selected strategy if it's
+            # in regime_skip_overrides for this (epic, regime) combo. Used to
+            # plug catastrophic-loss windows (e.g. SMC_SIMPLE in 'breakout'
+            # regime on EURJPY/USDJPY at PF 0.03 / 0.10 per 90d data).
+            try:
+                skip_reason = self._strategy_router.should_skip_strategy(
+                    epic=epic, regime=regime, strategy=strategy_name,
+                )
+            except Exception:
+                skip_reason = None
+            if skip_reason:
+                self.logger.info(
+                    f"⛔ [{epic}] {strategy_name} blocked in regime={regime}: {skip_reason}"
+                )
+                try:
+                    self._strategy_router.record_skip(
+                        epic=epic,
+                        regime=regime,
+                        blocked_strategy=strategy_name,
+                        routing_confidence=float(confidence_modifier or 0.0),
+                        signal_summary={
+                            'adx_value': adx_value,
+                            'volatility_state': volatility_state,
+                            'session': session,
+                            'regime_downgraded': regime_downgraded,
+                        },
+                    )
+                except Exception:
+                    pass
+                strategy_name = 'SKIPPED'
 
             # Determine regime confidence based on classification
             regime_confidence = 0.5  # default for trending

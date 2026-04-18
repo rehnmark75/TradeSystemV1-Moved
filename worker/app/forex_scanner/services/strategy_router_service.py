@@ -156,6 +156,13 @@ class StrategyRouterService:
         self._router_config: Optional[RouterConfig] = None
         self._cache_timestamp: Optional[datetime] = None
 
+        # Negative-routing rules from regime_skip_overrides:
+        #   (epic, regime, strategy) -> reason string
+        # Used to silently block specific (epic, regime, strategy) combos that
+        # historical performance has shown to be losers. Wildcard strategy '*'
+        # blocks every strategy for that (epic, regime) pair.
+        self._skip_rules: Dict[Tuple[str, str, str], str] = {}
+
         # Load initial configuration
         self._load_config()
 
@@ -191,15 +198,98 @@ class StrategyRouterService:
                 self._load_routing_rules()
                 self._load_router_config()
                 self._load_fitness_scores()
+                self._load_skip_rules()
                 self._cache_timestamp = datetime.now()
                 logger.info(
                     f"Strategy router loaded: {len(self._strategies)} strategies, "
-                    f"{len(self._routing_rules)} routing rules"
+                    f"{len(self._routing_rules)} routing rules, "
+                    f"{len(self._skip_rules)} skip rules"
                 )
             except Exception as e:
                 logger.error(f"Failed to load strategy router config: {e}")
                 # Use defaults if database unavailable
                 self._use_defaults()
+
+    def _load_skip_rules(self):
+        """Load (epic, regime, strategy) skip rules from regime_skip_overrides.
+
+        These are negative-routing rules — they silently block a specific
+        strategy from firing on a specific epic in a specific regime, even
+        when get_strategy_for_regime would have selected it. Used to plug
+        known catastrophic-loss windows (e.g. SMC_SIMPLE breakout regime
+        on EURJPY/USDJPY at PF 0.03 / 0.10 per Apr 2026 analyst data).
+        """
+        sql = """
+            SELECT epic, regime, strategy, COALESCE(reason, '') AS reason
+              FROM regime_skip_overrides
+             WHERE is_active = TRUE AND action = 'skip'
+        """
+        try:
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql)
+                    rows = cur.fetchall()
+            self._skip_rules = {
+                (epic, regime, strategy): reason
+                for (epic, regime, strategy, reason) in rows
+            }
+        except Exception as e:
+            # Table may not exist on legacy installs — fall through with empty dict
+            logger.warning(f"Could not load regime_skip_overrides: {e}")
+            self._skip_rules = {}
+
+    def should_skip_strategy(
+        self,
+        epic: str,
+        regime: str,
+        strategy: str,
+    ) -> Optional[str]:
+        """Return the skip reason if (epic, regime, strategy) is blocked, else None.
+
+        Matches both the exact (epic, regime, strategy) tuple and the wildcard
+        (epic, regime, '*') tuple. The reason string is suitable for logging
+        and for the regime_skip_log table.
+        """
+        with self._lock:
+            if self._should_refresh():
+                self._load_config()
+
+            exact = self._skip_rules.get((epic, regime, strategy))
+            if exact is not None:
+                return exact
+            wildcard = self._skip_rules.get((epic, regime, '*'))
+            if wildcard is not None:
+                return wildcard
+            return None
+
+    def record_skip(
+        self,
+        epic: str,
+        regime: str,
+        blocked_strategy: str,
+        routing_confidence: Optional[float] = None,
+        signal_summary: Optional[Dict] = None,
+    ) -> None:
+        """Append a row to regime_skip_log for telemetry/audit.
+
+        Best-effort: failure to log a skip should never crash the scanner.
+        """
+        sql = """
+            INSERT INTO regime_skip_log
+                (epic, regime, blocked_strategy, routing_confidence,
+                 hypothetical_signal_summary)
+            VALUES (%s, %s, %s, %s, %s::jsonb)
+        """
+        try:
+            import json
+            payload = json.dumps(signal_summary) if signal_summary else None
+            with self._get_connection() as conn:
+                with conn.cursor() as cur:
+                    cur.execute(sql, (epic, regime, blocked_strategy,
+                                      routing_confidence, payload))
+                conn.commit()
+        except Exception as e:
+            logger.warning(f"Failed to record regime_skip_log row: {e}")
 
     def _use_defaults(self):
         """Set default configuration when database unavailable"""
