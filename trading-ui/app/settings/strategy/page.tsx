@@ -59,7 +59,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -99,6 +99,25 @@ const STRATEGIES: Record<StrategyKey, {
       "limits",
       "filters",
       "pairs",
+      "Other",
+    ],
+  },
+  "mean-reversion": {
+    label: "MEAN_REVERSION",
+    apiBase: "/api/settings/strategy/mean-reversion",
+    draftKey: "mean-reversion-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/mean-reversion/effective",
+    columnEndpoint: "/api/settings/strategy/mean-reversion/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "Hard ADX Gates",
+      "Bollinger Bands",
+      "RSI",
+      "Support / Resistance",
+      "Risk Management",
+      "Timeframes & Cooldown",
+      "Regime & Routing",
+      "Legacy Oscillators (archived v0)",
       "Other",
     ],
   },
@@ -638,7 +657,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold"] as const).map((key) => (
+        {(["smc", "xau-gold", "mean-reversion"] as const).map((key) => (
           <button
             key={key}
             type="button"
