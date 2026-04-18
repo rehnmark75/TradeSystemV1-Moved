@@ -595,6 +595,8 @@ REASON: Analysis error - neutral assessment"""
         strategy = signal.get('strategy', 'SMC_SIMPLE').upper()
         if strategy == 'FVG_RETEST':
             return self._build_fvg_retest_prompt(signal, has_chart)
+        if strategy == 'MEAN_REVERSION':
+            return self._build_mean_reversion_prompt(signal, has_chart)
         return self._build_smc_prompt(signal, has_chart)
 
 
@@ -1289,6 +1291,183 @@ Be concise but thorough. Your assessment determines if real money is risked."""
 
         except Exception as e:
             self.logger.error(f"Error building FVG Retest prompt: {e}")
+            return self._build_fallback_prompt(signal, {})
+
+    def _build_mean_reversion_prompt(self, signal: Dict, has_chart: bool = True) -> str:
+        """
+        Vision-enabled prompt for the MEAN_REVERSION strategy.
+
+        Mean-reversion is the OPPOSITE thesis to SMC_SIMPLE / FVG_RETEST:
+            • SMC / FVG: trade WITH momentum, respect HTF EMA, use MACD as filter,
+              "overextended momentum often continues" is a feature not a flaw.
+            • MEAN_REVERSION: FADE the extreme, expect reversion to BB middle,
+              overextension IS the setup, counter-MACD is the setup.
+
+        This prompt therefore inverts the usual validation heuristics. Claude
+        must evaluate whether the *exhaustion* is real (reject if still impulsing)
+        and whether the HTF regime permits a mean-reversion trade at all (reject
+        if 1h ADX breaks above 25 — a sign of a strong trend where fading is
+        structurally unsafe).
+        """
+        try:
+            epic = signal.get('epic', 'Unknown')
+            pair = self._extract_pair(epic)
+            direction = signal.get('signal_type', signal.get('signal', 'Unknown'))
+            confidence = signal.get('confidence_score', signal.get('confidence', 0))
+
+            entry_price = signal.get('entry_price', signal.get('price', 0))
+            risk_pips = signal.get('stop_loss_pips', signal.get('risk_pips', 0))
+            reward_pips = signal.get('take_profit_pips', signal.get('reward_pips', 0))
+            try:
+                rr_ratio = float(reward_pips) / float(risk_pips) if float(risk_pips) > 0 else 0
+            except Exception:
+                rr_ratio = 0
+
+            monitor_only = bool(signal.get('monitor_only', False))
+
+            indicators = signal.get('strategy_indicators', {}) or {}
+            adx_15m = indicators.get('adx', signal.get('adx'))
+            adx_1h = indicators.get('adx_htf', signal.get('adx_htf'))
+            rsi_val = indicators.get('rsi', signal.get('rsi'))
+            bb_upper = indicators.get('bb_upper')
+            bb_lower = indicators.get('bb_lower')
+            bb_mid = indicators.get('bb_mid')
+            bb_mult = indicators.get('bb_mult')
+            extremity = indicators.get('extremity')
+
+            def fmt(v, prec=2, suffix=""):
+                if v is None:
+                    return "n/a"
+                try:
+                    return f"{float(v):.{prec}f}{suffix}"
+                except Exception:
+                    return str(v)
+
+            # Which oscillator extremes triggered the signal
+            if direction in ('BUY', 'BULL'):
+                setup_side = "OVERSOLD"
+                fade_what = "fade the drop"
+                expected_move = "back up toward the BB middle"
+                invalidator = "continued impulsive decline past the BB lower band"
+                reversal_patterns_wanted = "bullish engulfing, bullish pin bar, hammer, doji rejection, double-bottom"
+            else:
+                setup_side = "OVERBOUGHT"
+                fade_what = "fade the rally"
+                expected_move = "back down toward the BB middle"
+                invalidator = "continued impulsive rally past the BB upper band"
+                reversal_patterns_wanted = "bearish engulfing, shooting star, inverted hammer, doji rejection, double-top"
+
+            chart_instruction = ""
+            if has_chart:
+                chart_instruction = f"""
+## CHART ANALYSIS (EXAMINE CAREFULLY — MEAN-REVERSION LENS)
+
+The chart spans multiple timeframes. For mean-reversion you look for different things than trend-continuation:
+
+**What to look for (POSITIVE):**
+- Price has *just touched or poked through* the Bollinger band (not riding it for many candles — that's a trend)
+- Decelerating candles approaching the extreme: smaller bodies, longer wicks, volume tapering
+- {reversal_patterns_wanted} at or just past the band
+- 1h chart: price is inside a range, NOT in a strong directional run (flat or flattening EMAs)
+- Prior BB touches on the same side that reverted cleanly to mid-band (validates the regime)
+
+**What to look for (NEGATIVE — REJECT if any):**
+- Price is *still impulsing* past the band with a wide body and expanding volume — this is a breakout, not an exhaustion
+- 1h chart shows clear directional structure (stair-step HH/HL or LH/LL) — we are fading a macro trend
+- Price rode the BB band for many consecutive candles before the signal — band-walking means trend, not range
+- Gap or news candle caused the extreme — fading news is catching knives
+
+**Lines on chart:**
+- GREEN dashed: Entry price
+- RED dashed: Stop loss (structural — just beyond the band / recent wick)
+- BLUE dashed: Take profit (aimed at BB middle, roughly)
+"""
+
+            mo_note = (
+                "\n⚠️ **MONITOR-ONLY MODE:** This strategy is still in data-collection phase on this pair. "
+                "Your score still matters for the historical dataset, but no capital is at risk on this alert.\n"
+                if monitor_only else ""
+            )
+
+            prompt = f"""You are a SENIOR FOREX TECHNICAL ANALYST evaluating a MEAN-REVERSION signal.
+
+**STRATEGY THESIS — READ BEFORE ANY ANALYSIS:**
+MEAN_REVERSION fires when price has pushed to a statistical extreme (outside Bollinger
+Band 20/2σ) with a matching RSI(14) extreme (≤ 30 or ≥ 70), in a low-ADX regime
+(15m ADX ≤ {fmt(22, 0)}, 1h ADX ≤ {fmt(25, 0)}). The trade is to **{fade_what}** and
+expect price to revert **{expected_move}**.
+
+This is the OPPOSITE of a trend-following trade. Therefore:
+- ❌ DO NOT reject because MACD is against the entry — mean-reversion is counter-MACD by construction
+- ❌ DO NOT reject because price is on the "wrong" side of the HTF EMA — we are fading, not continuing
+- ❌ DO NOT apply the "overextended momentum often continues" rule — overextension IS the setup here
+- ✅ DO reject if price is STILL IMPULSING with wide-range candles and rising volume
+- ✅ DO reject if the 1h chart shows a clear directional trend (band-walking, stair-step structure)
+- ✅ DO reject if the extreme was caused by a news spike or gap
+{mo_note}
+═══════════════════════════════════════════════════════════════
+📊 SIGNAL OVERVIEW
+═══════════════════════════════════════════════════════════════
+• Pair: {pair}
+• Direction: {direction}  ({setup_side} fade)
+• Strategy: MEAN_REVERSION
+• System Confidence: {confidence:.1%}
+
+═══════════════════════════════════════════════════════════════
+💰 TRADE LEVELS
+═══════════════════════════════════════════════════════════════
+• Entry Price: {self._format_price(entry_price)}
+• Stop Loss: {fmt(risk_pips, 1)} pips  (structural — just beyond the extreme)
+• Take Profit: {fmt(reward_pips, 1)} pips (target: BB middle)
+• Risk:Reward Ratio: {rr_ratio:.2f}:1
+  ℹ️  MR R:R is structurally 1.5:1 not 2:1 — do NOT penalize the low R:R. The edge
+      comes from high win-rate (target hits before wick to SL), not from pay-off skew.
+
+═══════════════════════════════════════════════════════════════
+🔬 STRATEGY-SPECIFIC DATA (populated by the strategy at signal time)
+═══════════════════════════════════════════════════════════════
+• 15m ADX: {fmt(adx_15m, 1)}  (hard ceiling: 22 — signal already passed)
+• 1h  ADX: {fmt(adx_1h, 1)}   (hard ceiling: 25 — signal already passed)
+• RSI(14) 15m: {fmt(rsi_val, 1)}  (threshold for {setup_side}: ≤ 30 BUY / ≥ 70 SELL)
+• Bollinger Bands (20, {fmt(bb_mult, 1)}σ):
+    upper {self._format_price(bb_upper)} / mid {self._format_price(bb_mid)} / lower {self._format_price(bb_lower)}
+• Extremity score (0-1, how far past threshold): {fmt(extremity, 2)}
+{chart_instruction}
+═══════════════════════════════════════════════════════════════
+📋 REQUIRED RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════
+
+Analyze the signal (and chart if provided) then respond with EXACTLY these three lines:
+
+SCORE: [1-10]
+DECISION: [APPROVE/REJECT]
+REASON: [2-3 sentences. Focus on: exhaustion quality at the band, 1h trend absence, and presence/absence of reversal patterns. Do NOT comment on MACD alignment or HTF EMA side — those are intentionally non-factors here.]
+
+**SCORING GUIDELINES (mean-reversion lens):**
+- 8-10: Clean exhaustion — smaller bodies + longer wicks into the band, reversal pattern visible at/just past the band, 1h flat/range, prior reverts on the same pair show the behavior
+- 6-7: Acceptable — band touch with RSI extreme but exhaustion not yet confirmed, 1h slope mild
+- 4-5: Marginal — price at the band but still impulsing (wide body current candle), or 1h showing directional hints
+- 1-3: Poor — price band-walking for multiple candles, 1h in clear directional run, expanding volume/range on the break candle (this is a breakout, not a reversal)
+
+**AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
+- Current candle is an impulsive wide-range expansion with above-average volume in the signal direction (catching a knife)
+- 1h chart shows a clear, fresh directional structure (HH/HL for uptrend or LH/LL for downtrend) in the opposite direction of the fade
+- Price has ridden the BB band on the same side for ≥ 5 consecutive candles before this signal (band-walking confirms trend)
+- News / gap spike visible as the cause of the extreme (vertical candle, gap bar)
+- No reversal structure whatsoever: price made the extreme on the CURRENT candle with wide body and no wick (no exhaustion yet — too early)
+
+**NON-CRITERIA — DO NOT USE THESE TO REJECT:**
+- MACD histogram against the entry (by design — ignore)
+- Price on "wrong" side of HTF EMA (fade-of-trend inside a range is the whole point — ignore)
+- Low R:R 1.5:1 (structural to the strategy — ignore)
+- RSI extremity alone (extreme RSI IS the setup, not a concern)
+
+Be concise but thorough. Remember: you are evaluating an *exhaustion fade*, not a trend entry."""
+
+            return prompt
+
+        except Exception as e:
+            self.logger.error(f"Error building MEAN_REVERSION prompt: {e}")
             return self._build_fallback_prompt(signal, {})
 
     def _extract_pair(self, epic: str) -> str:
