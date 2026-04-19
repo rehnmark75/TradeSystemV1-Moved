@@ -22,6 +22,7 @@ const DEFAULT_ITEMS: ForexNavItem[] = [
   { href: "/forex/trade-analysis", label: "Trade Analysis" },
   { href: "/forex/performance-snapshot", label: "Performance Snapshot" },
   { href: "/forex/market-intelligence", label: "Market Intelligence" },
+  { href: "/forex/economic-calendar", label: "Economic Calendar" },
   { href: "/forex/market-conditions", label: "Market Conditions" },
   { href: "/forex/adx-regime", label: "ADX Regime" },
   { href: "/forex/smc-rejections", label: "SMC Rejections" },
