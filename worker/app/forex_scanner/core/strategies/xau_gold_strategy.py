@@ -49,12 +49,14 @@ try:
         XAUGoldConfig,
         XAUGoldConfigService,
         get_xau_gold_config,
+        apply_config_overrides,
     )
 except ImportError:  # pragma: no cover
     from forex_scanner.services.xau_gold_config_service import (
         XAUGoldConfig,
         XAUGoldConfigService,
         get_xau_gold_config,
+        apply_config_overrides,
     )
 
 
@@ -148,12 +150,15 @@ class _Rejection:
 class XAUGoldStrategy(StrategyInterface):
     """Gold-optimized strategy (XAU/USD)."""
 
-    def __init__(self, config=None, db_manager=None, logger=None):
+    def __init__(self, config=None, db_manager=None, logger=None, config_override=None):
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
+        # Backtest parameter isolation: --override key=value pairs from bt.py
+        self._config_override: Optional[Dict[str, Any]] = config_override
         # Prime config service (singleton)
         self._config_service = XAUGoldConfigService.get_instance()
         self.config: XAUGoldConfig = get_xau_gold_config()
+        apply_config_overrides(self.config, self._config_override)
 
         self._cooldowns: Dict[str, datetime] = {}
         self._rejections: List[_Rejection] = []
@@ -211,8 +216,10 @@ class XAUGoldStrategy(StrategyInterface):
         pair: str = "",
         **kwargs,
     ) -> Optional[Dict[str, Any]]:
-        # Refresh config on each cycle (cached by TTL inside service)
+        # Refresh config on each cycle (cached by TTL inside service) and reapply
+        # any backtest --override values on top of the refreshed config.
         self.config = get_xau_gold_config()
+        apply_config_overrides(self.config, self._config_override)
         cfg = self.config
 
         if not cfg.is_pair_enabled(epic):
@@ -272,8 +279,9 @@ class XAUGoldStrategy(StrategyInterface):
 
         # Regime gate (computed on 4H)
         regime, adx_val, atr_pct = self._regime(df_4h, df_trigger)
-        if cfg.block_ranging and regime == "ranging":
-            self._reject(epic, "regime_ranging", f"adx={adx_val:.1f}")
+        # TRENDING-only design: block both ranging and the 20<=ADX<25 neutral band
+        if cfg.block_ranging and regime in ("ranging", "neutral"):
+            self._reject(epic, "regime_not_trending", f"adx={adx_val:.1f} regime={regime}")
             return None
         if cfg.block_expansion and regime == "expansion":
             self._reject(epic, "regime_expansion", f"atr_pct={atr_pct:.1f}")
@@ -317,8 +325,9 @@ class XAUGoldStrategy(StrategyInterface):
         rsi_val = float(df_trigger["rsi_14"].iloc[-1])
         rsi_neutral = cfg.rsi_neutral_min <= rsi_val <= cfg.rsi_neutral_max
 
-        # DXY confluence (optional; we don't have DXY data wired — flag as neutral)
-        dxy_confluence = False  # TODO: wire DXY data source in v2
+        # DXY confluence is not wired yet; weight is zeroed in DB config to keep
+        # the confidence scale honest. Setting False has no effect while w_dxy_confluence=0.
+        dxy_confluence = False
 
         # Confidence
         confidence = self._confidence(
@@ -576,16 +585,22 @@ class XAUGoldStrategy(StrategyInterface):
         epic: str,
     ) -> bool:
         """Require the selected entry touch to occur inside or very near an active FVG."""
-        entry_idx = entry.get("entry_index")
-        if entry_idx is None:
+        entry_idx_in_scan = entry.get("entry_index")
+        if entry_idx_in_scan is None:
             return False
 
-        lookback_bars = min(len(df_entry), 96)
-        scoped = df_entry.iloc[-lookback_bars:].copy()
-        if entry_idx >= len(scoped):
+        # Reconstruct the absolute position of the entry bar in df_entry. The entry_index
+        # is returned as a position within the last `entry_check_bars` slice used by
+        # _check_pullback_entry, not within df_entry itself.
+        c = self.config
+        scan_len = min(len(df_entry), int(getattr(c, "entry_check_bars", 48)))
+        abs_entry_idx = len(df_entry) - scan_len + int(entry_idx_in_scan)
+        if abs_entry_idx < 2 or abs_entry_idx >= len(df_entry):
             return False
 
-        upto_entry = scoped.iloc[: entry_idx + 1].copy()
+        # Detect FVGs on a window of up to 96 bars ending at the entry bar
+        fvg_lookback = min(abs_entry_idx + 1, 96)
+        upto_entry = df_entry.iloc[abs_entry_idx + 1 - fvg_lookback : abs_entry_idx + 1].copy()
         if len(upto_entry) < 3:
             return False
 
@@ -688,5 +703,12 @@ class XAUGoldStrategy(StrategyInterface):
         self.logger.debug(f"[XAU_GOLD] {epic} rejected: {reason} ({detail})")
 
 
-def create_xau_gold_strategy(config=None, db_manager=None, logger=None) -> XAUGoldStrategy:
-    return XAUGoldStrategy(config=config, db_manager=db_manager, logger=logger)
+def create_xau_gold_strategy(
+    config=None, db_manager=None, logger=None, config_override=None
+) -> XAUGoldStrategy:
+    return XAUGoldStrategy(
+        config=config,
+        db_manager=db_manager,
+        logger=logger,
+        config_override=config_override,
+    )

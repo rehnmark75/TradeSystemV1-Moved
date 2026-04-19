@@ -724,13 +724,21 @@ REASON: [brief reason]"""
         """
         UPDATED: Create enhanced prompt with COMPLETE DataFrame technical data
         """
-        
+
+        # Strategy-aware branch: MEAN_REVERSION's thesis is the OPPOSITE of the
+        # default trend-continuation rules baked into this prompt. Route it to
+        # the dedicated mean-reversion builder so MACD/EMA-200 rules don't
+        # auto-reject every counter-trend fade.
+        strategy_upper = str(signal.get('strategy', '')).upper()
+        if strategy_upper == 'MEAN_REVERSION':
+            return self._create_mean_reversion_validation_prompt(signal, technical_validation)
+
         # Get price for display
         if 'price_mid' in signal:
             price_info = f"MID: {signal['price_mid']:.5f}, EXEC: {signal['execution_price']:.5f}"
         else:
             price_info = f"{signal.get('price', 'N/A'):.5f}"
-        
+
         # Get strategy-specific info
         strategy = technical_validation['strategy']
         
@@ -863,8 +871,130 @@ REASON: [Your detailed analysis focusing on indicator alignment and any contradi
 
 Focus on cross-validation between ALL available indicators, not just the triggering strategy.
 """
-        
+
         return prompt
+
+    def _create_mean_reversion_validation_prompt(self, signal: Dict, technical_validation: Dict) -> str:
+        """
+        Text-only enhanced validation prompt for MEAN_REVERSION signals.
+
+        Mirrors _create_enhanced_validation_prompt_with_complete_data's shape
+        (SCORE / CORRECT_TYPE / DECISION / REASON) but swaps in rules consistent
+        with a fade-of-extreme strategy rather than trend continuation:
+          • Counter-MACD and counter-HTF-EMA are EXPECTED, not rejection criteria
+          • Reversal candlestick patterns are POSITIVE
+          • Still-impulsive candles and band-walking are the real rejection signals
+        """
+        try:
+            if 'price_mid' in signal:
+                price_info = f"MID: {signal['price_mid']:.5f}, EXEC: {signal['execution_price']:.5f}"
+            else:
+                price_info = f"{signal.get('price', 'N/A'):.5f}"
+
+            indicators = signal.get('strategy_indicators', {}) or {}
+            adx_15m = indicators.get('adx', signal.get('adx'))
+            adx_1h = indicators.get('adx_htf', signal.get('adx_htf'))
+            rsi_val = indicators.get('rsi', signal.get('rsi'))
+            bb_upper = indicators.get('bb_upper')
+            bb_lower = indicators.get('bb_lower')
+            bb_mid = indicators.get('bb_mid')
+
+            def fmt(v, prec=2):
+                if v is None:
+                    return "N/A"
+                try:
+                    return f"{float(v):.{prec}f}"
+                except Exception:
+                    return str(v)
+
+            direction = signal.get('signal_type', signal.get('signal', 'Unknown'))
+            fade_side = "OVERSOLD" if direction in ('BUY', 'BULL') else "OVERBOUGHT"
+
+            prompt = f"""
+FOREX SIGNAL VALIDATION — MEAN_REVERSION STRATEGY (FADE-OF-EXTREME THESIS)
+
+IMPORTANT: This signal is from MEAN_REVERSION, which intentionally trades AGAINST
+short-term momentum. The standard trend-continuation rejection rules (MACD-direction
+filter, EMA 200 side, "overextended continues") DO NOT APPLY to this strategy.
+
+BASIC SIGNAL INFO:
+- Pair: {signal.get('epic', 'N/A')}
+- System Classification: {direction}  ({fade_side} fade)
+- Price: {price_info}
+- System Confidence: {signal.get('confidence_score', signal.get('confidence', 0)):.1%}
+- Strategy: MEAN_REVERSION
+
+STRATEGY-SPECIFIC INDICATORS:
+- 15m ADX: {fmt(adx_15m, 1)}  (hard ceiling 22 — already passed at signal build)
+- 1h  ADX: {fmt(adx_1h, 1)}   (hard ceiling 25 — already passed at signal build)
+- RSI(14) 15m: {fmt(rsi_val, 1)}
+- Bollinger Bands(20, 2σ): upper {fmt(bb_upper, 5)} / mid {fmt(bb_mid, 5)} / lower {fmt(bb_lower, 5)}
+
+FULL TECHNICAL CONTEXT (for reference only — DO NOT auto-reject on trend-filter basis):
+- macd_histogram: {signal.get('macd_histogram', 'N/A')}
+- macd_line: {signal.get('macd_line', 'N/A')}
+- macd_signal: {signal.get('macd_signal', 'N/A')}
+- ema_200: {signal.get('ema_200', signal.get('ema_trend', 'N/A'))}
+- atr: {signal.get('atr', 'N/A')}
+- nearest_support: {signal.get('nearest_support', 'N/A')} ({signal.get('distance_to_support_pips', 'N/A')} pips)
+- nearest_resistance: {signal.get('nearest_resistance', 'N/A')} ({signal.get('distance_to_resistance_pips', 'N/A')} pips)
+
+MEAN-REVERSION VALIDATION FRAMEWORK:
+
+1. EXHAUSTION QUALITY (primary factor):
+   - Is the current candle decelerating (smaller body, longer wick against the direction the
+     band was pushed)? That's a POSITIVE — the move has stalled.
+   - Is the current candle STILL IMPULSIVE (wide body, high volume, pushing through the band
+     in the impulse direction)? That's a REJECT — we are catching a knife.
+   - Look at the 2-3 candles leading into the band touch: are bodies getting smaller?
+
+2. REGIME CHECK (gate):
+   - 1h ADX already confirmed ≤ 25, but verify the reading above.
+   - If 1h ADX is very low (< 15), the range is well-defined — IDEAL.
+   - If 1h ADX is 20-25, accept but flag as marginal.
+
+3. REVERSAL STRUCTURE (bonus):
+   - For BUY: bullish engulfing / hammer / pin bar / doji rejection at/just past lower band = +1 to +2
+   - For SELL: bearish engulfing / shooting star / pin bar / doji at/just past upper band = +1 to +2
+   - Absence of a reversal pattern is NOT an automatic reject — it just lowers the score.
+
+4. WHAT *DOES NOT* COUNT AS A CONCERN HERE (explicitly inverted from trend rules):
+   - MACD histogram against the entry: EXPECTED (we trade against momentum) — IGNORE.
+   - Price on the "wrong" side of HTF EMA 200: EXPECTED — IGNORE.
+   - Low R:R 1.5:1: STRUCTURAL to this strategy — IGNORE.
+   - Extreme RSI value: that IS the setup — IGNORE.
+
+AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):
+- The current candle is a wide-range expansion bar with above-average volume in the direction
+  of the impulse (breakout, not reversal).
+- 1h ADX has been trending up sharply over the last 10-20 bars (regime is rotating to trend).
+- Price has ridden the same BB band for 5+ consecutive candles before the signal (band-walk
+  confirms trend, not range).
+- News/gap is the visible cause of the extreme.
+
+Respond EXACTLY in this format:
+
+SCORE: [1-10]
+CORRECT_TYPE: [BULL/BEAR/NONE/SYSTEM_CORRECT]
+DECISION: [APPROVE/REJECT]
+REASON: [2-3 sentences. Focus on exhaustion quality and regime, NOT on MACD/EMA-200/R:R.]
+"""
+            return prompt
+
+        except Exception as e:
+            self.logger.error(f"Error building MEAN_REVERSION validation prompt: {e}")
+            # Safe fallback — generic analysis without the misleading trend rules
+            return f"""FOREX SIGNAL VALIDATION — MEAN_REVERSION
+
+Signal: {signal.get('epic', 'Unknown')} {signal.get('signal_type', 'Unknown')}
+
+This is a fade-of-extreme signal. Do NOT apply trend-continuation rejection rules
+(MACD direction, EMA 200 side). Judge on exhaustion quality at the Bollinger band.
+
+SCORE: [1-10]
+CORRECT_TYPE: [BULL/BEAR/NONE/SYSTEM_CORRECT]
+DECISION: [APPROVE/REJECT]
+REASON: [Brief reason]"""
 
     def parse_enhanced_response(self, response: str) -> Dict:
         """

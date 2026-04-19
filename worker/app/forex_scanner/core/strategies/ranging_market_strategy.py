@@ -69,6 +69,13 @@ class RangingMarketConfig:
     adx_max_threshold: float = 25.0  # More permissive default
     adx_period: int = 14
 
+    # Hard ADX ceilings — enforced even when trust_regime_routing=True.
+    # The router can mislabel intra-trend pullbacks as 'ranging'; these ceilings
+    # block mean-reversion entries when underlying trend strength is too high.
+    hard_adx_gate_enabled: bool = True
+    adx_hard_ceiling_primary: float = 22.0  # 15m ADX ceiling
+    adx_hard_ceiling_htf: float = 25.0      # 1h ADX ceiling (HTF veto)
+
     # ==========================================================================
     # OSCILLATOR SETTINGS
     # ==========================================================================
@@ -231,6 +238,12 @@ class RangingMarketConfig:
 
     def get_pair_min_oscillator_agreement(self, epic: str) -> int:
         return int(self.get_for_pair(epic, 'min_oscillator_agreement', self.min_oscillator_agreement))
+
+    def get_pair_adx_hard_ceiling_primary(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'adx_hard_ceiling_primary', self.adx_hard_ceiling_primary))
+
+    def get_pair_adx_hard_ceiling_htf(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, 'adx_hard_ceiling_htf', self.adx_hard_ceiling_htf))
 
     def get_pair_sr_proximity_pips(self, epic: str) -> float:
         return float(self.get_for_pair(epic, 'sr_proximity_pips', self.sr_proximity_pips))
@@ -483,11 +496,14 @@ class RangingMarketStrategy(StrategyInterface):
             self.logger.info(f"[RANGING_MARKET] ⏳ {epic} - In cooldown, skipping")
             return None
 
-        # Phase 1: Check regime/ADX filter
+        # Phase 1: Check regime/ADX filter (primary + HTF hard ceilings)
         adx_value = self._get_adx(df)
-        regime_ok = self._check_regime_filter(epic, adx_value, routing_context)
+        adx_htf = self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None
+        regime_ok = self._check_regime_filter(epic, adx_value, adx_htf, routing_context)
         if not regime_ok:
-            self.logger.info(f"[RANGING_MARKET] ❌ {epic} - ADX {adx_value:.1f} too high, rejected")
+            adx_str = f"{adx_value:.1f}" if adx_value is not None else "n/a"
+            adx_htf_str = f"{adx_htf:.1f}" if adx_htf is not None else "n/a"
+            self.logger.info(f"[RANGING_MARKET] ❌ {epic} - ADX gate rejected (15m={adx_str}, 1h={adx_htf_str})")
             return None
 
         # Phase 2: Detect oscillator signals
@@ -539,7 +555,8 @@ class RangingMarketStrategy(StrategyInterface):
             tp_pips=self.config.get_pair_fixed_take_profit(epic),
             confidence=confidence,
             qualification=qualification,
-            adx_value=adx_value
+            adx_value=adx_value,
+            adx_htf=adx_htf,
         )
 
         self._set_cooldown(epic)
@@ -560,34 +577,59 @@ class RangingMarketStrategy(StrategyInterface):
         self,
         epic: str,
         adx_value: Optional[float],
-        routing_context: Dict = None
+        adx_htf: Optional[float] = None,
+        routing_context: Dict = None,
     ) -> bool:
         """
         Check if market conditions are suitable for ranging strategy.
 
-        When trust_regime_routing=True and routing provides regime='ranging',
-        skip the ADX filter (router already validated this).
+        Two-layer gate:
+          1. Hard ADX ceilings (always enforced when hard_adx_gate_enabled=True).
+             Blocks intra-trend pullbacks that the router mislabels as 'ranging'.
+             - Primary TF (15m) ceiling: adx_hard_ceiling_primary (default 22)
+             - HTF (1h) ceiling:         adx_hard_ceiling_htf     (default 25)
+          2. Routing trust: if hard ceilings pass and routing says 'ranging' /
+             'low_volatility', accept without the standalone ADX threshold.
+             Otherwise fall back to the per-pair adx_max_threshold gate.
         """
-        # If routing says regime is 'ranging' or 'low_volatility', trust it
+        # Layer 1: Hard ADX ceilings — always enforced regardless of routing.
+        if self.config.hard_adx_gate_enabled:
+            primary_ceiling = self.config.get_pair_adx_hard_ceiling_primary(epic)
+            if adx_value is not None and adx_value > primary_ceiling:
+                self._log_rejection(
+                    epic,
+                    "HARD_ADX_CEILING_PRIMARY",
+                    {'adx_15m': adx_value, 'ceiling': primary_ceiling},
+                )
+                return False
+
+            htf_ceiling = self.config.get_pair_adx_hard_ceiling_htf(epic)
+            if adx_htf is not None and adx_htf > htf_ceiling:
+                self._log_rejection(
+                    epic,
+                    "HARD_ADX_CEILING_HTF",
+                    {'adx_1h': adx_htf, 'ceiling': htf_ceiling},
+                )
+                return False
+
+        # Layer 2a: Routing trust path (after hard ceilings have already passed).
         if self.config.trust_regime_routing and routing_context:
             regime = routing_context.get('regime', '')
             if regime in ('ranging', 'low_volatility'):
                 self.logger.debug(
-                    f"[RANGING_MARKET] Trusting regime routing: {regime} for {epic}"
+                    f"[RANGING_MARKET] Trusting regime routing: {regime} for {epic} "
+                    f"(15m ADX={adx_value}, 1h ADX={adx_htf})"
                 )
                 return True
 
-        # Standalone mode or no routing - use ADX filter
+        # Layer 2b: Standalone mode — use the soft per-pair ADX threshold.
         if self.config.use_adx_filter and adx_value is not None:
             threshold = self.config.get_pair_adx_max_threshold(epic)
             if adx_value > threshold:
                 self._log_rejection(
                     epic,
                     "ADX_TOO_HIGH",
-                    {'adx': adx_value, 'threshold': threshold}
-                )
-                self.logger.debug(
-                    f"[RANGING_MARKET] ADX {adx_value:.1f} > {threshold} for {epic}"
+                    {'adx': adx_value, 'threshold': threshold},
                 )
                 return False
 
@@ -958,9 +1000,17 @@ class RangingMarketStrategy(StrategyInterface):
         tp_pips: float,
         confidence: float,
         qualification: SignalQualification,
-        adx_value: Optional[float]
+        adx_value: Optional[float],
+        adx_htf: Optional[float] = None,
     ) -> Dict:
-        """Build standardized signal dictionary with qualification details."""
+        """Build standardized signal dictionary with qualification details.
+
+        IMPORTANT: alert_history extracts top-level keys 'adx' and 'market_regime'.
+        Earlier versions only set nested 'strategy_indicators.adx' and 'regime',
+        which caused alert_history.adx / market_regime to be NULL or fall back to
+        the router's regime label. Set both top-level and nested forms so
+        downstream consumers always see a consistent canonical value.
+        """
         now = datetime.now(timezone.utc)
 
         return {
@@ -977,7 +1027,13 @@ class RangingMarketStrategy(StrategyInterface):
             'signal_timestamp': now.isoformat(),
             'timestamp': now,
             'version': self.config.version,
-            'regime': 'ranging',
+
+            # Top-level fields that alert_history reads directly
+            'adx': adx_value,
+            'adx_htf': adx_htf,
+            'market_regime': 'ranging',
+            'regime': 'ranging',  # legacy key, kept for back-compat
+
             'monitor_only': bool(self.config.get_for_pair(epic, 'monitor_only', False)),
 
             # Qualification details
@@ -986,10 +1042,11 @@ class RangingMarketStrategy(StrategyInterface):
 
             'strategy_indicators': {
                 'adx': adx_value,
+                'adx_htf': adx_htf,
                 'oscillators_agreeing': qualification.oscillators_agreeing,
                 'session': qualification.session,
-                'sr_distance_pips': qualification.sr_distance_pips
-            }
+                'sr_distance_pips': qualification.sr_distance_pips,
+            },
         }
 
     # ==========================================================================
@@ -997,29 +1054,47 @@ class RangingMarketStrategy(StrategyInterface):
     # ==========================================================================
 
     def _get_adx(self, df: pd.DataFrame) -> Optional[float]:
-        """Get or calculate ADX value."""
+        """Get or calculate canonical Wilder ADX.
+
+        Uses pre-stamped df['adx'] when present (DataFetcher.add_adx_indicator
+        provides the canonical EMA-Wilder value live). Falls back to a local
+        EMA-Wilder calculation that matches the DataFetcher formula exactly,
+        so historical recomputation produces values comparable to live data.
+        """
         if 'adx' in df.columns:
-            return float(df['adx'].iloc[-1])
+            try:
+                v = df['adx'].iloc[-1]
+                if v is not None and not pd.isna(v):
+                    return float(v)
+            except Exception:  # pragma: no cover — fall through to recompute
+                pass
 
         try:
             period = self.config.adx_period
             high, low, close = df['high'], df['low'], df['close']
 
-            tr1 = high - low
-            tr2 = abs(high - close.shift(1))
-            tr3 = abs(low - close.shift(1))
-            tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
+            tr = pd.concat(
+                [high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()],
+                axis=1,
+            ).max(axis=1)
 
-            dm_plus = (high - high.shift(1)).clip(lower=0)
-            dm_minus = (low.shift(1) - low).clip(lower=0)
+            up_move = high - high.shift(1)
+            down_move = low.shift(1) - low
+            plus_dm = pd.Series(
+                np.where((up_move > down_move) & (up_move > 0), up_move, 0.0),
+                index=df.index,
+            )
+            minus_dm = pd.Series(
+                np.where((down_move > up_move) & (down_move > 0), down_move, 0.0),
+                index=df.index,
+            )
 
-            atr = tr.rolling(window=period).mean()
-            di_plus = 100 * (dm_plus.rolling(window=period).mean() / atr)
-            di_minus = 100 * (dm_minus.rolling(window=period).mean() / atr)
-
-            dx = 100 * abs(di_plus - di_minus) / (di_plus + di_minus + 0.0001)
-            adx = dx.rolling(window=period).mean()
-
+            alpha = 1.0 / period
+            atr = tr.ewm(alpha=alpha, adjust=False).mean()
+            plus_di = 100 * plus_dm.ewm(alpha=alpha, adjust=False).mean() / atr.replace(0, np.nan)
+            minus_di = 100 * minus_dm.ewm(alpha=alpha, adjust=False).mean() / atr.replace(0, np.nan)
+            dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
+            adx = dx.ewm(alpha=alpha, adjust=False).mean()
             return float(adx.iloc[-1])
         except Exception as e:
             self.logger.debug(f"[RANGING_MARKET] ADX calc error: {e}")
