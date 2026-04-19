@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS xau_gold_global_config (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Unique index must exist before the ON CONFLICT inserts below, otherwise the
+-- first-ever migration run fails with "no unique constraint matching ON CONFLICT".
+CREATE UNIQUE INDEX IF NOT EXISTS idx_xau_gold_global_scope_param ON xau_gold_global_config(config_set, parameter_name);
+
 INSERT INTO xau_gold_global_config
     (config_set, parameter_name, parameter_value, value_type, category, description, display_order)
 VALUES
@@ -159,6 +163,9 @@ CREATE TABLE IF NOT EXISTS xau_gold_pair_overrides (
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- Unique index must exist before the ON CONFLICT inserts below.
+CREATE UNIQUE INDEX IF NOT EXISTS idx_xau_gold_pair_scope_epic ON xau_gold_pair_overrides(config_set, epic);
+
 INSERT INTO xau_gold_pair_overrides (config_set, epic, pair_name, pip_size, is_enabled, is_traded, monitor_only, notes)
 VALUES
     ('live', 'CS.D.CFEGOLD.CEE.IP', 'XAUUSD', 0.1, TRUE, FALSE, TRUE,
@@ -197,8 +204,8 @@ CREATE TABLE IF NOT EXISTS xau_gold_config_audit (
 CREATE INDEX IF NOT EXISTS idx_xau_gold_global_category ON xau_gold_global_config(category);
 CREATE INDEX IF NOT EXISTS idx_xau_gold_global_active   ON xau_gold_global_config(is_active);
 CREATE INDEX IF NOT EXISTS idx_xau_gold_pair_enabled    ON xau_gold_pair_overrides(is_enabled);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_xau_gold_global_scope_param ON xau_gold_global_config(config_set, parameter_name);
-CREATE UNIQUE INDEX IF NOT EXISTS idx_xau_gold_pair_scope_epic    ON xau_gold_pair_overrides(config_set, epic);
+-- Unique indexes (idx_xau_gold_global_scope_param, idx_xau_gold_pair_scope_epic)
+-- are created earlier in this file so the ON CONFLICT inserts have a matching target.
 
 
 SELECT 'XAU_GOLD configuration tables created' AS status;

@@ -350,3 +350,37 @@ class XAUGoldConfigService:
 
 def get_xau_gold_config() -> XAUGoldConfig:
     return XAUGoldConfigService.get_instance().get_config()
+
+
+def apply_config_overrides(
+    cfg: XAUGoldConfig, overrides: Optional[Dict[str, Any]]
+) -> XAUGoldConfig:
+    """Apply backtest --override key=value pairs to a loaded XAUGoldConfig in place.
+
+    Unknown keys are logged and ignored. Values are coerced to the type of the
+    existing attribute so CLI strings like "25" or "true" land correctly.
+    """
+    if not overrides:
+        return cfg
+    for key, value in overrides.items():
+        if not hasattr(cfg, key):
+            logger.debug(f"XAU_GOLD override ignored (unknown key): {key}")
+            continue
+        current = getattr(cfg, key)
+        try:
+            if isinstance(current, bool):
+                new_val = str(value).strip().lower() in _TRUE_STR
+            elif isinstance(current, int):
+                new_val = int(float(value))
+            elif isinstance(current, float):
+                new_val = float(value)
+            elif isinstance(current, list):
+                # Accept JSON array string (e.g. '["CS.D.CFEGOLD.KAGGLE.IP"]') or pre-parsed list
+                new_val = json.loads(value) if isinstance(value, str) else list(value)
+            else:
+                new_val = value
+            setattr(cfg, key, new_val)
+            logger.info(f"XAU_GOLD override applied: {key}={new_val}")
+        except Exception as e:
+            logger.warning(f"XAU_GOLD override failed for {key}={value}: {e}")
+    return cfg

@@ -559,8 +559,10 @@ class SignalDetector:
                 self.xau_gold_strategy = create_xau_gold_strategy(
                     db_manager=self.db_manager,
                     logger=self.logger,
+                    config_override=self._config_override,
                 )
-                self.logger.info("✅ XAU_GOLD strategy initialized (lazy-load)")
+                mode = "BACKTEST with overrides" if self._config_override else "LIVE"
+                self.logger.info(f"✅ XAU_GOLD strategy initialized (lazy-load, {mode})")
 
             # Timeframes from strategy's own config
             cfg = self.xau_gold_strategy.config

@@ -23,6 +23,36 @@ try:
 except ImportError:
     VSL_SIMULATOR_AVAILABLE = False
 
+# PAIR_INFO is the source of truth for pip_multiplier per epic.
+# Gold (CS.D.CFEGOLD.CEE.IP) has pip_multiplier=10; FX majors 10000; JPY pairs 100.
+# The legacy JPY-string-check ignored gold entirely, producing 4× under-reported losses.
+try:
+    from config import PAIR_INFO as _PAIR_INFO
+except ImportError:
+    try:
+        from forex_scanner.config import PAIR_INFO as _PAIR_INFO
+    except ImportError:
+        _PAIR_INFO = {}
+
+
+def _resolve_pip_multiplier(epic: Optional[str], logger: Optional[logging.Logger] = None) -> float:
+    """Resolve pip_multiplier for an epic via PAIR_INFO; fall back to JPY heuristic."""
+    if epic:
+        info = _PAIR_INFO.get(epic)
+        if info and info.get('pip_multiplier') is not None:
+            return float(info['pip_multiplier'])
+    # Fallback (legacy behavior) for epics missing from PAIR_INFO
+    if epic and 'JPY' in epic.upper():
+        fallback = 100.0
+    else:
+        fallback = 10000.0
+    if epic and logger is not None:
+        logger.warning(
+            f"[trailing_stop_simulator] epic {epic!r} missing from PAIR_INFO; "
+            f"falling back to pip_multiplier={fallback}"
+        )
+    return fallback
+
 
 class TrailingStopSimulator:
     """
@@ -188,6 +218,17 @@ class TrailingStopSimulator:
 
         self.target_pips = target_pips
         self.initial_stop_pips = initial_stop_pips
+        # Gold (and other wide-stop instruments) need a longer simulation window —
+        # 96 × 5m = 8h is often too short for a 80-pip SL to resolve on XAUUSD.
+        # Extend to 288 bars (24h on 5m) when caller used the default and epic is gold.
+        if max_bars == 96 and epic:
+            epic_upper = epic.upper()
+            if 'GOLD' in epic_upper or 'XAU' in epic_upper:
+                max_bars = 288
+                if logger:
+                    logger.info(
+                        f"[trailing_stop_simulator] Extending max_bars 96→288 for gold epic {epic}"
+                    )
         self.max_bars = max_bars
         self.time_exit_hours = time_exit_hours  # 🔥 NEW: Time-based exit (None = disabled)
         self.use_fixed_sl_tp = use_fixed_sl_tp  # 🎯 NEW: Fixed SL/TP mode (no trailing)
@@ -653,6 +694,12 @@ class TrailingStopSimulator:
             target_pips = float(signal['reward_pips'])
             # v5.0.0: Compute proportional trailing stages from TP instead of disabling trailing
             self._apply_sltp_trailing_ratios(target_pips, current_stop_pips)
+            # CRITICAL: sync the instance baseline so _update_progressive_trailing_stop()
+            # doesn't reset current_stop_pips back to the class default (20) on bar 1
+            # before any stage has triggered. Without this, the signal's 80-pip SL
+            # gets silently replaced with the class default on every bar.
+            self.initial_stop_pips = current_stop_pips
+            self.target_pips = target_pips
             self.logger.info(
                 f"📊 [SL/TP TRAILING] SL={current_stop_pips:.1f} TP={target_pips:.1f} pips → "
                 f"BE={self.break_even_trigger}, S1={self.stage1_trigger}→{self.stage1_lock}, "
@@ -681,12 +728,11 @@ class TrailingStopSimulator:
         mfe_protection_triggered = False  # 🆕 Stage 2.5: MFE Protection
         stage_reached = 0
 
-        # Determine pip multiplier based on epic (JPY pairs use 100, others use 10000)
-        check_epic = epic or self.epic  # Use passed epic or instance epic
-        if check_epic and 'JPY' in check_epic:
-            pip_multiplier = 100  # JPY pairs: 1 pip = 0.01
-        else:
-            pip_multiplier = 10000  # Standard pairs: 1 pip = 0.0001
+        # Resolve pip_multiplier via PAIR_INFO (canonical source). This correctly handles
+        # gold (pip_multiplier=10) and other non-FX instruments whose scale differs from
+        # JPY=100 / FX-default=10000. See _resolve_pip_multiplier at module top.
+        check_epic = epic or self.epic
+        pip_multiplier = _resolve_pip_multiplier(check_epic, self.logger)
 
         # Simulate trade bar by bar
         self.logger.debug(f"Simulating {len(future_data)} bars, time_exit_hours={self.time_exit_hours}")
