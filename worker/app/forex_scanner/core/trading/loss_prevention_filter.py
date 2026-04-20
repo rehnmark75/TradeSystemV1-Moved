@@ -91,7 +91,8 @@ class LossPreventionFilter:
 
                     # Load enabled rules (scoped to config_set)
                     cur.execute("""
-                        SELECT rule_name, category, penalty, condition_config, apply_in_backtest
+                        SELECT rule_name, category, penalty, condition_config, apply_in_backtest,
+                               applies_to_strategies
                         FROM loss_prevention_rules
                         WHERE is_enabled = TRUE AND config_set = %s
                         ORDER BY category, penalty DESC
@@ -203,6 +204,9 @@ class LossPreventionFilter:
         disabled_rules = set(pair_config.get('disabled_rules') or [])
         penalty_overrides = pair_config.get('rule_penalty_overrides') or {}
 
+        # Signal's strategy (for per-strategy rule scoping)
+        sig_strategy = str(signal.get('strategy', '') or '').upper()
+
         triggered = []
         for rule in self._rules:
             # Skip backtest-excluded rules
@@ -212,6 +216,14 @@ class LossPreventionFilter:
             # Skip rules disabled for this pair
             if rule['rule_name'] in disabled_rules:
                 continue
+
+            # Skip rules scoped to other strategies.
+            # NULL/empty applies_to_strategies = rule applies to all strategies.
+            scope = rule.get('applies_to_strategies')
+            if scope:
+                scope_upper = [str(s).upper() for s in scope]
+                if sig_strategy and sig_strategy not in scope_upper:
+                    continue
 
             if self._check_rule(rule, signal, signal_timestamp):
                 # Apply per-pair penalty override if exists
