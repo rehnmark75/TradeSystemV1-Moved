@@ -451,13 +451,13 @@ class ClaudeAnalyzer:
                 response_data = self.api_client.call_api_with_image(
                     prompt=prompt,
                     image_base64=chart_base64,
-                    max_tokens=300
+                    max_tokens=700
                 )
                 response = response_data.get('content') if response_data else None
                 tokens_used = response_data.get('tokens', 0) if response_data else 0
             else:
                 self.logger.info(f"📝 Calling Claude text-only API (no chart available)...")
-                response = self.api_client.call_api(prompt, max_tokens=300)
+                response = self.api_client.call_api(prompt, max_tokens=700)
                 tokens_used = 0
 
             if not response:
