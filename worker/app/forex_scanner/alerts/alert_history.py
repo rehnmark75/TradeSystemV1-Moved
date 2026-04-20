@@ -704,8 +704,10 @@ class AlertHistoryManager:
             signal['rejection_type'] = 'claude_analysis'
 
             # Determine if it was a score-based or decision-based rejection
-            score = claude_result.get('score', 0)
-            decision = claude_result.get('decision', 'UNKNOWN')
+            # Coerce: parser can still surface non-numeric score on malformed responses
+            raw_score = claude_result.get('score')
+            score = raw_score if isinstance(raw_score, (int, float)) else 0
+            decision = claude_result.get('decision') or 'UNKNOWN'
 
             if decision == 'REJECT':
                 rejection_category = 'explicit_rejection'

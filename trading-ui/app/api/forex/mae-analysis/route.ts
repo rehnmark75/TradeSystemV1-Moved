@@ -31,6 +31,12 @@ function deriveResult(profitLoss: number | null, status: string | null) {
   return "PENDING";
 }
 
+function pipMultiplier(symbol: string | null) {
+  const normalized = (symbol ?? "").toUpperCase();
+  if (normalized.includes("JPY")) return 100;
+  return 10000;
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const days = parseDays(searchParams.get("days"));
@@ -46,6 +52,7 @@ export async function GET(request: Request) {
         symbol,
         direction,
         entry_price,
+        sl_price,
         timestamp,
         status,
         profit_loss,
@@ -53,7 +60,6 @@ export async function GET(request: Request) {
         vsl_mae_pips as mae_pips,
         vsl_mae_price as mae_price,
         vsl_mae_timestamp as mae_time,
-        virtual_sl_pips,
         vsl_stage,
         vsl_breakeven_triggered as hit_breakeven,
         vsl_stage1_triggered as hit_stage1,
@@ -70,20 +76,26 @@ export async function GET(request: Request) {
     const trades = (tradesResult.rows ?? []).map((row) => {
       const profitLoss = row.profit_loss == null ? null : Number(row.profit_loss);
       const maePips = row.mae_pips == null ? null : Number(row.mae_pips);
-      const virtualSl = row.virtual_sl_pips == null ? null : Number(row.virtual_sl_pips);
+      const entryPrice = row.entry_price == null ? null : Number(row.entry_price);
+      const slPrice = row.sl_price == null ? null : Number(row.sl_price);
+      const storedStopPips =
+        entryPrice != null && slPrice != null
+          ? Math.abs(entryPrice - slPrice) * pipMultiplier(row.symbol)
+          : null;
       const maePct =
-        maePips != null && virtualSl != null && virtualSl !== 0
-          ? (maePips / virtualSl) * 100
+        maePips != null && storedStopPips != null && storedStopPips !== 0
+          ? (maePips / storedStopPips) * 100
           : null;
 
       return {
         ...row,
-        entry_price: row.entry_price == null ? null : Number(row.entry_price),
+        entry_price: entryPrice,
+        sl_price: slPrice,
         profit_loss: profitLoss,
         mfe_pips: row.mfe_pips == null ? null : Number(row.mfe_pips),
         mae_pips: maePips,
-        virtual_sl_pips: virtualSl,
-        mae_pct_of_vsl: maePct == null ? null : Number(maePct.toFixed(1)),
+        stop_distance_pips: storedStopPips == null ? null : Number(storedStopPips.toFixed(1)),
+        mae_pct_of_stop: maePct == null ? null : Number(maePct.toFixed(1)),
         symbol_short: normalizeSymbol(row.symbol),
         result: deriveResult(profitLoss, row.status)
       };
@@ -101,13 +113,21 @@ export async function GET(request: Request) {
         PERCENTILE_CONT(0.90) WITHIN GROUP (ORDER BY vsl_mae_pips) as p90_mae_pips,
         AVG(vsl_peak_profit_pips) as avg_mfe_pips,
         MAX(vsl_peak_profit_pips) as max_mfe_pips,
-        AVG(virtual_sl_pips) as avg_vsl_setting,
+        AVG(
+          ABS(entry_price - sl_price) *
+          CASE
+            WHEN symbol LIKE '%JPY%' THEN 100
+            ELSE 10000
+          END
+        ) as avg_stop_setting,
         COUNT(CASE WHEN profit_loss > 0 THEN 1 END) as wins,
         COUNT(CASE WHEN profit_loss < 0 THEN 1 END) as losses
       FROM trade_log
       WHERE is_scalp_trade = true
       AND timestamp >= $1
       AND vsl_mae_pips IS NOT NULL
+      AND entry_price IS NOT NULL
+      AND sl_price IS NOT NULL
       AND environment = $2
       GROUP BY symbol
       ORDER BY total_trades DESC
@@ -132,7 +152,7 @@ export async function GET(request: Request) {
         p90_mae_pips: Number(row.p90_mae_pips ?? 0),
         avg_mfe_pips: Number(row.avg_mfe_pips ?? 0),
         max_mfe_pips: Number(row.max_mfe_pips ?? 0),
-        avg_vsl_setting: Number(row.avg_vsl_setting ?? 0)
+        avg_stop_setting: Number(row.avg_stop_setting ?? 0)
       };
     });
 

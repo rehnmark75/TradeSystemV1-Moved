@@ -7,6 +7,7 @@ Run as a background process in the task-worker container.
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import time
@@ -86,6 +87,7 @@ class BacktestJobProcessor:
                     WHERE id = (
                         SELECT id FROM backtest_job_queue
                         WHERE status = 'pending'
+                          AND cancel_requested_at IS NULL
                         ORDER BY priority, submitted_at
                         LIMIT 1
                         FOR UPDATE SKIP LOCKED
@@ -101,25 +103,44 @@ class BacktestJobProcessor:
             return None
 
     def _complete_job(self, job_id: int, execution_id: Optional[int] = None,
-                      error: Optional[str] = None):
+                      error: Optional[str] = None, cancelled: bool = False):
         """Mark job as completed or failed."""
         conn = self._get_connection()
         try:
             with conn.cursor() as cur:
-                if error:
+                if cancelled:
+                    cur.execute("""
+                        UPDATE backtest_job_queue
+                        SET status = 'cancelled',
+                            completed_at = NOW(),
+                            progress = jsonb_build_object(
+                              'phase', 'cancelled',
+                              'last_activity', 'Cancelled from trading-ui'
+                            )
+                        WHERE id = %s
+                    """, (job_id,))
+                elif error:
                     cur.execute("""
                         UPDATE backtest_job_queue
                         SET status = 'failed',
                             completed_at = NOW(),
-                            error_message = %s
+                            error_message = %s,
+                            progress = jsonb_build_object(
+                              'phase', 'failed',
+                              'last_activity', LEFT(%s, 240)
+                            )
                         WHERE id = %s
-                    """, (error, job_id))
+                    """, (error, error or 'Job failed', job_id))
                 else:
                     cur.execute("""
                         UPDATE backtest_job_queue
                         SET status = 'completed',
                             completed_at = NOW(),
-                            execution_id = %s
+                            execution_id = %s,
+                            progress = jsonb_build_object(
+                              'phase', 'completed',
+                              'last_activity', 'Backtest completed'
+                            )
                         WHERE id = %s
                     """, (execution_id, job_id))
                 conn.commit()
@@ -180,13 +201,31 @@ class BacktestJobProcessor:
         if job.get('snapshot_name'):
             cmd.extend(['--snapshot', job['snapshot_name']])
 
+        # Historical intelligence replay
+        if job.get('use_historical_intelligence'):
+            cmd.append('--use-historical-intelligence')
+
+        # Parameter variation testing
+        variation = job.get('variation_config')
+        if isinstance(variation, str):
+            try:
+                variation = json.loads(variation)
+            except json.JSONDecodeError:
+                variation = None
+
+        if isinstance(variation, dict) and variation.get('enabled') and variation.get('param_grid'):
+            cmd.extend(['--vary-json', json.dumps(variation['param_grid'])])
+            if variation.get('workers'):
+                cmd.extend(['--vary-workers', str(variation['workers'])])
+            if variation.get('rank_by'):
+                cmd.extend(['--rank-by', str(variation['rank_by'])])
+            if variation.get('top_n'):
+                cmd.extend(['--top-n', str(variation['top_n'])])
+
         return cmd
 
     def _extract_execution_id(self, output: str) -> Optional[int]:
         """Extract execution_id from CLI output."""
-        # Look for patterns like "Execution ID: 1234" or "execution_id=1234"
-        import re
-
         patterns = [
             r'Execution ID:\s*(\d+)',
             r'execution_id[=:]\s*(\d+)',
@@ -218,6 +257,62 @@ class BacktestJobProcessor:
             logger.error(f"Error getting execution ID: {e}")
             return None
 
+    def _parse_progress(self, line: str, started_at: datetime) -> Dict[str, Any]:
+        elapsed = max((datetime.now() - started_at).total_seconds(), 0)
+        progress = {
+            'elapsed_seconds': round(elapsed, 2),
+            'last_activity': line[:240] if line else None,
+            'phase': 'running',
+        }
+
+        lowered = line.lower()
+        if 'loading' in lowered or 'fetching' in lowered:
+            progress['phase'] = 'loading_data'
+        elif 'variation' in lowered:
+            progress['phase'] = 'running_variations'
+        elif 'signal' in lowered:
+            progress['phase'] = 'analyzing_signals'
+        elif 'chart' in lowered:
+            progress['phase'] = 'generating_chart'
+        elif 'processing' in lowered:
+            progress['phase'] = 'processing'
+        elif 'complete' in lowered or 'saved execution' in lowered:
+            progress['phase'] = 'completing'
+
+        match = re.search(r'\[(\d+)/(\d+)\]', line)
+        if match:
+            progress['current'] = int(match.group(1))
+            progress['total'] = int(match.group(2))
+            progress['phase'] = 'running_variations'
+
+        return progress
+
+    def _update_live_state(self, job_id: int, progress: Dict[str, Any], recent_output: list[str]):
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("""
+                    UPDATE backtest_job_queue
+                    SET progress = %s::jsonb,
+                        recent_output = %s::jsonb
+                    WHERE id = %s
+                """, (json.dumps(progress), json.dumps(recent_output[-25:]), job_id))
+                conn.commit()
+        except Exception as e:
+            logger.error(f"Error updating live job state: {e}")
+            conn.rollback()
+
+    def _is_cancel_requested(self, job_id: int) -> bool:
+        conn = self._get_connection()
+        try:
+            with conn.cursor() as cur:
+                cur.execute("SELECT cancel_requested_at IS NOT NULL FROM backtest_job_queue WHERE id = %s", (job_id,))
+                row = cur.fetchone()
+                return bool(row[0]) if row else False
+        except Exception as e:
+            logger.error(f"Error checking cancel request: {e}")
+            return False
+
     def process_job(self, job: Dict[str, Any]) -> bool:
         """
         Process a single job.
@@ -238,32 +333,79 @@ class BacktestJobProcessor:
             cmd = self._build_command(job)
             logger.info(f"Command: {' '.join(cmd)}")
 
-            # Execute backtest
-            result = subprocess.run(
+            process = subprocess.Popen(
                 cmd,
-                capture_output=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
                 text=True,
-                timeout=3600  # 1 hour timeout
+                bufsize=1
             )
 
-            # Log output
-            if result.stdout:
-                logger.info(f"Job {job_uid} stdout:\n{result.stdout[-2000:]}")  # Last 2000 chars
-            if result.stderr:
-                logger.warning(f"Job {job_uid} stderr:\n{result.stderr[-1000:]}")
+            started_at = datetime.now()
+            stdout_lines = []
+            recent_output = []
 
-            # Check result
-            if result.returncode == 0:
+            while True:
+                if self._is_cancel_requested(job_id):
+                    process.kill()
+                    self._update_live_state(
+                        job_id,
+                        {
+                            'phase': 'cancelled',
+                            'elapsed_seconds': round((datetime.now() - started_at).total_seconds(), 2),
+                            'last_activity': 'Cancellation requested from trading-ui',
+                        },
+                        recent_output + ['Cancellation requested from trading-ui']
+                    )
+                    self._complete_job(job_id, cancelled=True)
+                    logger.info(f"Job {job_uid} cancelled")
+                    return False
+
+                line = process.stdout.readline() if process.stdout else ''
+                if line:
+                    clean = line.rstrip()
+                    stdout_lines.append(clean)
+                    recent_output.append(clean)
+                    self._update_live_state(job_id, self._parse_progress(clean, started_at), recent_output)
+                elif process.poll() is not None:
+                    break
+
+                if (datetime.now() - started_at).total_seconds() > 3600:
+                    process.kill()
+                    raise subprocess.TimeoutExpired(cmd, timeout=3600)
+
+            stderr = process.stderr.read() if process.stderr else ''
+            stdout = '\n'.join(stdout_lines)
+
+            if process.returncode == 0:
                 # Try to extract execution_id
-                execution_id = self._extract_execution_id(result.stdout)
+                execution_id = self._extract_execution_id(stdout)
                 if not execution_id:
                     execution_id = self._get_latest_execution_id(epic)
 
+                self._update_live_state(
+                    job_id,
+                    {
+                        'phase': 'completed',
+                        'elapsed_seconds': round((datetime.now() - started_at).total_seconds(), 2),
+                        'last_activity': 'Backtest completed',
+                    },
+                    recent_output
+                )
                 self._complete_job(job_id, execution_id=execution_id)
                 logger.info(f"Job {job_uid} completed successfully (execution_id: {execution_id})")
                 return True
             else:
-                error = result.stderr or f"Exit code: {result.returncode}"
+                error = stderr or f"Exit code: {process.returncode}"
+                self._update_live_state(
+                    job_id,
+                    {
+                        'phase': 'failed',
+                        'elapsed_seconds': round((datetime.now() - started_at).total_seconds(), 2),
+                        'last_activity': error[:240],
+                    },
+                    recent_output + ([error[:240]] if error else [])
+                )
                 self._complete_job(job_id, error=error[:1000])
                 logger.error(f"Job {job_uid} failed: {error[:200]}")
                 return False

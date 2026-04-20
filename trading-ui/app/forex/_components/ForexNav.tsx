@@ -12,7 +12,10 @@ type ForexNavProps = {
 
 const DEFAULT_ITEMS: ForexNavItem[] = [
   { href: "/forex", label: "Overview" },
+  { href: "/forex/backtests", label: "Backtests" },
+  { href: "/forex/breakeven-optimizer", label: "Breakeven Optimizer" },
   { href: "/forex/chart", label: "Chart" },
+  { href: "/forex/htf-analysis", label: "HTF Analysis" },
   { href: "/forex/strategy", label: "Strategy Performance" },
   { href: "/forex/trade-performance", label: "Trade Performance" },
   { href: "/forex/entry-timing", label: "Entry Timing" },
@@ -20,7 +23,6 @@ const DEFAULT_ITEMS: ForexNavItem[] = [
   { href: "/forex/alert-history", label: "Alert History" },
   { href: "/forex/alert-data", label: "Alert Data" },
   { href: "/forex/trade-analysis", label: "Trade Analysis" },
-  { href: "/forex/performance-snapshot", label: "Performance Snapshot" },
   { href: "/forex/market-intelligence", label: "Market Intelligence" },
   { href: "/forex/economic-calendar", label: "Economic Calendar" },
   { href: "/forex/market-conditions", label: "Market Conditions" },
