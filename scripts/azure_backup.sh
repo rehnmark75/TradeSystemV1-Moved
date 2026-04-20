@@ -61,6 +61,19 @@ backup_and_upload_database() {
 
     echo "  → Backing up ${db_name}..."
 
+    # Per-database data-exclusion list.
+    # forex.ig_candles_backtest is derived/resampled historical candles,
+    # re-populatable via scripts/dukascopy_download.py + dukascopy_push_local.sh.
+    # Schema is still included (so a restore recreates the empty table); only
+    # the data is skipped. Saves ~8-10 GB per backup generation, reducing
+    # Azure storage cost and upload time.
+    local exclude_args=()
+    case "${db_name}" in
+        forex)
+            exclude_args+=(--exclude-table-data='public.ig_candles_backtest')
+            ;;
+    esac
+
     # Dump database to staging
     if docker exec "${POSTGRES_CONTAINER}" pg_dump \
         -U "${POSTGRES_USER}" \
@@ -72,6 +85,7 @@ backup_and_upload_database() {
         --format=plain \
         --no-owner \
         --no-privileges \
+        "${exclude_args[@]}" \
         > "${sql_file}" 2>/dev/null; then
 
         # Compress

@@ -59,6 +59,19 @@ backup_single_database() {
     local db_name=$1
     echo "  → Backing up ${db_name} database..."
 
+    # Per-database data-exclusion list.
+    # We keep the SCHEMA (so a restore recreates the table with its indexes)
+    # but skip the DATA. Currently:
+    #   forex.ig_candles_backtest — derived/resampled historical candles,
+    #       re-populatable via scripts/dukascopy_download.py + dukascopy_push_local.sh.
+    #       Excluding saves ~8-10 GB per backup generation.
+    local exclude_args=()
+    case "${db_name}" in
+        forex)
+            exclude_args+=(--exclude-table-data='public.ig_candles_backtest')
+            ;;
+    esac
+
     # pg_dump with comprehensive options for complete backup:
     # - Tables, data, indexes, constraints
     # - Views (regular and materialized)
@@ -75,6 +88,7 @@ backup_single_database() {
         --format=plain \
         --no-owner \
         --no-privileges \
+        "${exclude_args[@]}" \
         > "${BACKUP_DIR}/${db_name}_backup_${TIMESTAMP}.sql" 2>/dev/null; then
 
         gzip "${BACKUP_DIR}/${db_name}_backup_${TIMESTAMP}.sql"
