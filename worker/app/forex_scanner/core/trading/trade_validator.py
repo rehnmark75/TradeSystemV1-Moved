@@ -729,11 +729,12 @@ class TradeValidator:
         """Process Claude analysis result and determine approval status"""
         epic = signal.get('epic', 'Unknown')
 
-        # Extract result fields
-        approved = claude_result.get('approved', False)
-        score = claude_result.get('score', 0)
-        decision = claude_result.get('decision', 'UNKNOWN')
-        reason = claude_result.get('reason', 'No reason provided')
+        # Extract result fields — coerce to safe types in case parser returned None
+        approved = bool(claude_result.get('approved', False))
+        raw_score = claude_result.get('score')
+        score = raw_score if isinstance(raw_score, (int, float)) else 0
+        decision = claude_result.get('decision') or 'UNKNOWN'
+        reason = claude_result.get('reason') or 'No reason provided'
 
         self.logger.info(f"🤖 Claude analysis: {epic} - Score: {score}/10, Decision: {decision}")
 

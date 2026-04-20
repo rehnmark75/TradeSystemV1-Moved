@@ -17,66 +17,158 @@ class ResponseParser:
     def __init__(self):
         self.logger = logging.getLogger(__name__)
     
+    # Headers can arrive bolded (**SCORE:**), lower-case, or with extra
+    # whitespace. The header regex tolerates all three and an optional
+    # leading "- "/"* " bullet that Claude sometimes emits.
+    _HEADER_RE = re.compile(
+        r'^\s*(?:[-*]\s+)?\**\s*(SCORE|DECISION|REASON|CORRECT_TYPE)\s*\**\s*[:\-]\s*(.*)$',
+        re.IGNORECASE,
+    )
+
+    # Last-resort regexes that scan the whole blob if line-based parsing fails.
+    _SCORE_FALLBACK_RE = re.compile(r'score\s*[:\-]?\s*\**\s*(\d+)', re.IGNORECASE)
+    _DECISION_FALLBACK_RE = re.compile(
+        r'decision\s*[:\-]?\s*\**\s*(APPROVE|REJECT|NEUTRAL)', re.IGNORECASE
+    )
+
+    @staticmethod
+    def _strip_code_fence(response: str) -> str:
+        """Remove ```...``` or ```lang ...``` wrappers Claude sometimes uses."""
+        stripped = response.strip()
+        if stripped.startswith('```'):
+            stripped = re.sub(r'^```[^\n]*\n?', '', stripped)
+            if stripped.endswith('```'):
+                stripped = stripped[:-3]
+        return stripped.strip()
+
     def parse_minimal_response(self, response: str) -> Dict:
         """
-        Parse the minimal Claude response into structured data
-        Safe parsing with proper type conversion
-        """
-        try:
-            result = {
-                'score': None,
-                'decision': None,
-                'reason': None,
-                'approved': False
-            }
-            
-            if not response or not response.strip():
-                return result
-            
-            lines = [line.strip() for line in response.strip().split('\n') if line.strip()]
+        Parse the minimal Claude response into structured data.
 
-            section_markers = ('SCORE:', 'DECISION:', 'REASON:', 'CORRECT_TYPE:')
+        Tolerant of:
+          - markdown-bolded headers (**SCORE:**)
+          - case variations (score:, Score:)
+          - leading bullets ("- SCORE: 7")
+          - ``` code fences
+          - trailing extras on the score line (e.g. "SCORE: 7/10")
+
+        Always returns a usable dict — on parse failure, score defaults to 0
+        and decision to 'REJECT' so downstream numeric comparisons are safe.
+        """
+        result = {
+            'score': 0,
+            'decision': 'REJECT',
+            'reason': None,
+            'approved': False,
+            'parse_ok': False,
+        }
+
+        if not response or not response.strip():
+            result['reason'] = 'Empty Claude response'
+            return result
+
+        try:
+            cleaned = self._strip_code_fence(response)
+            lines = [ln for ln in cleaned.split('\n')]
+
+            found_score = False
+            found_decision = False
+
             i = 0
             while i < len(lines):
-                line = lines[i]
-                if line.startswith('SCORE:'):
-                    score_text = line.replace('SCORE:', '').strip()
-                    try:
-                        result['score'] = int(float(score_text))
-                    except ValueError:
-                        numbers = re.findall(r'\b(\d+)\b', score_text)
-                        if numbers:
-                            try:
-                                result['score'] = int(numbers[0])
-                            except (ValueError, IndexError):
-                                result['score'] = 0
-                                self.logger.warning(f"Could not parse score from: {score_text}")
+                line = lines[i].strip()
+                if not line:
+                    i += 1
+                    continue
 
-                elif line.startswith('DECISION:'):
-                    decision = line.replace('DECISION:', '').strip().upper()
-                    result['decision'] = decision
-                    result['approved'] = decision == 'APPROVE'
+                header_match = self._HEADER_RE.match(line)
+                if not header_match:
+                    i += 1
+                    continue
 
-                elif line.startswith('REASON:'):
-                    reason_parts = [line.replace('REASON:', '').strip()]
+                field = header_match.group(1).upper()
+                value = header_match.group(2).strip()
+                # Strip surrounding markdown bold/italic artifacts (e.g. **REASON:** X)
+                value = re.sub(r'^\**\s*', '', value)
+                value = re.sub(r'\s*\**$', '', value).strip()
+
+                if field == 'SCORE':
+                    numbers = re.findall(r'\d+', value)
+                    if numbers:
+                        try:
+                            result['score'] = max(0, min(10, int(numbers[0])))
+                            found_score = True
+                        except (ValueError, IndexError):
+                            pass
+
+                elif field == 'DECISION':
+                    decision = value.upper()
+                    decision = re.sub(r'[^A-Z]', '', decision)  # strip brackets
+                    if decision in ('APPROVE', 'REJECT', 'NEUTRAL'):
+                        result['decision'] = decision
+                        result['approved'] = decision == 'APPROVE'
+                        found_decision = True
+
+                elif field == 'REASON':
+                    reason_parts = [value] if value else []
                     j = i + 1
-                    while j < len(lines) and not lines[j].startswith(section_markers):
-                        reason_parts.append(lines[j])
+                    while j < len(lines):
+                        next_line = lines[j].strip()
+                        if self._HEADER_RE.match(next_line):
+                            break
+                        if next_line:
+                            reason_parts.append(next_line)
                         j += 1
-                    result['reason'] = ' '.join(p for p in reason_parts if p).strip()
+                    joined = ' '.join(p for p in reason_parts if p).strip()
+                    if joined:
+                        result['reason'] = joined
                     i = j
                     continue
+
                 i += 1
-            
+
+            # Fallback: scan entire blob if headers missing
+            if not found_score:
+                m = self._SCORE_FALLBACK_RE.search(cleaned)
+                if m:
+                    try:
+                        result['score'] = max(0, min(10, int(m.group(1))))
+                        found_score = True
+                    except ValueError:
+                        pass
+
+            if not found_decision:
+                m = self._DECISION_FALLBACK_RE.search(cleaned)
+                if m:
+                    decision = m.group(1).upper()
+                    result['decision'] = decision
+                    result['approved'] = decision == 'APPROVE'
+                    found_decision = True
+
+            result['parse_ok'] = found_score and found_decision
+
+            if not result['parse_ok']:
+                # Preserve a slice of raw response so the operator can diagnose
+                preview = cleaned[:200].replace('\n', ' ⏎ ')
+                result['reason'] = (
+                    result.get('reason')
+                    or f"Parse failed (missing SCORE/DECISION). Raw: {preview}"
+                )
+                self.logger.warning(
+                    "⚠️ Claude response parse failed — score_found=%s decision_found=%s preview=%r",
+                    found_score, found_decision, preview,
+                )
+
             return result
-            
+
         except Exception as e:
-            self.logger.error(f"Error parsing minimal response: {e}")
+            self.logger.error(f"Error parsing minimal response: {e}", exc_info=True)
             return {
                 'score': 0,
                 'decision': 'REJECT',
-                'reason': 'Parse error',
-                'approved': False
+                'reason': f'Parse error: {e}',
+                'approved': False,
+                'parse_ok': False,
             }
     
     def parse_enhanced_response(self, response: str) -> Dict:
