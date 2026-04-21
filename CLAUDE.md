@@ -278,6 +278,33 @@ IG Markets API (Lightstreamer) → ig_candles table (5m base)
 **Database tables**: `ig_candles`, `preferred_forex_prices`
 **Resampling**: 5m → 15m (3 candles), 5m → 1h (12 candles), 5m → 4h (48 candles)
 
+### Historical Backfill: `ig_candles_backtest` (Dukascopy, excluded from backups)
+
+For multi-year backtests we use **Dukascopy Bank's** public data feed to
+populate `ig_candles_backtest` with 1m bars from 2020 onward, then
+self-resample within the same table to 5m/15m/1h/4h. Dukascopy ≠ IG
+pricing (small spread delta on FX, meaningful delta on metals — gold
+lands as `CS.D.CFEGOLD.DUKAS.IP` to avoid polluting the live IG series).
+
+**Key architectural choice**: `ig_candles_backtest` is **excluded from
+Azure backups** (`--exclude-table-data=public.ig_candles_backtest` in
+`scripts/enhanced_backup.sh` + `scripts/azure_backup.sh`). Schema is
+still dumped so a restore recreates the empty table + indexes; only the
+data is skipped. Saves ~8-10 GB per backup generation.
+
+**Restore procedure after a DR event:**
+```bash
+# 1. Restore forex DB from backup (schema only for ig_candles_backtest)
+# 2. Re-populate ig_candles_backtest from Dukascopy:
+python3 -m venv ~/.venvs/dukas
+~/.venvs/dukas/bin/pip install dukascopy-python pandas
+~/.venvs/dukas/bin/python scripts/dukascopy_download.py \
+    --start 2020-01-01 --end 2025-09-17 --output-dir /tmp/dukas/
+./scripts/dukascopy_push_local.sh /tmp/dukas/
+```
+Expected runtime: ~3-5 hours download + ~15 min load/resample.
+See `scripts/dukascopy_download.py --list-epics` for the epic mapping.
+
 ---
 
 ## ⚡ Scalp Mode Trailing System (Jan 2026)

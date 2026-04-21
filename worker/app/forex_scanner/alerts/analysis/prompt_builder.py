@@ -1089,10 +1089,10 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 {lpf_section}
 {smc_analysis}
 ═══════════════════════════════════════════════════════════════
-📋 REQUIRED RESPONSE FORMAT
+📋 REQUIRED RESPONSE FORMAT — READ CAREFULLY
 ═══════════════════════════════════════════════════════════════
 
-Analyze the signal (and chart if provided) then respond with EXACTLY these three lines:
+**CRITICAL:** Your response MUST begin with the literal token `SCORE:` as the very first characters. No preamble, no headers, no checklists, no markdown `##` sections, no "## SENIOR ANALYST ASSESSMENT" intros — previous outputs that led with a narrative checklist got truncated before reaching the verdict and were auto-rejected. Do the analysis silently, then emit only these three lines:
 
 SCORE: [1-10]
 DECISION: [APPROVE/REJECT]

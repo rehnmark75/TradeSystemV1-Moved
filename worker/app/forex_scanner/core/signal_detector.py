@@ -97,6 +97,7 @@ class SignalDetector:
         self.ranging_market_strategy = None
         self.volume_profile_strategy = None
         self.mean_reversion_strategy = None
+        self.range_structure_strategy = None
 
         # FVG Retest strategy (v4.0.0) - dual-mode BOS + FVG entry
         self.fvg_retest_strategy = None
@@ -107,6 +108,9 @@ class SignalDetector:
         # enable flags + hard ADX gates inside the strategy do the actual
         # filtering. Enable flag is driven from scanner_global_config.
         self.mean_reversion_enabled = True
+
+        # RANGE_STRUCTURE runs concurrently (like MEAN_REVERSION) in monitor-only mode until its 30-day validation gate passes.
+        self.range_structure_enabled = True
 
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
@@ -162,6 +166,8 @@ class SignalDetector:
             'RANGING': self._force_init_ranging_market,
             'MEAN_REVERSION': self._force_init_mean_reversion,
             'MR': self._force_init_mean_reversion,
+            'RANGE_STRUCTURE': self._force_init_range_structure,
+            'RS': self._force_init_range_structure,
             'VOLUME_PROFILE': self._force_init_volume_profile,
             'VP': self._force_init_volume_profile,
             'FVG_RETEST': self._force_init_fvg_retest,
@@ -172,7 +178,7 @@ class SignalDetector:
         }
 
         if strategy_name not in init_map:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, MEAN_REVERSION, VOLUME_PROFILE, FVG_RETEST, XAU_GOLD."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, MEAN_REVERSION, VOLUME_PROFILE, FVG_RETEST, XAU_GOLD, RANGE_STRUCTURE."
 
         return init_map[strategy_name]()
 
@@ -205,6 +211,15 @@ class SignalDetector:
             return True, "Mean Reversion strategy force-initialized"
         except Exception as e:
             return False, f"Failed to force-init Mean Reversion: {e}"
+
+    def _force_init_range_structure(self) -> Tuple[bool, str]:
+        """Force-initialize Range Structure strategy for backtest."""
+        try:
+            self.range_structure_strategy = None  # lazy-loaded on first use
+            self.logger.info("🔧 Force-initialized Range Structure strategy (lazy-load)")
+            return True, "Range Structure strategy force-initialized"
+        except Exception as e:
+            return False, f"Failed to force-init Range Structure: {e}"
 
     def _force_init_volume_profile(self) -> Tuple[bool, str]:
         """Force-initialize Volume Profile strategy for backtest"""
@@ -682,6 +697,20 @@ class SignalDetector:
                     self.logger.error(f"❌ [MEAN_REVERSION] Error for {epic}: {e}")
                     individual_results['mean_reversion'] = None
 
+            elif routed_strategy == 'RANGE_STRUCTURE' and self._strategy_router:
+                try:
+                    self.logger.debug(f"🔍 [RANGE_STRUCTURE] Starting detection for {epic}")
+                    signal = self.detect_range_structure_signals(epic, pair, spread_pips, timeframe, routing_context=routing_result)
+                    individual_results['range_structure'] = signal
+                    if signal:
+                        all_signals.append(signal)
+                        self.logger.info(f"✅ [RANGE_STRUCTURE] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.5f}")
+                    else:
+                        self.logger.debug(f"📊 [RANGE_STRUCTURE] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
+                    individual_results['range_structure'] = None
+
             elif routed_strategy == 'VOLUME_PROFILE' and self._strategy_router:
                 try:
                     self.logger.debug(f"🔍 [VOLUME_PROFILE] Starting detection for {epic}")
@@ -759,6 +788,30 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [MEAN_REVERSION] Error for {epic}: {e}")
                     individual_results['mean_reversion'] = None
+
+            # RANGE_STRUCTURE runs concurrently (monitor-only) so we can
+            # observe its performance alongside whichever strategy the
+            # router picked. Internal hard ADX gates + per-pair enable
+            # flags inside the strategy filter out unsuitable conditions.
+            if self.range_structure_enabled and not self._is_gold_epic(epic):
+                try:
+                    self.logger.debug(f"🔍 [RANGE_STRUCTURE] Starting detection for {epic}")
+                    rs_signal = self.detect_range_structure_signals(
+                        epic, pair, spread_pips, timeframe,
+                        routing_context=routing_result,
+                    )
+                    individual_results['range_structure'] = rs_signal
+                    if rs_signal:
+                        all_signals.append(rs_signal)
+                        self.logger.info(
+                            f"✅ [RANGE_STRUCTURE] Signal detected for {epic}: "
+                            f"{rs_signal.get('signal')} @ {rs_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [RANGE_STRUCTURE] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
+                    individual_results['range_structure'] = None
 
             # FVG_RETEST runs concurrently with other strategies (not routed)
             if self.fvg_retest_enabled:
@@ -1654,6 +1707,89 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting mean reversion signals for {epic}: {e}")
+            return None
+
+    def detect_range_structure_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m',
+        current_timestamp: datetime = None,
+        routing_context: Dict = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the Range Structure strategy.
+
+        Range boundary rejection-wick strategy (15m primary + 1h HTF) with hard
+        ADX gates. Mirrors detect_mean_reversion_signals wiring — lazy-loads on
+        first use, fetches primary + confirmation timeframes via DataFetcher,
+        delegates to the strategy's detect_signal() and enhances the result
+        with technical indicators before returning.
+        """
+        try:
+            if self.range_structure_strategy is None:
+                try:
+                    try:
+                        from .strategies.range_structure_strategy import create_range_structure_strategy
+                    except (ImportError, ValueError):
+                        from forex_scanner.core.strategies.range_structure_strategy import create_range_structure_strategy
+                    self.range_structure_strategy = create_range_structure_strategy(
+                        config=None,
+                        logger=self.logger,
+                        db_manager=self.db_manager,
+                    )
+                    self.range_structure_strategy.data_fetcher = self.data_fetcher
+                    self.logger.info("✅ Range Structure strategy lazy-loaded")
+                except ImportError as e:
+                    self.logger.warning(f"⚠️ Could not import Range Structure strategy: {e}")
+                    return None
+                except Exception as e:
+                    self.logger.error(f"❌ Error initializing Range Structure strategy: {e}")
+                    return None
+
+            df_trigger = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=timeframe,
+                lookback_hours=48,
+            )
+            if df_trigger is None or df_trigger.empty:
+                self.logger.debug(f"[RANGE_STRUCTURE] No {timeframe} data for {epic}")
+                return None
+
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=72,
+            )
+
+            # Resolve a current_timestamp from the latest trigger bar if not supplied
+            if current_timestamp is None:
+                try:
+                    if 'start_time' in df_trigger.columns:
+                        current_timestamp = df_trigger['start_time'].iloc[-1]
+                    else:
+                        current_timestamp = df_trigger.index[-1]
+                except Exception:
+                    current_timestamp = None
+
+            signal = self.range_structure_strategy.detect_signal(
+                df_trigger=df_trigger,
+                df_4h=df_1h,
+                epic=epic,
+                pair=pair,
+                current_timestamp=current_timestamp,
+                routing_context=routing_context,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_trigger)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting range structure signals for {epic}: {e}")
             return None
 
     def detect_volume_profile_signals(

@@ -13,6 +13,10 @@ Adding a new strategy:
 
 from .base_strategy import BaseStrategy
 from .smc_simple_strategy import SMCSimpleStrategy, create_smc_simple_strategy
+from .range_structure_strategy import (
+    RangeStructureStrategy,
+    create_range_structure_strategy,
+)
 from .strategy_registry import (
     StrategyRegistry,
     StrategyInterface,
@@ -27,6 +31,8 @@ __all__ = [
     # Active strategies
     'SMCSimpleStrategy',
     'create_smc_simple_strategy',
+    'RangeStructureStrategy',
+    'create_range_structure_strategy',
 
     # Registry
     'StrategyRegistry',
