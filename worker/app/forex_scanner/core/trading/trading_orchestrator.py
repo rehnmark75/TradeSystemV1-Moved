@@ -65,6 +65,16 @@ try:
     # Import RejectionOutcomeAnalyzer for automatic outcome analysis
     from monitoring.rejection_outcome_analyzer import RejectionOutcomeAnalyzer
 
+    # Import SMCRejectionHistoryManager for tracking validation rejections
+    try:
+        from alerts.smc_rejection_history import SMCRejectionHistoryManager
+        SMC_REJECTION_AVAILABLE = True
+        print("✅ Successfully imported SMCRejectionHistoryManager")
+    except ImportError as e:
+        print(f"⚠️ SMCRejectionHistoryManager not available: {e}")
+        SMCRejectionHistoryManager = None
+        SMC_REJECTION_AVAILABLE = False
+
     print("✅ Successfully imported all trading modules including AlertHistoryManager")
 except ImportError:
     from forex_scanner import config

@@ -59,7 +59,10 @@ except ImportError:
 
 # NEW: Import economic news filter for fundamental analysis
 try:
-    from core.trading.economic_news_filter import EconomicNewsFilter
+    try:
+        from core.trading.economic_news_filter import EconomicNewsFilter
+    except (ImportError, ValueError):
+        from forex_scanner.core.trading.economic_news_filter import EconomicNewsFilter
     NEWS_FILTER_AVAILABLE = True
 except ImportError:
     NEWS_FILTER_AVAILABLE = False
@@ -67,8 +70,12 @@ except ImportError:
 
 # NEW: Import market intelligence for universal signal context capture
 try:
-    from core.intelligence.market_intelligence import MarketIntelligenceEngine
-    from core.intelligence import create_intelligence_engine
+    try:
+        from core.intelligence.market_intelligence import MarketIntelligenceEngine
+        from core.intelligence import create_intelligence_engine
+    except (ImportError, ValueError):
+        from forex_scanner.core.intelligence.market_intelligence import MarketIntelligenceEngine
+        from forex_scanner.core.intelligence import create_intelligence_engine
     MARKET_INTELLIGENCE_AVAILABLE = True
 except ImportError:
     MARKET_INTELLIGENCE_AVAILABLE = False
@@ -76,7 +83,10 @@ except ImportError:
 
 # NEW: Import loss prevention filter for pattern-based trade blocking
 try:
-    from core.trading.loss_prevention_filter import LossPreventionFilter
+    try:
+        from core.trading.loss_prevention_filter import LossPreventionFilter
+    except (ImportError, ValueError):
+        from forex_scanner.core.trading.loss_prevention_filter import LossPreventionFilter
     LPF_AVAILABLE = True
 except ImportError:
     LPF_AVAILABLE = False
