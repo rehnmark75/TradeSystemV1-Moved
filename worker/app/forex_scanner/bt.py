@@ -65,13 +65,17 @@ def main():
             # Handle strategy shortcuts
             # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
             # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
-            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG"]:
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "EURUSD_RANGE_FADE", "ERF", "EURUSD_RANGE_FADE_5M", "ERF5"]:
                 strategy_mapping = {
                     "SMC": "SMC_SIMPLE",
                     "SMC_SIMPLE": "SMC_SIMPLE",
                     "SMC_EMA": "SMC_SIMPLE",
                     "FVG_RETEST": "FVG_RETEST",
                     "FVG": "FVG_RETEST",
+                    "EURUSD_RANGE_FADE": "EURUSD_RANGE_FADE",
+                    "ERF": "EURUSD_RANGE_FADE",
+                    "EURUSD_RANGE_FADE_5M": "EURUSD_RANGE_FADE_5M",
+                    "ERF5": "EURUSD_RANGE_FADE_5M",
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])
