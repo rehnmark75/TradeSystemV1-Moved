@@ -59,7 +59,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold" | "mean-reversion";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -118,6 +118,26 @@ const STRATEGIES: Record<StrategyKey, {
       "Timeframes & Cooldown",
       "Regime & Routing",
       "Legacy Oscillators (archived v0)",
+      "Other",
+    ],
+  },
+  "range-fade": {
+    label: "RANGE_FADE",
+    apiBase: "/api/settings/strategy/range-fade",
+    draftKey: "range-fade-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/range-fade/effective",
+    columnEndpoint: "/api/settings/strategy/range-fade/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "General",
+      "Timeframes & Cooldown",
+      "HTF Bias",
+      "Bollinger Bands",
+      "RSI",
+      "Range Structure",
+      "Volatility Gates",
+      "Session",
+      "Risk Management",
       "Other",
     ],
   },
@@ -657,7 +677,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion"] as const).map((key) => (
+        {(["smc", "xau-gold", "mean-reversion", "range-fade"] as const).map((key) => (
           <button
             key={key}
             type="button"

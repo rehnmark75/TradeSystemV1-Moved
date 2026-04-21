@@ -169,28 +169,34 @@ class EURUSDRangeFadeConfigService:
             "STRATEGY_CONFIG_DATABASE_URL",
             "postgresql://postgres:postgres@postgres:5432/strategy_config",
         )
+        self._config_set = os.getenv("TRADING_CONFIG_SET", "demo")
 
     @classmethod
     def get_instance(cls) -> "EURUSDRangeFadeConfigService":
         return cls()
 
+    def _cache_key(self, profile: str) -> str:
+        return f"{self._config_set}:{profile}"
+
     def get_config(self, profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
         normalized = str(profile or "15m").strip().lower()
+        key = self._cache_key(normalized)
         now = datetime.now()
         with self._lock:
-            if normalized in self._cached and normalized in self._cache_ts:
-                if now - self._cache_ts[normalized] <= self._cache_ttl:
-                    return copy.deepcopy(self._cached[normalized])
+            if key in self._cached and key in self._cache_ts:
+                if now - self._cache_ts[key] <= self._cache_ttl:
+                    return copy.deepcopy(self._cached[key])
             cfg = self._load_from_database(normalized)
-            self._cached[normalized] = cfg
-            self._cache_ts[normalized] = now
+            self._cached[key] = cfg
+            self._cache_ts[key] = now
             return copy.deepcopy(cfg)
 
     def refresh(self, profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
         normalized = str(profile or "15m").strip().lower()
+        key = self._cache_key(normalized)
         with self._lock:
-            self._cached.pop(normalized, None)
-            self._cache_ts.pop(normalized, None)
+            self._cached.pop(key, None)
+            self._cache_ts.pop(key, None)
         return self.get_config(normalized)
 
     def _load_from_database(self, profile: str) -> EURUSDRangeFadeConfig:
@@ -202,11 +208,11 @@ class EURUSDRangeFadeConfigService:
                 cur.execute(
                     """
                     SELECT * FROM eurusd_range_fade_global_config
-                    WHERE is_active = TRUE AND profile_name = %s
+                    WHERE is_active = TRUE AND profile_name = %s AND config_set = %s
                     ORDER BY id DESC
                     LIMIT 1
                     """,
-                    (config.profile_name,),
+                    (config.profile_name, self._config_set),
                 )
                 row = cur.fetchone()
                 if row:
@@ -222,9 +228,9 @@ class EURUSDRangeFadeConfigService:
                 cur.execute(
                     """
                     SELECT * FROM eurusd_range_fade_pair_overrides
-                    WHERE profile_name = %s
+                    WHERE profile_name = %s AND config_set = %s
                     """,
-                    (config.profile_name,),
+                    (config.profile_name, self._config_set),
                 )
                 pair_overrides: Dict[str, Dict[str, Any]] = {}
                 for row in cur.fetchall():

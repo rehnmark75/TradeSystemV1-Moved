@@ -1520,48 +1520,57 @@ Be concise but thorough. Remember: you are evaluating an *exhaustion fade*, not 
                     return str(v)
 
             if direction in ('BUY', 'BULL'):
-                setup_side = "range low / lower band fade"
-                desired_confirmation = "signs that downside momentum is exhausting near support"
-                reject_if = "price is still impulsing down through the range low with strong continuation candles"
+                setup_side = "lower Bollinger Band fade (HTF-aligned long)"
+                desired_confirmation = "stalling downside momentum at/near the lower band while the 1h bias remains bullish"
+                reject_if = "the 1h has just flipped bearish or price is expanding lower through the band with strong continuation candles"
             else:
-                setup_side = "range high / upper band fade"
-                desired_confirmation = "signs that upside momentum is exhausting near resistance"
-                reject_if = "price is still impulsing up through the range high with strong continuation candles"
+                setup_side = "upper Bollinger Band fade (HTF-aligned short)"
+                desired_confirmation = "stalling upside momentum at/near the upper band while the 1h bias remains bearish"
+                reject_if = "the 1h has just flipped bullish or price is expanding higher through the band with strong continuation candles"
 
             chart_instruction = ""
             if has_chart:
                 chart_instruction = f"""
-## CHART ANALYSIS (RANGE-FADE LENS)
+## CHART ANALYSIS (HTF-ALIGNED BB FADE LENS)
 
-Focus on whether this is a true exhaustion at the range edge or just a breakout continuation.
+This is a **controlled mean-reversion** trade. Price has touched a Bollinger Band edge while the 1h HTF bias is {htf_bias}. We are fading the 5m stretch IN THE DIRECTION of the 1h bias, not calling a reversal of the 1h trend.
 
 Positive signs:
-- Price is testing a clear horizontal range edge, not discovering a fresh trend leg
-- Wick rejection, smaller bodies, or immediate stall at the outer band
-- Reaction occurs close to the prior range extreme, with no sustained band-walk
-- 1h context is supportive ({htf_bias}) or at least not obviously trending against the fade
+- Wick rejection or stall at the outer band rather than a sustained band-walk
+- 1h bias is clearly {htf_bias} and the entry direction aligns with it
+- Current 5m bar is not an expansion candle — body size looks typical
+- No recent breakout structure on the 1h that would invalidate the fade
 
 Automatic concerns:
-- Repeated expansion candles pushing through the range edge
-- Clear breakout structure / band-walking rather than a one-candle stretch
-- A fresh trend leg on the 1h chart that makes the fade structurally unsafe
+- 1h bias has visibly flipped or is in transition (e.g. HTF EMA being crossed right now)
+- Multiple consecutive expansion candles pushing through the band (band-walking, not fading)
+- News-driven spike or gap — this strategy has no macro filter
+- Entry against an obvious intraday breakout on the 1h
 """
 
             mo_note = (
-                "\n⚠️ **MONITOR-ONLY MODE:** This strategy is still in validation. Score the setup honestly; no capital is at risk.\n"
+                "\n⚠️ **MONITOR-ONLY MODE:** This strategy is in live-signal validation. Score honestly; no capital is at risk.\n"
                 if monitor_only else ""
             )
 
-            return f"""You are a SENIOR FOREX TECHNICAL ANALYST evaluating a range-fade setup.
+            return f"""You are a SENIOR FOREX TECHNICAL ANALYST evaluating a Bollinger Band fade with higher-timeframe alignment.
 
-**STRATEGY THESIS — READ FIRST**
-RANGE_FADE is a controlled fade of local extremes. It triggers when the instrument stretches to a Bollinger-band edge with an RSI extreme and is still trading near a recent range boundary. The setup is NOT a momentum continuation trade.
+**STRATEGY THESIS — READ FIRST (v0.4.0 lean config)**
+RANGE_FADE is a controlled mean-reversion trade on EURUSD 5m. It triggers when:
+1. Price touches a Bollinger Band edge (upper for shorts, lower for longs)
+2. RSI is past 40 (for longs) or 60 (for shorts) — moderate directional bias, NOT an extreme
+3. The 1h HTF bias (EMA50 + slope) aligns with the fade direction — strict, no neutral
+4. Current hour is within London/NY window (06–18 UTC)
+
+It is NOT a strict range-extreme fade and NOT a momentum continuation trade. It fades a 5m stretch IN THE DIRECTION of the 1h trend.
 
 Important:
-- ❌ Do NOT reject just because 5m micro-structure is still pointed against the entry; this strategy intentionally fades the stretch.
-- ❌ Do NOT apply a generic SMC "momentum continuation" lens.
-- ✅ Do reject if the move is still expanding through the range edge with obvious breakout behavior.
-- ✅ Do reject if the 1h context clearly supports continuation rather than exhaustion.
+- ❌ Do NOT reject because RSI isn't at 20/80 — the lean config explicitly uses 40/60 moderate thresholds (ablation showed tighter RSI killed sample size without adding edge).
+- ❌ Do NOT demand price be within N pips of a horizontal range boundary — the proximity gate is intentionally disabled in v0.4.0.
+- ❌ Do NOT apply a generic SMC "momentum continuation" or "wait for structure break" lens.
+- ✅ DO reject if the 1h bias is actively flipping against the entry.
+- ✅ DO reject if the current 5m bar is an expansion candle breaking clean out of the band (band-walk, not fade).
+- ✅ DO approve if you see a normal pullback to the band in an HTF-aligned direction.
 {mo_note}
 ═══════════════════════════════════════════════════════════════
 📊 SIGNAL OVERVIEW
@@ -1583,14 +1592,14 @@ Important:
 ═══════════════════════════════════════════════════════════════
 🔬 STRATEGY DATA
 ═══════════════════════════════════════════════════════════════
-• RSI(14): {fmt(rsi_val, 1)}
+• RSI(14): {fmt(rsi_val, 1)}   (thresholds: 40 for longs / 60 for shorts — moderate, not extreme)
 • Bollinger Bands:
     upper {self._format_price(bb_upper)} / mid {self._format_price(bb_mid)} / lower {self._format_price(bb_lower)}
-• Band width: {fmt(band_width, 1)} pips
-• HTF bias: {htf_bias}
-• Range high / low: {self._format_price(range_high)} / {self._format_price(range_low)}
-• Distance to range low: {fmt(dist_low, 1)} pips
-• Distance to range high: {fmt(dist_high, 1)} pips
+• Band width: {fmt(band_width, 1)} pips   (informational — band-width gate is disabled)
+• HTF bias (1h EMA50 + slope): {htf_bias}   ← **primary confluence, must align**
+• Prior-range context: high {self._format_price(range_high)} / low {self._format_price(range_low)}
+• Distance to range low: {fmt(dist_low, 1)} pips (context only; not a required proximity)
+• Distance to range high: {fmt(dist_high, 1)} pips (context only; not a required proximity)
 {chart_instruction}
 ═══════════════════════════════════════════════════════════════
 📋 REQUIRED RESPONSE FORMAT
@@ -1600,7 +1609,7 @@ Your response MUST be exactly three lines:
 
 SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
-REASON: [2-3 sentences focused on whether the stretch looks exhausted near the range edge, whether 1h context supports a fade, and whether the move is actually breaking out.]
+REASON: [2-3 sentences focused on (a) whether the 1h HTF bias truly aligns with the entry direction, (b) whether the current 5m bar looks like a normal pullback to the band vs. a breakout expansion, and (c) whether any obvious regime change on the 1h invalidates the fade.]
 
 Reject if: {reject_if}.
 Approve only if you see {desired_confirmation}.

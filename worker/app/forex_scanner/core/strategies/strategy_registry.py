@@ -308,13 +308,8 @@ def _auto_register_xau_gold():
 _auto_register_xau_gold()
 
 
-def _auto_register_range_fade():
-    """Auto-register EURUSD range-fade strategies if available."""
-    try:
-        from .range_fade_strategy import EURUSDRangeFadeStrategy  # noqa: F401
-        logger.debug("✅ Auto-registered RANGE_FADE strategy")
-    except ImportError as e:
-        logger.warning(f"⚠️ Could not auto-register Range Fade: {e}")
-
-
-_auto_register_range_fade()
+# RANGE_FADE / EURUSD_RANGE_FADE self-register via @register_strategy decorator
+# on EURUSDRangeFadeStrategy. core/strategies/__init__.py imports the module,
+# which fires the decorator — no explicit auto-register call needed (and adding
+# one causes a circular import since it runs while range_fade_strategy is still
+# being loaded).
