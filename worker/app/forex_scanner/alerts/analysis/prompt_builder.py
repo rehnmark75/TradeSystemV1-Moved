@@ -799,7 +799,7 @@ This is a MOMENTUM continuation trade (price beyond swing break).
                     primary_markers_label = f"{trigger_upper} chart (PRIMARY)"
                     entry_markers_label = f"{entry_upper} chart"
                     checklist_items = f"""1. ✓ **{htf_upper} STRATEGY HTF (HIGHEST PRIORITY):** This signal uses {htf_upper} for directional bias — not 4H. Judge trend alignment against the {htf_upper} EMA/structure shown on the chart. Use 4H ONLY as macro backdrop: if {htf_upper} aligns with the signal, a conflicting 4H is a −1 penalty, not a rejection.
-2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number? For SELL — near a swing LOW, support zone, or round number? Within {sr_buffer_pips} pips (proportional to {_risk:.0f}-pip SL) = HIGH-RISK. Buying AT resistance or selling AT support = score ≤4.
+2. ✓ **RESISTANCE/SUPPORT PROXIMITY:** For BUY — is entry near a recent swing HIGH, resistance zone, or round number? For SELL — near a swing LOW, support zone, or round number? Within {sr_buffer_pips} pips = scoring penalty (−1 to −2). Entry AT a MAJOR multi-touch S/R AGAINST {htf_upper} trend = score ≤4. Entry near S/R WITH {htf_upper} trend = penalty only, NOT a cap (SMC reversal entries near S/R are the strategy's edge).
 3. ✓ **POSITION IN RANGE:** For BUY: entry should be near the BOTTOM of a local range. For SELL: near the TOP. Entry at the TOP of a recovery in a downtrend = buying into supply. REJECT.
 4. ✓ Is price clearly respecting the {htf_upper} EMA trend direction? (This is the EMA the strategy used for bias — CRITICAL for scalp quality.)
 5. ✓ Is the swing break on the {trigger_upper} chart clean and confirmed (full candle close)?
@@ -819,7 +819,7 @@ This is a MOMENTUM continuation trade (price beyond swing break).
                     primary_markers_label = "15m chart - PRIMARY"
                     entry_markers_label = "5m chart"
                     checklist_items = f"""1. ✓ **4H TREND STRUCTURE (HIGHEST PRIORITY):** Look at the 4H chart candles — is the trend making Higher Highs/Higher Lows (bullish) or Lower Highs/Lower Lows (bearish)? This is MORE important than EMA position alone. A BUY signal in a 4H downtrend (LH/LL) or SELL signal in a 4H uptrend (HH/HL) is COUNTER-TREND and must score ≤4.
-2. ✓ **RESISTANCE/SUPPORT PROXIMITY (HIGH PRIORITY):** For BUY — is entry near a recent swing HIGH, resistance zone, or round number (x.x000, x.x500)? For SELL — is entry near a recent swing LOW, support zone, or round number? Within {sr_buffer_pips} pips (proportional to {_risk:.0f}-pip SL) = HIGH-RISK. Buying AT resistance or selling AT support = score ≤4.
+2. ✓ **RESISTANCE/SUPPORT PROXIMITY:** For BUY — is entry near a recent swing HIGH, resistance zone, or round number (x.x000, x.x500)? For SELL — is entry near a recent swing LOW, support zone, or round number? Within {sr_buffer_pips} pips = scoring penalty (−1 to −2). Entry AT a MAJOR multi-touch S/R AGAINST the 4H trend = score ≤4. Entry near S/R WITH the trend = penalty only, NOT a cap.
 3. ✓ **POSITION IN RANGE:** Is entry at a favorable location? For BUY: entry should be near the BOTTOM of a local range (at demand/support). For SELL: entry should be near the TOP of a local range (at supply/resistance). Entry at the TOP of a recovery in a downtrend = buying the worst location.
 4. ✓ Is price clearly respecting the 4H EMA trend direction?
 5. ✓ Is the swing break on 15m clean and confirmed (full candle close)?
@@ -975,7 +975,7 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
 - EMA 9: {self._format_price(ema_9_val)}
 - EMA 21: {self._format_price(ema_21_val)}
 - EMA 50: {self._format_price(ema_50_val)}
-- 5m Trend: {ema_alignment} {'✅ Aligned' if ema_aligned_with_signal else '⚠️ Conflict'}
+- 5m Trend: {ema_alignment} {'✅ Aligned' if ema_aligned_with_signal else '⚠️ Conflict (scoring penalty only, NOT auto-reject — SMC reversal entries legitimately fire against 5m micro)'}
 """
 
             # Build Bollinger Band context if available
@@ -998,10 +998,14 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
             # Build market context section
             rsi_warning = ''
             if rsi_value:
-                if direction == 'BULL' and rsi_value > 65:
-                    rsi_warning = ' ⚠️ Overbought for BUY'
+                if direction == 'BULL' and rsi_value > 75:
+                    rsi_warning = ' ⚠️ Overbought for BUY (extended)'
+                elif direction == 'BEAR' and rsi_value < 25:
+                    rsi_warning = ' ⚠️ Oversold for SELL (extended)'
+                elif direction == 'BULL' and rsi_value > 65:
+                    rsi_warning = ' • Extended for BUY (score penalty only, not reject)'
                 elif direction == 'BEAR' and rsi_value < 35:
-                    rsi_warning = ' ⚠️ Oversold for SELL'
+                    rsi_warning = ' • Extended for SELL (score penalty only, not reject)'
 
             adx_warning = ' ⚠️ Weak trend' if adx_value and adx_value < 20 else ''
 
@@ -1102,15 +1106,16 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - Primary HTF for this signal: **{primary_htf_label}** (strategy bias TF). 4H is macro backdrop only.
 - 8-10: Strong {primary_htf_label} trend alignment (HH/HL or LH/LL confirmed), clean swing break on trigger TF, volume confirmed, EMA 9/21 aligned, entry at favorable range location
 - 6-7: Good {primary_htf_label} trend alignment with minor concerns (e.g., momentum slightly extended, volume not confirmed, minor S/R nearby)
-- 4-5: Marginal setup - {primary_htf_label} trend unclear/choppy, entry near resistance/support level, or EMA micro-structure conflict
+- 4-5: Marginal setup - {primary_htf_label} trend unclear/choppy, entry near resistance/support level. NOTE: 5m EMA micro-structure conflict alone is NOT a marginal-setup trigger — apply as a −1 scoring penalty only. SMC reversal entries fire against 5m micro-structure by design.
 - 1-3: Poor setup - counter-trend to {primary_htf_label} structure, entry AT resistance/support, or technical breakdown
 
 **HARD SCORE CAPS (cannot exceed these regardless of other factors):**
 - Counter-trend to **{primary_htf_label}** structure AND MTF Confluence < 0.6: MAX SCORE 4, REJECT. This cap is evaluated against the strategy's primary HTF ({primary_htf_label}), NOT 4H macro. If {primary_htf_label} aligns with the signal but 4H disagrees, apply only a −1 penalty.
   ⚠️ EXCEPTION: If MTF Confluence ≥ 0.6 OR "All TFs aligned" flag is present, the strategy's multi-timeframe system has already validated direction. Do NOT apply counter-trend cap — score on entry quality and S/R location instead.
-- Entry within **{sr_buffer_pips} pips** of major resistance (for BUY) or support (for SELL): MAX SCORE 4, REJECT. Buffer is proportional to SL size ({_risk:.0f}-pip SL) — do NOT enforce a larger buffer than this.
+- Entry within **{sr_buffer_pips} pips** of major resistance (for BUY) or support (for SELL): apply a −2 scoring penalty. This is NOT an automatic rejection — SMC reversal entries at S/R are the strategy's edge. Only cap at MAX SCORE 4 if the S/R level is confirmed MAJOR (multi-touch, HTF-significant) AND entry is within 2 pips AND {primary_htf_label} trend opposes the signal.
 - Entry at round number psychological level (x.x000, x.x500) against HTF trend: MAX SCORE 3, REJECT
 - Entry at TOP of local recovery in a downtrend (or BOTTOM of local selloff in uptrend): MAX SCORE 4, REJECT
+- **4H macro structure (RANGING / LL / LH etc.) alone is NOT a cap or rejection trigger.** In scalp mode the primary HTF is {primary_htf_label}, not 4H. 4H is macro backdrop only — if {primary_htf_label} aligns with the signal, a conflicting 4H structure is at most a −1 penalty.
 
 ⚠️ TESTING MODE: R:R and TP minimums are DISABLED. We are testing small, quick profits. Do NOT reject based on low R:R or small TP. Focus on trend alignment, HTF structure, and entry location quality.
 
@@ -1136,13 +1141,17 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 
 **AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
 - **{primary_htf_label} trend structure opposes signal AND MTF Confluence < 0.6** — evaluate against the strategy's primary HTF ({primary_htf_label}). If MTF Confluence ≥ 0.6 or "All TFs aligned", skip this rejection. Do NOT reject based on 4H macro structure alone when {primary_htf_label} aligns with the signal.
-- **Entry AT resistance (BUY) or AT support (SELL)** — If price is within **{sr_buffer_pips} pips** (proportional to {_risk:.0f}-pip SL) of a visible resistance/support zone, swing high/low, or round number (x.x000, x.x500), REJECT. Do NOT enforce a larger buffer.
+- **Entry AT resistance (BUY) or AT support (SELL)** — REJECT ONLY if ALL THREE are true: (a) price within **2 pips** of a MAJOR (multi-touch, HTF-confirmed) resistance/support, (b) {primary_htf_label} trend opposes the signal, (c) no reversal confirmation candle visible. A near-S/R entry that's WITH the strategy's primary HTF bias is not an auto-reject — score penalty only.
 - **Entry at top of local recovery in downtrend** — If {primary_htf_label} is bearish but trigger/entry TFs show a rally, and entry is near the TOP of that rally (not at a pullback), this is buying into supply. REJECT.
-- Counter-trend trades (price on wrong side of {primary_htf_label} EMA with confirming bearish/bullish candle structure)
 - MOMENTUM entry showing reversal candles on trigger TF (engulfing, pin bars against direction)
-- Price too close to {primary_htf_label} EMA (<2.5 pips) - buffer zone violation
 - S/R level on trigger TF blocking more than 75% of path to target
-- EMA 9/21 crossed against signal direction on trigger TF
+
+**NOT automatic rejection triggers (apply as score penalties instead):**
+- EMA 9/21 crossed against signal direction on trigger TF → −1 penalty
+- 5M EMA micro-structure conflict → −1 penalty
+- Price close to {primary_htf_label} EMA → −1 penalty
+- Counter-trend to 4H when primary HTF ({primary_htf_label}) aligns with signal → −1 penalty
+- RSI 30–40 for SELL or 60–70 for BUY → −1 penalty (not "oversold/overbought" rejection)
 
 Be concise but thorough. Your assessment determines if real money is risked."""
 
