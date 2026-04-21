@@ -1262,10 +1262,10 @@ The chart shows multi-timeframe analysis:
 {entry_detail}
 
 ═══════════════════════════════════════════════════════════════
-📋 REQUIRED RESPONSE FORMAT
+📋 REQUIRED RESPONSE FORMAT — READ CAREFULLY
 ═══════════════════════════════════════════════════════════════
 
-Analyze the signal (and chart if provided) then respond with EXACTLY these three lines:
+**CRITICAL:** Your response MUST begin with the literal token `SCORE:` as the very first characters. No preamble, no headers, no checklists, no markdown `##` sections — previous outputs that led with a narrative checklist got truncated before reaching the verdict and were auto-rejected. Do the analysis silently, then emit only these three lines:
 
 SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
@@ -1434,10 +1434,10 @@ This is the OPPOSITE of a trend-following trade. Therefore:
 • Extremity score (0-1, how far past threshold): {fmt(extremity, 2)}
 {chart_instruction}
 ═══════════════════════════════════════════════════════════════
-📋 REQUIRED RESPONSE FORMAT
+📋 REQUIRED RESPONSE FORMAT — READ CAREFULLY
 ═══════════════════════════════════════════════════════════════
 
-Analyze the signal (and chart if provided) then respond with EXACTLY these three lines:
+**CRITICAL:** Your response MUST begin with the literal token `SCORE:` as the very first characters. No preamble, no headers, no checklists, no markdown `##` sections — previous outputs that led with a narrative checklist got truncated before reaching the verdict and were auto-rejected. Do the analysis silently, then emit only these three lines:
 
 SCORE: [1-10]
 DECISION: [APPROVE/REJECT]
