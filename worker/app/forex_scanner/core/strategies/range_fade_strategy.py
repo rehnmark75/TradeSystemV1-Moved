@@ -133,7 +133,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         if df is None or len(df) < max(cfg.bb_period, cfg.range_lookback_bars) + 5:
             return None
 
-        if epic != EURUSD_EPIC or not cfg.is_pair_enabled(epic):
+        if not cfg.is_pair_enabled(epic):
             return None
 
         if not self._check_cooldown(epic):
@@ -164,7 +164,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         if None in (latest_upper, latest_lower, latest_mid, latest_rsi, latest_atr, latest_bar_range):
             return None
 
-        pip = 0.0001
+        pip = 0.01 if "JPY" in epic.upper() else 0.0001
         band_width_pips = (latest_upper - latest_lower) / pip
         if band_width_pips < cfg.min_band_width_pips or band_width_pips > cfg.max_band_width_pips:
             return None

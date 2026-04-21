@@ -26,6 +26,8 @@ import psycopg2.extras
 logger = logging.getLogger(__name__)
 
 EURUSD_EPIC = "CS.D.EURUSD.CEEM.IP"
+EURJPY_EPIC = "CS.D.EURJPY.MINI.IP"
+SUPPORTED_EPICS = [EURUSD_EPIC, EURJPY_EPIC]
 _TRUE_STR = {"1", "true", "yes", "on", "y", "t"}
 
 
@@ -43,7 +45,7 @@ class EURUSDRangeFadeConfig:
     profile_name: str = "15m"
     version: str = "0.3.0"
 
-    enabled_pairs: List[str] = field(default_factory=lambda: [EURUSD_EPIC])
+    enabled_pairs: List[str] = field(default_factory=lambda: list(SUPPORTED_EPICS))
     monitor_only: bool = True
 
     primary_timeframe: str = "15m"
@@ -91,7 +93,7 @@ class EURUSDRangeFadeConfig:
             return False
         row = self.pair_overrides.get(epic)
         if row is None:
-            return epic == EURUSD_EPIC
+            return epic in SUPPORTED_EPICS
         return bool(row.get("is_enabled", True))
 
     def is_pair_monitor_only(self, epic: str) -> bool:
