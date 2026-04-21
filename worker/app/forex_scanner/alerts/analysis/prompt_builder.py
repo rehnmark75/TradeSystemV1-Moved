@@ -597,6 +597,8 @@ REASON: Analysis error - neutral assessment"""
             return self._build_fvg_retest_prompt(signal, has_chart)
         if strategy == 'MEAN_REVERSION':
             return self._build_mean_reversion_prompt(signal, has_chart)
+        if strategy in {'RANGE_FADE', 'RANGE_FADE_5M', 'EURUSD_RANGE_FADE', 'EURUSD_RANGE_FADE_5M'}:
+            return self._build_eurusd_range_fade_prompt(signal, has_chart)
         return self._build_smc_prompt(signal, has_chart)
 
 
@@ -1477,6 +1479,134 @@ Be concise but thorough. Remember: you are evaluating an *exhaustion fade*, not 
 
         except Exception as e:
             self.logger.error(f"Error building MEAN_REVERSION prompt: {e}")
+            return self._build_fallback_prompt(signal, {})
+
+    def _build_eurusd_range_fade_prompt(self, signal: Dict, has_chart: bool = True) -> str:
+        """Vision prompt for EURUSD range-fade setups."""
+        try:
+            epic = signal.get('epic', 'Unknown')
+            pair = self._extract_pair(epic)
+            strategy = signal.get('strategy', 'RANGE_FADE')
+            direction = signal.get('signal_type', signal.get('signal', 'Unknown'))
+            confidence = signal.get('confidence_score', signal.get('confidence', 0))
+            entry_price = signal.get('entry_price', signal.get('price', 0))
+            risk_pips = signal.get('stop_loss_pips', signal.get('risk_pips', 0))
+            reward_pips = signal.get('take_profit_pips', signal.get('reward_pips', 0))
+            monitor_only = bool(signal.get('monitor_only', False))
+
+            try:
+                rr_ratio = float(reward_pips) / float(risk_pips) if float(risk_pips) > 0 else 0
+            except Exception:
+                rr_ratio = 0
+
+            indicators = signal.get('strategy_indicators', {}) or {}
+            rsi_val = indicators.get('rsi', signal.get('rsi'))
+            bb_upper = indicators.get('bb_upper')
+            bb_lower = indicators.get('bb_lower')
+            bb_mid = indicators.get('bb_mid')
+            band_width = indicators.get('band_width_pips')
+            htf_bias = indicators.get('htf_bias', 'unknown')
+            range_high = indicators.get('range_high')
+            range_low = indicators.get('range_low')
+            dist_low = indicators.get('distance_to_low_pips')
+            dist_high = indicators.get('distance_to_high_pips')
+
+            def fmt(v, prec=2, suffix=""):
+                if v is None:
+                    return "n/a"
+                try:
+                    return f"{float(v):.{prec}f}{suffix}"
+                except Exception:
+                    return str(v)
+
+            if direction in ('BUY', 'BULL'):
+                setup_side = "range low / lower band fade"
+                desired_confirmation = "signs that downside momentum is exhausting near support"
+                reject_if = "price is still impulsing down through the range low with strong continuation candles"
+            else:
+                setup_side = "range high / upper band fade"
+                desired_confirmation = "signs that upside momentum is exhausting near resistance"
+                reject_if = "price is still impulsing up through the range high with strong continuation candles"
+
+            chart_instruction = ""
+            if has_chart:
+                chart_instruction = f"""
+## CHART ANALYSIS (RANGE-FADE LENS)
+
+Focus on whether this is a true exhaustion at the range edge or just a breakout continuation.
+
+Positive signs:
+- Price is testing a clear horizontal range edge, not discovering a fresh trend leg
+- Wick rejection, smaller bodies, or immediate stall at the outer band
+- Reaction occurs close to the prior range extreme, with no sustained band-walk
+- 1h context is supportive ({htf_bias}) or at least not obviously trending against the fade
+
+Automatic concerns:
+- Repeated expansion candles pushing through the range edge
+- Clear breakout structure / band-walking rather than a one-candle stretch
+- A fresh trend leg on the 1h chart that makes the fade structurally unsafe
+"""
+
+            mo_note = (
+                "\n⚠️ **MONITOR-ONLY MODE:** This strategy is still in validation. Score the setup honestly; no capital is at risk.\n"
+                if monitor_only else ""
+            )
+
+            return f"""You are a SENIOR FOREX TECHNICAL ANALYST evaluating a range-fade setup.
+
+**STRATEGY THESIS — READ FIRST**
+RANGE_FADE is a controlled fade of local extremes. It triggers when the instrument stretches to a Bollinger-band edge with an RSI extreme and is still trading near a recent range boundary. The setup is NOT a momentum continuation trade.
+
+Important:
+- ❌ Do NOT reject just because 5m micro-structure is still pointed against the entry; this strategy intentionally fades the stretch.
+- ❌ Do NOT apply a generic SMC "momentum continuation" lens.
+- ✅ Do reject if the move is still expanding through the range edge with obvious breakout behavior.
+- ✅ Do reject if the 1h context clearly supports continuation rather than exhaustion.
+{mo_note}
+═══════════════════════════════════════════════════════════════
+📊 SIGNAL OVERVIEW
+═══════════════════════════════════════════════════════════════
+• Pair: {pair}
+• Direction: {direction}
+• Strategy: {strategy}
+• Setup Type: {setup_side}
+• System Confidence: {confidence:.1%}
+
+═══════════════════════════════════════════════════════════════
+💰 TRADE LEVELS
+═══════════════════════════════════════════════════════════════
+• Entry Price: {self._format_price(entry_price)}
+• Stop Loss: {fmt(risk_pips, 1)} pips
+• Take Profit: {fmt(reward_pips, 1)} pips
+• Risk:Reward Ratio: {rr_ratio:.2f}:1
+
+═══════════════════════════════════════════════════════════════
+🔬 STRATEGY DATA
+═══════════════════════════════════════════════════════════════
+• RSI(14): {fmt(rsi_val, 1)}
+• Bollinger Bands:
+    upper {self._format_price(bb_upper)} / mid {self._format_price(bb_mid)} / lower {self._format_price(bb_lower)}
+• Band width: {fmt(band_width, 1)} pips
+• HTF bias: {htf_bias}
+• Range high / low: {self._format_price(range_high)} / {self._format_price(range_low)}
+• Distance to range low: {fmt(dist_low, 1)} pips
+• Distance to range high: {fmt(dist_high, 1)} pips
+{chart_instruction}
+═══════════════════════════════════════════════════════════════
+📋 REQUIRED RESPONSE FORMAT
+═══════════════════════════════════════════════════════════════
+
+Your response MUST be exactly three lines:
+
+SCORE: [1-10]
+DECISION: [APPROVE/REJECT]
+REASON: [2-3 sentences focused on whether the stretch looks exhausted near the range edge, whether 1h context supports a fade, and whether the move is actually breaking out.]
+
+Reject if: {reject_if}.
+Approve only if you see {desired_confirmation}.
+"""
+        except Exception as e:
+            self.logger.error(f"Error building RANGE_FADE prompt: {e}")
             return self._build_fallback_prompt(signal, {})
 
     def _extract_pair(self, epic: str) -> str:

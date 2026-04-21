@@ -8,13 +8,15 @@ from datetime import datetime
 import numpy as np
 import pandas as pd
 
-from forex_scanner.core.strategies.eurusd_range_fade_strategy import (
+from forex_scanner.core.strategies.range_fade_strategy import (
+    EURUSDRangeFadeStrategy,
+    apply_config_overrides,
+)
+from forex_scanner.services.range_fade_config_service import (
     EURUSD_EPIC,
     EURUSDRangeFadeConfig,
     EURUSDRangeFadeConfigService,
-    EURUSDRangeFadeStrategy,
-    apply_config_overrides,
-    build_eurusd_range_fade_config,
+    build_range_fade_config,
 )
 
 
@@ -48,7 +50,7 @@ def _make_1h_bullish_htf(bars: int = 120) -> pd.DataFrame:
 class EURUSDRangeFadeConfigTests(unittest.TestCase):
     def test_defaults(self):
         cfg = EURUSDRangeFadeConfig()
-        self.assertEqual(cfg.strategy_name, "EURUSD_RANGE_FADE")
+        self.assertEqual(cfg.strategy_name, "RANGE_FADE")
         self.assertTrue(cfg.monitor_only)
         self.assertIn(EURUSD_EPIC, cfg.enabled_pairs)
         self.assertTrue(cfg.is_session_allowed(14))
@@ -66,8 +68,8 @@ class EURUSDRangeFadeConfigTests(unittest.TestCase):
         self.assertEqual(cfg.fixed_take_profit_pips, 15)
 
     def test_build_5m_profile(self):
-        cfg = build_eurusd_range_fade_config("5m")
-        self.assertEqual(cfg.strategy_name, "EURUSD_RANGE_FADE_5M")
+        cfg = build_range_fade_config("5m")
+        self.assertEqual(cfg.strategy_name, "RANGE_FADE_5M")
         self.assertEqual(cfg.profile_name, "5m")
         self.assertEqual(cfg.primary_timeframe, "5m")
         self.assertEqual(cfg.confirmation_timeframe, "1h")
@@ -78,12 +80,14 @@ class EURUSDRangeFadeStrategyTests(unittest.TestCase):
     def setUp(self) -> None:
         EURUSDRangeFadeConfigService._instance = None
         svc = EURUSDRangeFadeConfigService.get_instance()
-        svc._cached = EURUSDRangeFadeConfig()
-        svc._cache_ts = datetime.now()
+        svc._cached = {}
+        svc._cache_ts = {}
+        svc._cached["15m"] = EURUSDRangeFadeConfig()
+        svc._cache_ts["15m"] = datetime.now()
         self.strat = EURUSDRangeFadeStrategy()
 
     def test_strategy_name(self):
-        self.assertEqual(self.strat.strategy_name, "EURUSD_RANGE_FADE")
+        self.assertEqual(self.strat.strategy_name, "RANGE_FADE")
         self.assertEqual(self.strat.get_required_timeframes(), ["1h", "15m"])
 
     def test_non_eurusd_pair_returns_none(self):
@@ -105,7 +109,7 @@ class EURUSDRangeFadeStrategyTests(unittest.TestCase):
             current_timestamp=pd.Timestamp("2026-04-21 14:00", tz="UTC").to_pydatetime(),
         )
         self.assertIsNotNone(signal)
-        self.assertEqual(signal["strategy"], "EURUSD_RANGE_FADE")
+        self.assertEqual(signal["strategy"], "RANGE_FADE")
         self.assertEqual(signal["signal"], "BUY")
         self.assertTrue(signal["monitor_only"])
         self.assertGreaterEqual(signal["confidence"], self.strat.config.min_confidence)
@@ -132,7 +136,7 @@ class EURUSDRangeFadeStrategyTests(unittest.TestCase):
 
     def test_constructor_can_select_5m_profile(self):
         strat = EURUSDRangeFadeStrategy(config_override={"erf_profile": "5m"})
-        self.assertEqual(strat.strategy_name, "EURUSD_RANGE_FADE_5M")
+        self.assertEqual(strat.strategy_name, "RANGE_FADE_5M")
         self.assertEqual(strat.config.primary_timeframe, "5m")
         self.assertEqual(strat.get_required_timeframes(), ["1h", "5m"])
 

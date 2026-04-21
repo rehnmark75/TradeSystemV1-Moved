@@ -5,7 +5,7 @@ Runs a bounded set of strategy configurations through the existing backtest CLI,
 parses the headline metrics, and prints the strongest candidates.
 
 Usage:
-    docker exec task-worker python /app/forex_scanner/scripts/eval_eurusd_range_fade.py
+    docker exec task-worker python /app/forex_scanner/scripts/eval_range_fade.py
 """
 from __future__ import annotations
 
@@ -19,7 +19,7 @@ from typing import Dict, Iterable, List, Optional
 
 BACKTEST_CMD = ["python", "/app/forex_scanner/backtest_cli.py"]
 EPIC = "CS.D.EURUSD.CEEM.IP"
-STRATEGY = "EURUSD_RANGE_FADE"
+STRATEGY = "RANGE_FADE"
 
 
 @dataclass

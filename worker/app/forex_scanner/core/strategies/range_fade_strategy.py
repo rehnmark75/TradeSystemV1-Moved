@@ -18,120 +18,32 @@ Design
 """
 from __future__ import annotations
 
-import copy
 import logging
-from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
 
+try:
+    from ...services.range_fade_config_service import (
+        EURUSD_EPIC,
+        EURUSDRangeFadeConfig,
+        build_range_fade_config,
+        get_range_fade_config,
+    )
+except ImportError:
+    from forex_scanner.services.range_fade_config_service import (
+        EURUSD_EPIC,
+        EURUSDRangeFadeConfig,
+        build_range_fade_config,
+        get_range_fade_config,
+    )
+
 from .strategy_registry import StrategyInterface, register_strategy
 
 
-EURUSD_EPIC = "CS.D.EURUSD.CEEM.IP"
-
-
-@dataclass
-class EURUSDRangeFadeConfig:
-    strategy_name: str = "EURUSD_RANGE_FADE"
-    profile_name: str = "15m"
-    version: str = "0.2.0"
-
-    enabled_pairs: List[str] = field(default_factory=lambda: [EURUSD_EPIC])
-    monitor_only: bool = True
-
-    primary_timeframe: str = "15m"
-    confirmation_timeframe: str = "1h"
-
-    bb_period: int = 20
-    bb_mult: float = 2.0
-    rsi_period: int = 14
-    rsi_oversold: int = 30
-    rsi_overbought: int = 70
-
-    range_lookback_bars: int = 48
-    range_proximity_pips: float = 4.0
-    min_band_width_pips: float = 8.0
-    max_band_width_pips: float = 45.0
-
-    htf_ema_period: int = 50
-    htf_slope_bars: int = 3
-    allow_neutral_htf: bool = True
-
-    max_current_range_pips: float = 16.0
-    min_confidence: float = 0.52
-    max_confidence: float = 0.84
-
-    fixed_stop_loss_pips: float = 8.0
-    fixed_take_profit_pips: float = 12.0
-    signal_cooldown_minutes: int = 45
-
-    london_start_hour_utc: int = 8
-    new_york_end_hour_utc: int = 18
-
-    def is_pair_enabled(self, epic: str) -> bool:
-        return epic in self.enabled_pairs
-
-    def is_session_allowed(self, hour_utc: int) -> bool:
-        return self.london_start_hour_utc <= hour_utc <= self.new_york_end_hour_utc
-
-
-class EURUSDRangeFadeConfigService:
-    _instance = None
-
-    def __init__(self):
-        self._cached: Optional[EURUSDRangeFadeConfig] = None
-        self._cache_ts: Optional[datetime] = None
-
-    @classmethod
-    def get_instance(cls) -> "EURUSDRangeFadeConfigService":
-        if cls._instance is None:
-            cls._instance = cls()
-        return cls._instance
-
-    def get_config(self) -> EURUSDRangeFadeConfig:
-        if self._cached is None:
-            self._cached = build_eurusd_range_fade_config("15m")
-            self._cache_ts = datetime.now()
-        return self._cached
-
-
-def build_eurusd_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
-    normalized = str(profile or "15m").strip().lower()
-
-    if normalized in {"15m", "default", "base"}:
-        return EURUSDRangeFadeConfig()
-
-    if normalized in {"5m", "fast"}:
-        return EURUSDRangeFadeConfig(
-            strategy_name="EURUSD_RANGE_FADE_5M",
-            profile_name="5m",
-            primary_timeframe="5m",
-            confirmation_timeframe="1h",
-            rsi_oversold=32,
-            rsi_overbought=68,
-            range_lookback_bars=144,
-            range_proximity_pips=3.0,
-            min_band_width_pips=6.0,
-            max_band_width_pips=28.0,
-            allow_neutral_htf=False,
-            max_current_range_pips=12.0,
-            fixed_stop_loss_pips=8.0,
-            fixed_take_profit_pips=12.0,
-            signal_cooldown_minutes=30,
-            london_start_hour_utc=6,
-            new_york_end_hour_utc=18,
-        )
-
-    raise ValueError(f"Unsupported EURUSD range-fade profile: {profile}")
-
-
-def get_eurusd_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
-    if not profile or str(profile).strip().lower() in {"15m", "default", "base"}:
-        return EURUSDRangeFadeConfigService.get_instance().get_config()
-    return build_eurusd_range_fade_config(profile)
+logger = logging.getLogger(__name__)
 
 
 def apply_config_overrides(
@@ -157,10 +69,11 @@ def apply_config_overrides(
                 new_val = value
             setattr(cfg, key, new_val)
         except Exception as exc:
-            logger.warning("EURUSD_RANGE_FADE override failed for %s=%r: %s", key, value, exc)
+            logger.warning("RANGE_FADE override failed for %s=%r: %s", key, value, exc)
     return cfg
 
 
+@register_strategy("RANGE_FADE")
 @register_strategy("EURUSD_RANGE_FADE")
 class EURUSDRangeFadeStrategy(StrategyInterface):
     def __init__(self, config=None, logger=None, db_manager=None, config_override: dict = None):
@@ -170,14 +83,14 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         profile_name = None
         if isinstance(self._config_override, dict):
             profile_name = self._config_override.get("erf_profile") or self._config_override.get("profile")
-        base_config = config or get_eurusd_range_fade_config(profile_name)
-        self.config = copy.deepcopy(base_config)
+        base_config = config or get_range_fade_config(profile_name)
+        self.config = base_config
         apply_config_overrides(self.config, self._config_override)
         self._cooldowns: Dict[str, datetime] = {}
         self._current_timestamp: Optional[datetime] = None
 
         self.logger.info(
-            "[EURUSD_RANGE_FADE] profile=%s v%s initialized | TF=%s HTF=%s "
+            "[RANGE_FADE] profile=%s v%s initialized | TF=%s HTF=%s "
             "BB(%s, %.1f) RSI(%s, %s/%s) SL/TP=%.1f/%.1f monitor_only=%s",
             self.config.profile_name,
             self.config.version,
@@ -342,7 +255,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
 
         self._set_cooldown(epic)
         self.logger.info(
-            "[EURUSD_RANGE_FADE] %s %s @ %.5f RSI=%.1f htf=%s conf=%.2f",
+            "[RANGE_FADE] %s %s @ %.5f RSI=%.1f htf=%s conf=%.2f",
             direction,
             epic,
             latest_close,
@@ -458,8 +371,17 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         self._cooldowns[epic] = now + timedelta(minutes=self.config.signal_cooldown_minutes)
 
 
-def create_eurusd_range_fade_strategy(config=None, logger=None, db_manager=None, config_override=None):
+def create_range_fade_strategy(config=None, logger=None, db_manager=None, config_override=None):
     return EURUSDRangeFadeStrategy(
+        config=config,
+        logger=logger,
+        db_manager=db_manager,
+        config_override=config_override,
+    )
+
+
+def create_eurusd_range_fade_strategy(config=None, logger=None, db_manager=None, config_override=None):
+    return create_range_fade_strategy(
         config=config,
         logger=logger,
         db_manager=db_manager,

@@ -874,8 +874,10 @@ class BacktestScanner(IntelligentForexScanner):
                 'ICHIMOKU_CLOUD': 'detect_ichimoku_signals',
                 'MEAN_REVERSION': 'detect_mean_reversion_signals',
                 'MEANREV': 'detect_mean_reversion_signals',  # Fixed: Accept short form
+                'RANGE_FADE': 'detect_eurusd_range_fade_signals',
                 'EURUSD_RANGE_FADE': 'detect_eurusd_range_fade_signals',
                 'ERF': 'detect_eurusd_range_fade_signals',
+                'RANGE_FADE_5M': 'detect_eurusd_range_fade_signals',
                 'EURUSD_RANGE_FADE_5M': 'detect_eurusd_range_fade_signals',
                 'ERF5': 'detect_eurusd_range_fade_signals',
                 'RANGING_MARKET': 'detect_ranging_market_signals',
