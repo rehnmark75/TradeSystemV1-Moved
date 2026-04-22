@@ -42,49 +42,47 @@ _TRUE_STR = {"1", "true", "yes", "on", "y", "t"}
 
 
 def _normalize_strategy_name(name: Any) -> Any:
-    if name == "EURUSD_RANGE_FADE":
+    if name in ("EURUSD_RANGE_FADE", "EURUSD_RANGE_FADE_5M", "RANGE_FADE_5M", "RANGE_FADE_15M"):
         return "RANGE_FADE"
-    if name == "EURUSD_RANGE_FADE_5M":
-        return "RANGE_FADE_5M"
     return name
 
 
 @dataclass
 class EURUSDRangeFadeConfig:
     strategy_name: str = "RANGE_FADE"
-    profile_name: str = "15m"
+    profile_name: str = "5m"
     version: str = "0.3.0"
 
     enabled_pairs: List[str] = field(default_factory=lambda: list(SUPPORTED_EPICS))
     monitor_only: bool = True
 
-    primary_timeframe: str = "15m"
+    primary_timeframe: str = "5m"
     confirmation_timeframe: str = "1h"
 
     bb_period: int = 20
     bb_mult: float = 2.0
     rsi_period: int = 14
-    rsi_oversold: int = 30
-    rsi_overbought: int = 70
+    rsi_oversold: int = 32
+    rsi_overbought: int = 68
 
-    range_lookback_bars: int = 48
-    range_proximity_pips: float = 4.0
-    min_band_width_pips: float = 8.0
-    max_band_width_pips: float = 45.0
+    range_lookback_bars: int = 144
+    range_proximity_pips: float = 3.0
+    min_band_width_pips: float = 6.0
+    max_band_width_pips: float = 28.0
 
     htf_ema_period: int = 50
     htf_slope_bars: int = 3
-    allow_neutral_htf: bool = True
+    allow_neutral_htf: bool = False
 
-    max_current_range_pips: float = 16.0
+    max_current_range_pips: float = 12.0
     min_confidence: float = 0.52
     max_confidence: float = 0.84
 
     fixed_stop_loss_pips: float = 8.0
     fixed_take_profit_pips: float = 12.0
-    signal_cooldown_minutes: int = 45
+    signal_cooldown_minutes: int = 30
 
-    london_start_hour_utc: int = 8
+    london_start_hour_utc: int = 6
     new_york_end_hour_utc: int = 18
 
     pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
@@ -118,30 +116,10 @@ class EURUSDRangeFadeConfig:
 
 
 def build_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
-    normalized = str(profile or "15m").strip().lower()
-    if normalized in {"15m", "default", "base"}:
+    normalized = str(profile or "5m").strip().lower()
+    if normalized in {"5m", "fast", "default", "base"}:
         return EURUSDRangeFadeConfig()
-    if normalized in {"5m", "fast"}:
-        return EURUSDRangeFadeConfig(
-            strategy_name="RANGE_FADE_5M",
-            profile_name="5m",
-            primary_timeframe="5m",
-            confirmation_timeframe="1h",
-            rsi_oversold=32,
-            rsi_overbought=68,
-            range_lookback_bars=144,
-            range_proximity_pips=3.0,
-            min_band_width_pips=6.0,
-            max_band_width_pips=28.0,
-            allow_neutral_htf=False,
-            max_current_range_pips=12.0,
-            fixed_stop_loss_pips=8.0,
-            fixed_take_profit_pips=12.0,
-            signal_cooldown_minutes=30,
-            london_start_hour_utc=6,
-            new_york_end_hour_utc=18,
-        )
-    raise ValueError(f"Unsupported EURUSD range-fade profile: {profile}")
+    raise ValueError(f"Unsupported range-fade profile: {profile} (only 5m is supported)")
 
 
 def _coerce_value(current: Any, value: Any) -> Any:
@@ -191,7 +169,7 @@ class EURUSDRangeFadeConfigService:
         return f"{self._config_set}:{profile}"
 
     def get_config(self, profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
-        normalized = str(profile or "15m").strip().lower()
+        normalized = str(profile or "5m").strip().lower()
         key = self._cache_key(normalized)
         now = datetime.now()
         with self._lock:
@@ -204,7 +182,7 @@ class EURUSDRangeFadeConfigService:
             return copy.deepcopy(cfg)
 
     def refresh(self, profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
-        normalized = str(profile or "15m").strip().lower()
+        normalized = str(profile or "5m").strip().lower()
         key = self._cache_key(normalized)
         with self._lock:
             self._cached.pop(key, None)

@@ -1,0 +1,70 @@
+-- Seed AUDJPY + USDJPY into RANGE_FADE pair overrides.
+-- Follows the EURJPY pattern (RSI 38/62, SL/TP 10/15 for JPY pips, London 6-18 UTC).
+-- Without these rows, the scanner was firing on the strategy's global defaults
+-- which are calibrated for USD majors, not JPY pairs.
+-- DEMO: is_enabled=t, monitor_only=f, is_traded=t
+-- LIVE: is_enabled=f (safety lock) + monitor_only=t
+
+INSERT INTO eurusd_range_fade_pair_overrides (
+    epic, pair_name, profile_name, config_set,
+    is_enabled, is_traded, monitor_only,
+    rsi_oversold, rsi_overbought,
+    range_proximity_pips, max_current_range_pips,
+    london_start_hour_utc, new_york_end_hour_utc,
+    allow_neutral_htf, signal_cooldown_minutes,
+    fixed_stop_loss_pips, fixed_take_profit_pips,
+    parameter_overrides, notes
+) VALUES
+('CS.D.AUDJPY.MINI.IP', 'AUDJPY', '5m', 'demo',
+    true, true, false,
+    38, 62,
+    999.00, 999.00,
+    6, 18,
+    false, 0,
+    10.00, 15.00,
+    '{"min_band_width_pips":0,"max_band_width_pips":9999}'::jsonb,
+    '2026-04-22 seeded AUDJPY on 5m (JPY defaults, mirrors EURJPY)'),
+('CS.D.AUDJPY.MINI.IP', 'AUDJPY', '5m', 'live',
+    false, false, true,
+    38, 62,
+    999.00, 999.00,
+    6, 18,
+    false, 0,
+    10.00, 15.00,
+    '{"min_band_width_pips":0,"max_band_width_pips":9999}'::jsonb,
+    '2026-04-22 live disabled pending demo validation'),
+('CS.D.USDJPY.MINI.IP', 'USDJPY', '5m', 'demo',
+    true, true, false,
+    38, 62,
+    999.00, 999.00,
+    6, 18,
+    false, 0,
+    10.00, 15.00,
+    '{"min_band_width_pips":0,"max_band_width_pips":9999}'::jsonb,
+    '2026-04-22 seeded USDJPY on 5m (JPY defaults, mirrors EURJPY)'),
+('CS.D.USDJPY.MINI.IP', 'USDJPY', '5m', 'live',
+    false, false, true,
+    38, 62,
+    999.00, 999.00,
+    6, 18,
+    false, 0,
+    10.00, 15.00,
+    '{"min_band_width_pips":0,"max_band_width_pips":9999}'::jsonb,
+    '2026-04-22 live disabled pending demo validation')
+ON CONFLICT (epic, profile_name, config_set) DO UPDATE SET
+    is_enabled = EXCLUDED.is_enabled,
+    is_traded = EXCLUDED.is_traded,
+    monitor_only = EXCLUDED.monitor_only,
+    rsi_oversold = EXCLUDED.rsi_oversold,
+    rsi_overbought = EXCLUDED.rsi_overbought,
+    range_proximity_pips = EXCLUDED.range_proximity_pips,
+    max_current_range_pips = EXCLUDED.max_current_range_pips,
+    london_start_hour_utc = EXCLUDED.london_start_hour_utc,
+    new_york_end_hour_utc = EXCLUDED.new_york_end_hour_utc,
+    allow_neutral_htf = EXCLUDED.allow_neutral_htf,
+    signal_cooldown_minutes = EXCLUDED.signal_cooldown_minutes,
+    fixed_stop_loss_pips = EXCLUDED.fixed_stop_loss_pips,
+    fixed_take_profit_pips = EXCLUDED.fixed_take_profit_pips,
+    parameter_overrides = EXCLUDED.parameter_overrides,
+    notes = EXCLUDED.notes,
+    updated_at = NOW();

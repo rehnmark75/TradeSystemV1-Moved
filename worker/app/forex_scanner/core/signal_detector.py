@@ -174,9 +174,9 @@ class SignalDetector:
             'RANGE_FADE': self._force_init_eurusd_range_fade,
             'EURUSD_RANGE_FADE': self._force_init_eurusd_range_fade,
             'ERF': self._force_init_eurusd_range_fade,
-            'RANGE_FADE_5M': self._force_init_eurusd_range_fade_5m,
-            'EURUSD_RANGE_FADE_5M': self._force_init_eurusd_range_fade_5m,
-            'ERF5': self._force_init_eurusd_range_fade_5m,
+            'RANGE_FADE_5M': self._force_init_eurusd_range_fade,
+            'EURUSD_RANGE_FADE_5M': self._force_init_eurusd_range_fade,
+            'ERF5': self._force_init_eurusd_range_fade,
             'RANGE_STRUCTURE': self._force_init_range_structure,
             'RS': self._force_init_range_structure,
             'VOLUME_PROFILE': self._force_init_volume_profile,
@@ -224,24 +224,14 @@ class SignalDetector:
             return False, f"Failed to force-init Mean Reversion: {e}"
 
     def _force_init_eurusd_range_fade(self) -> Tuple[bool, str]:
-        """Force-initialize EURUSD range-fade strategy for backtest."""
-        try:
-            self._eurusd_range_fade_profile = "15m"
-            self.eurusd_range_fade_strategy = None  # lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Range Fade strategy (lazy-load)")
-            return True, "Range Fade strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init Range Fade: {e}"
-
-    def _force_init_eurusd_range_fade_5m(self) -> Tuple[bool, str]:
-        """Force-initialize EURUSD 5m range-fade profile for backtest."""
+        """Force-initialize range-fade strategy for backtest (5m only)."""
         try:
             self._eurusd_range_fade_profile = "5m"
             self.eurusd_range_fade_strategy = None  # lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Range Fade 5m profile (lazy-load)")
-            return True, "Range Fade 5m profile force-initialized"
+            self.logger.info("🔧 Force-initialized Range Fade strategy (lazy-load, 5m)")
+            return True, "Range Fade strategy force-initialized"
         except Exception as e:
-            return False, f"Failed to force-init Range Fade 5m profile: {e}"
+            return False, f"Failed to force-init Range Fade: {e}"
 
     def _force_init_range_structure(self) -> Tuple[bool, str]:
         """Force-initialize Range Structure strategy for backtest."""
@@ -1777,18 +1767,20 @@ class SignalDetector:
         epic: str,
         pair: str,
         spread_pips: float = 1.5,
-        timeframe: str = '15m',
+        timeframe: str = '5m',
         current_timestamp: datetime = None,
         routing_context: Dict = None,
     ) -> Optional[Dict]:
-        """Detect signals using the range-fade strategy family."""
+        """Detect signals using the range-fade strategy family (5m only)."""
         try:
             if self.eurusd_range_fade_strategy is None:
                 try:
-                    from .strategies.range_fade_strategy import EURUSDRangeFadeStrategy
+                    try:
+                        from .strategies.range_fade_strategy import EURUSDRangeFadeStrategy
+                    except ImportError:
+                        from forex_scanner.core.strategies.range_fade_strategy import EURUSDRangeFadeStrategy
                     strategy_override = dict(self._config_override or {})
-                    selected_profile = self._eurusd_range_fade_profile or ("5m" if str(timeframe).lower() == "5m" else "15m")
-                    strategy_override.setdefault("erf_profile", selected_profile)
+                    strategy_override.setdefault("erf_profile", "5m")
                     self.eurusd_range_fade_strategy = EURUSDRangeFadeStrategy(
                         config=None,
                         logger=self.logger,
@@ -1796,7 +1788,7 @@ class SignalDetector:
                         config_override=strategy_override,
                     )
                     self.eurusd_range_fade_strategy.data_fetcher = self.data_fetcher
-                    self.logger.info("✅ Range Fade strategy lazy-loaded")
+                    self.logger.info("✅ Range Fade strategy lazy-loaded (5m)")
                 except ImportError as e:
                     self.logger.warning(f"⚠️ Could not import Range Fade strategy: {e}")
                     return None

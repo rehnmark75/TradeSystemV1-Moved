@@ -1,17 +1,16 @@
 #!/usr/bin/env python3
 """
-EURUSD range-fade profiles.
+Range-fade strategy (5m primary).
 
 Purpose
 -------
-Provide narrow, backtest-first EURUSD fade profiles that do not depend heavily
+Provide a narrow, backtest-first fade strategy that does not depend heavily
 on ADX. The setup fades local extremes only when higher timeframe context is
 supportive and the market is not obviously expanding.
 
 Design
 ------
-- Pair scope: EURUSD only (`CS.D.EURUSD.CEEM.IP`)
-- Primary timeframe: profile-dependent (`15m` or `5m`)
+- Primary timeframe: 5m (only supported profile)
 - Higher timeframe context: 1h
 - Entry family: controlled mean reversion / range fade
 - Deployment mode: monitor-only by default
@@ -74,7 +73,9 @@ def apply_config_overrides(
 
 
 @register_strategy("RANGE_FADE")
+@register_strategy("RANGE_FADE_5M")
 @register_strategy("EURUSD_RANGE_FADE")
+@register_strategy("EURUSD_RANGE_FADE_5M")
 class EURUSDRangeFadeStrategy(StrategyInterface):
     def __init__(self, config=None, logger=None, db_manager=None, config_override: dict = None):
         self.logger = logger or logging.getLogger(__name__)
