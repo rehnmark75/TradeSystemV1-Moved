@@ -89,6 +89,8 @@ class SMCRejectionHistoryManager:
     STAGE_PAIR_SCALP_FILTER = 'PAIR_SCALP_FILTER'  # Per-pair scalp mode filter rejection
     # Regime-based rejection stages
     STAGE_REGIME_BREAKOUT = 'REGIME_BREAKOUT'  # Breakout regime blocked (40% WR historically)
+    # MFI momentum filter (direction-aware oversold/overbought + slope gate)
+    STAGE_MFI_FILTER = 'MFI_FILTER'  # MFI rising on sell / falling on buy / extreme level
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -111,7 +113,9 @@ class SMCRejectionHistoryManager:
         # v2.38.0: Per-pair scalp filters
         STAGE_PAIR_SCALP_FILTER,
         # Regime-based rejections
-        STAGE_REGIME_BREAKOUT
+        STAGE_REGIME_BREAKOUT,
+        # MFI momentum filter
+        STAGE_MFI_FILTER,
     ]
 
     def __init__(self, db_manager, config=None):

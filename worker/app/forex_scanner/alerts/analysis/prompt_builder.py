@@ -841,13 +841,14 @@ This is a MOMENTUM continuation trade (price beyond swing break).
                     seq_str = ' → '.join(macro_structure.get('swing_sequence', [])) or 'insufficient pivots'
                     ema_str = macro_structure.get('ema50_relation', 'unknown')
                     macro_auth_block = f"""
-⚠️ [AUTHORITATIVE PRE-COMPUTED DATA — DO NOT OVERRIDE WITH VISUAL IMPRESSION]
-4H Macro Structure (computed from raw price data — treat as ground truth):
+📊 [4H MACRO CONTEXT — PRE-COMPUTED FROM RAW PRICE DATA]
+The following 4H structure values are accurate (computed, not inferred). Do not override these specific values with a visual impression of the 4H panel:
   • Trend: {macro_structure['trend_label']}
   • Recent swing sequence (oldest → newest): {seq_str}
   • Price vs 4H EMA50: {ema_str}
-Your structure assessment of the 4H panel MUST agree with this data. If the chart appears to contradict it, prioritise this data.
-[END AUTHORITATIVE DATA]
+
+**How to use this data:** 4H is macro backdrop only — it is NOT the primary HTF for this signal and is NOT an automatic rejection trigger. The primary HTF (stated below) drives the verdict. A 4H trend that opposes the signal is at most a −1 penalty when the primary HTF aligns with the signal direction.
+[END 4H MACRO CONTEXT]
 """
 
                 chart_instruction = f"""
@@ -1116,14 +1117,14 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
   ⚠️ EXCEPTION: If MTF Confluence ≥ 0.6 OR "All TFs aligned" flag is present, the strategy's multi-timeframe system has already validated direction. Do NOT apply counter-trend cap — score on entry quality and S/R location instead.
 - Entry within **{sr_buffer_pips} pips** of major resistance (for BUY) or support (for SELL): apply a −2 scoring penalty. This is NOT an automatic rejection — SMC reversal entries at S/R are the strategy's edge. Only cap at MAX SCORE 4 if the S/R level is confirmed MAJOR (multi-touch, HTF-significant) AND entry is within 2 pips AND {primary_htf_label} trend opposes the signal.
 - Entry at round number psychological level (x.x000, x.x500) against HTF trend: MAX SCORE 3, REJECT
-- Entry at TOP of local recovery in a downtrend (or BOTTOM of local selloff in uptrend): MAX SCORE 4, REJECT
+- Entry at TOP of local recovery in a downtrend (or BOTTOM of local selloff in uptrend): apply a −2 scoring penalty. Cap at MAX SCORE 4 REJECT only if ALL THREE are true: (a) {primary_htf_label} trend opposes signal, (b) no reversal confirmation candle visible on trigger TF, (c) a MAJOR S/R level is also within 2 pips blocking the path. Otherwise score penalty only — SMC often enters near local turning points by design.
 - **4H macro structure (RANGING / LL / LH etc.) alone is NOT a cap or rejection trigger.** In scalp mode the primary HTF is {primary_htf_label}, not 4H. 4H is macro backdrop only — if {primary_htf_label} aligns with the signal, a conflicting 4H structure is at most a −1 penalty.
 
 ⚠️ TESTING MODE: R:R and TP minimums are DISABLED. We are testing small, quick profits. Do NOT reject based on low R:R or small TP. Focus on trend alignment, HTF structure, and entry location quality.
 
 **ENTRY TYPE EVALUATION:**
 - PULLBACK entries: Prefer entries in 38.2%-61.8% Fib zone (check 5m chart). Outside zone = lower score but not automatic rejection
-- MOMENTUM entries: Accept up to 50% beyond break point. Look for strong directional candles on 15m, reject if showing exhaustion
+- MOMENTUM entries: Accept up to 50% beyond break point. Look for strong directional candles on 15m. Exhaustion signs alone = −2 penalty, not auto-reject. Only REJECT a MOMENTUM entry when exhaustion is paired with counter-HTF bias AND a clear reversal candle on the trigger TF.
 - Check entry type box on 5m chart for quick visual confirmation
 
 **SUPPORT/RESISTANCE EVALUATION (check 15m chart):**
@@ -1136,17 +1137,19 @@ REASON: [2-3 sentences explaining your professional assessment. Focus on: trend 
 - RANGING regime + trend-following signal: reduce score by 1-2 points
 - RSI overbought (>65) for BUY or oversold (<35) for SELL: flag as concern, reduce score by 1
 - ADX < 20 (weak trend): flag low trend strength, reduce score by 1 for trend-following entries
-- MTF confluence < 0.5 or not all TFs aligned: treat as increased risk
+- MTF confluence < 0.5 or not all TFs aligned: treat as increased risk (informational — already captured by the HTF/MTF hard cap above, do NOT subtract again)
 - Entry Quality Score < 0.4: strategy itself rated this entry poorly — reduce score by 1
-- LPF "Would Block: YES": the loss-prevention system flagged this — apply additional caution, reduce score by 1-2
-- MI Confidence Modifier strongly negative (< -10%): market intelligence is bearish on this signal
+- LPF "Would Block: YES": informational only — LPF runs as its own upstream filter. Do NOT apply a further score penalty here.
+- MI Confidence Modifier strongly negative (< -10%): informational context only — do NOT apply a further score penalty here unless MI contradicts both HTF bias AND entry quality.
+
+**IMPORTANT — penalty cap:** the combined penalty from the MARKET CONTEXT block above is capped at −2 total. Pick the single most severe signal and apply that; do NOT stack all items into a cumulative −4 to −6. HTF alignment, swing break cleanliness, major S/R obstruction, and exhaustion-at-momentum are the four factors that should drive the decision — everything else is shading, not compounding reject pressure.
 
 **AUTOMATIC REJECTION CRITERIA (ANY ONE = REJECT):**
 - **{primary_htf_label} trend structure opposes signal AND MTF Confluence < 0.6** — evaluate against the strategy's primary HTF ({primary_htf_label}). If MTF Confluence ≥ 0.6 or "All TFs aligned", skip this rejection. Do NOT reject based on 4H macro structure alone when {primary_htf_label} aligns with the signal.
 - **Entry AT resistance (BUY) or AT support (SELL)** — REJECT ONLY if ALL THREE are true: (a) price within **2 pips** of a MAJOR (multi-touch, HTF-confirmed) resistance/support, (b) {primary_htf_label} trend opposes the signal, (c) no reversal confirmation candle visible. A near-S/R entry that's WITH the strategy's primary HTF bias is not an auto-reject — score penalty only.
-- **Entry at top of local recovery in downtrend** — If {primary_htf_label} is bearish but trigger/entry TFs show a rally, and entry is near the TOP of that rally (not at a pullback), this is buying into supply. REJECT.
-- MOMENTUM entry showing reversal candles on trigger TF (engulfing, pin bars against direction)
-- S/R level on trigger TF blocking more than 75% of path to target
+- **Entry at top of local recovery / bottom of local selloff** — penalty only by default (see HARD SCORE CAPS above). REJECT here only if {primary_htf_label} opposes signal AND no reversal confirmation candle AND major S/R within 2 pips (same 3-condition AND-gate).
+- MOMENTUM entry showing reversal candles on trigger TF (engulfing, pin bars against direction) AND {primary_htf_label} opposes the signal — reversal candle alone is a −2 penalty, not an auto-reject.
+- S/R level on trigger TF blocking more than 75% of path to target AND {primary_htf_label} opposes the signal — partial obstruction with HTF bias alignment is a penalty, not a reject.
 
 **NOT automatic rejection triggers (apply as score penalties instead):**
 - EMA 9/21 crossed against signal direction on trigger TF → −1 penalty

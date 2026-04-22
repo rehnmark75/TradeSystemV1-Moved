@@ -25,6 +25,7 @@ import json
 import numpy as np  # Add this import
 import hashlib
 from psycopg2.extras import RealDictCursor
+from alerts.analysis.response_parser import get_min_approval_score
 try:
     from utils.scanner_utils import make_json_serializable
 except ImportError:
@@ -708,10 +709,11 @@ class AlertHistoryManager:
             raw_score = claude_result.get('score')
             score = raw_score if isinstance(raw_score, (int, float)) else 0
             decision = claude_result.get('decision') or 'UNKNOWN'
+            min_approval_score = get_min_approval_score()
 
             if decision == 'REJECT':
                 rejection_category = 'explicit_rejection'
-            elif score < 6:  # Assumes min_claude_score of 6
+            elif score < min_approval_score:
                 rejection_category = 'low_score'
             else:
                 rejection_category = 'other'

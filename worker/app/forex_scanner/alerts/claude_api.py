@@ -2387,13 +2387,14 @@ Respond with ONLY the three lines above, nothing else.
                     score = num
                     break
             
-            # Determine decision based on content
+            # Determine decision based on content using the configured approval floor
             response_lower = response.lower()
             decision = 'APPROVE'
+            min_approval_score = get_min_approval_score()
             
             if any(word in response_lower for word in ['reject', 'poor', 'weak', 'avoid', 'bad']):
                 decision = 'REJECT'
-            elif score < 6:
+            elif score < min_approval_score:
                 decision = 'REJECT'
             
             return {
