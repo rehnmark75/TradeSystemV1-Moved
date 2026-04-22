@@ -53,6 +53,7 @@ export default function ScannerSettingsPage() {
   const [activeCategory, setActiveCategory] = useState<string | null>(null);
   const [showSaveModal, setShowSaveModal] = useState(false);
 
+  const contentRef = useRef<HTMLDivElement>(null);
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
 
   useEffect(() => {
@@ -116,6 +117,9 @@ export default function ScannerSettingsPage() {
   // IntersectionObserver for active category tracking
   useEffect(() => {
     const refs = sectionRefs.current;
+    const root = contentRef.current;
+    if (!root) return;
+
     const observer = new IntersectionObserver(
       (entries) => {
         for (const entry of entries) {
@@ -125,7 +129,7 @@ export default function ScannerSettingsPage() {
           }
         }
       },
-      { threshold: 0.1, rootMargin: "-100px 0px -60% 0px" }
+      { root, threshold: 0.1, rootMargin: "-100px 0px -60% 0px" }
     );
     refs.forEach((el) => observer.observe(el));
     return () => observer.disconnect();
@@ -133,7 +137,13 @@ export default function ScannerSettingsPage() {
 
   const scrollToCategory = (category: string) => {
     const el = sectionRefs.current.get(category);
-    if (el) el.scrollIntoView({ behavior: "smooth", block: "start" });
+    const container = contentRef.current;
+    if (!el || !container) return;
+
+    container.scrollTo({
+      top: Math.max(0, el.offsetTop - 12),
+      behavior: "smooth",
+    });
   };
 
   const handleSave = () => setShowSaveModal(true);
@@ -223,7 +233,7 @@ export default function ScannerSettingsPage() {
           onSelect={scrollToCategory}
         />
 
-        <div className="strategy-content">
+        <div className="strategy-content" ref={contentRef}>
           {loading ? (
             <div className="settings-placeholder">Loading scanner settings…</div>
           ) : error ? (

@@ -68,8 +68,21 @@ export default function CategoryNav({
   useEffect(() => {
     if (!activeCategory || !navRef.current) return;
     const active = navRef.current.querySelector(".category-nav-item.active");
-    if (active) {
-      active.scrollIntoView({ block: "nearest", behavior: "smooth" });
+    if (!(active instanceof HTMLElement)) return;
+
+    const nav = navRef.current;
+    const navTop = nav.scrollTop;
+    const navBottom = navTop + nav.clientHeight;
+    const itemTop = active.offsetTop;
+    const itemBottom = itemTop + active.offsetHeight;
+
+    if (itemTop < navTop) {
+      nav.scrollTo({ top: itemTop, behavior: "smooth" });
+      return;
+    }
+
+    if (itemBottom > navBottom) {
+      nav.scrollTo({ top: itemBottom - nav.clientHeight, behavior: "smooth" });
     }
   }, [activeCategory]);
 
