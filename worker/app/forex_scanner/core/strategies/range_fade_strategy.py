@@ -88,6 +88,9 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         apply_config_overrides(self.config, self._config_override)
         self._cooldowns: Dict[str, datetime] = {}
         self._current_timestamp: Optional[datetime] = None
+        self._rej_counts: Dict[str, int] = {}
+        self._rej_last_log: datetime = datetime.now(timezone.utc)
+        self._rej_log_interval_minutes: int = 15
 
         self.logger.info(
             "[RANGE_FADE] profile=%s v%s initialized | TF=%s HTF=%s "
@@ -128,19 +131,24 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         **kwargs,
     ) -> Optional[Dict]:
         self._current_timestamp = current_timestamp
+        self.flush_rejections()
         cfg = self.config
         df = df_trigger if df_trigger is not None else df_entry
         if df is None or len(df) < max(cfg.bb_period, cfg.range_lookback_bars) + 5:
+            self._reject(epic, "insufficient_data")
             return None
 
         if not cfg.is_pair_enabled(epic):
+            self._reject(epic, "pair_disabled")
             return None
 
         if not self._check_cooldown(epic):
+            self._reject(epic, "cooldown")
             return None
 
         now = self._resolve_now(df)
         if not cfg.is_session_allowed(now.hour):
+            self._reject(epic, "session_blocked")
             return None
 
         close = df["close"].astype(float)
@@ -162,13 +170,16 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         latest_atr = self._safe_float(atr.iloc[-1])
         latest_bar_range = self._safe_float((high.iloc[-1] - low.iloc[-1]))
         if None in (latest_upper, latest_lower, latest_mid, latest_rsi, latest_atr, latest_bar_range):
+            self._reject(epic, "indicator_nan")
             return None
 
         pip = 0.01 if "JPY" in epic.upper() else 0.0001
         band_width_pips = (latest_upper - latest_lower) / pip
         if band_width_pips < cfg.min_band_width_pips or band_width_pips > cfg.max_band_width_pips:
+            self._reject(epic, "band_width_out_of_range")
             return None
         if latest_bar_range / pip > cfg.max_current_range_pips:
+            self._reject(epic, "bar_range_too_wide")
             return None
 
         prior_high = high.rolling(cfg.range_lookback_bars).max().shift(1)
@@ -176,6 +187,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         range_high = self._safe_float(prior_high.iloc[-1])
         range_low = self._safe_float(prior_low.iloc[-1])
         if range_high is None or range_low is None:
+            self._reject(epic, "no_prior_range")
             return None
 
         distance_to_low_pips = (latest_close - range_low) / pip
@@ -183,6 +195,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
 
         htf_bias = self._get_htf_bias(df_4h)
         if htf_bias is None:
+            self._reject(epic, "no_htf_bias")
             return None
 
         direction: Optional[str] = None
@@ -212,6 +225,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
             range_proximity = max(0.0, cfg.range_proximity_pips - distance_to_high_pips) / max(cfg.range_proximity_pips, 1e-6)
 
         if direction is None:
+            self._reject(epic, "no_trigger")
             return None
 
         score = min(1.0, 0.45 * rsi_extremity + 0.35 * min(1.0, band_penetration) + 0.20 * range_proximity)
@@ -369,6 +383,25 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         if getattr(now, "tzinfo", None) is None:
             now = now.replace(tzinfo=timezone.utc)
         self._cooldowns[epic] = now + timedelta(minutes=self.config.signal_cooldown_minutes)
+
+    def _reject(self, epic: str, reason: str) -> None:
+        self._rej_counts[reason] = self._rej_counts.get(reason, 0) + 1
+
+    def flush_rejections(self) -> None:
+        if not self._rej_counts:
+            return
+        now = datetime.now(timezone.utc)
+        elapsed = (now - self._rej_last_log).total_seconds() / 60.0
+        if elapsed < self._rej_log_interval_minutes:
+            return
+        top = sorted(self._rej_counts.items(), key=lambda x: -x[1])[:6]
+        total = sum(self._rej_counts.values())
+        self.logger.info(
+            "[RANGE_FADE] Rejection rollup (last %dmin, %d rejections): %s",
+            int(elapsed), total, dict(top),
+        )
+        self._rej_counts.clear()
+        self._rej_last_log = now
 
 
 def create_range_fade_strategy(config=None, logger=None, db_manager=None, config_override=None):
