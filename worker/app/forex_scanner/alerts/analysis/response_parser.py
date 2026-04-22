@@ -5,8 +5,50 @@ Extracted from claude_api.py for better modularity
 """
 
 import logging
+import os
 import re
+import time
 from typing import Dict, Optional
+
+# Claude approval threshold resolver.
+#
+# Historically the parser hard-coded `score >= 6 -> APPROVE`, which shadowed
+# `scanner_global_config.min_claude_quality_score` (the DB flag that
+# trade_validator.py already reads). These two gates are now unified:
+# the parser also reads the DB value, with an env-var override for
+# fast debug/A-B without a DB write.
+#
+# Resolution order:
+#   1. CLAUDE_MIN_APPROVAL_SCORE env var (if set & parseable)
+#   2. scanner_global_config.min_claude_quality_score
+#   3. Hard default 6 (previous behavior)
+#
+# Cached for _APPROVAL_TTL_S so DB edits are picked up without restart.
+_APPROVAL_TTL_S = 60
+_approval_cache: Dict[str, float] = {"value": 6.0, "ts": 0.0}
+
+
+def get_min_approval_score(default: int = 6) -> int:
+    env_val = os.environ.get("CLAUDE_MIN_APPROVAL_SCORE")
+    if env_val is not None:
+        try:
+            return int(float(env_val))
+        except ValueError:
+            pass
+
+    now = time.time()
+    if now - _approval_cache["ts"] < _APPROVAL_TTL_S:
+        return int(_approval_cache["value"])
+
+    try:
+        from services.scanner_config_service import get_scanner_config
+        cfg = get_scanner_config()
+        val = int(getattr(cfg, "min_claude_quality_score", default) or default)
+        _approval_cache["value"] = float(val)
+        _approval_cache["ts"] = now
+        return val
+    except Exception:
+        return default
 
 
 class ResponseParser:
@@ -375,7 +417,7 @@ class ResponseParser:
             elif rejection_count > approval_count and rejection_count > 0:
                 decision = 'REJECT'
             elif score is not None:
-                decision = 'APPROVE' if score >= 6 else 'REJECT'
+                decision = 'APPROVE' if score >= get_min_approval_score() else 'REJECT'
                 self.logger.debug(f"    Decision based on score {score}: {decision}")
             else:
                 decision = 'APPROVE'  # Conservative default
@@ -478,7 +520,7 @@ class ResponseParser:
             elif total_approve > total_reject:
                 decision = 'APPROVE'
             elif score is not None:
-                decision = 'APPROVE' if score >= 6 else 'REJECT'
+                decision = 'APPROVE' if score >= get_min_approval_score() else 'REJECT'
             else:
                 decision = 'APPROVE'  # Conservative default
             

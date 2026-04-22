@@ -16,6 +16,8 @@ import random
 import re
 from datetime import datetime
 from typing import Dict, Optional, List
+
+from alerts.analysis.response_parser import get_min_approval_score
 try:
     import config
 except ImportError:
@@ -1205,7 +1207,7 @@ REASON: [Brief reason]"""
             elif total_approve > total_reject:
                 decision = 'APPROVE'
             elif score is not None:
-                decision = 'APPROVE' if score >= 6 else 'REJECT'
+                decision = 'APPROVE' if score >= get_min_approval_score() else 'REJECT'
             else:
                 decision = 'APPROVE'  # Conservative default
             
@@ -1311,7 +1313,7 @@ REASON: [Brief reason]"""
                 decision = 'REJECT'
             elif score is not None:
                 # Base decision on score
-                decision = 'APPROVE' if score >= 6 else 'REJECT'
+                decision = 'APPROVE' if score >= get_min_approval_score() else 'REJECT'
                 self.logger.debug(f"    Decision based on score {score}: {decision}")
             
             if decision:
