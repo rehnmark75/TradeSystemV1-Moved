@@ -844,7 +844,13 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
                     individual_results['range_structure'] = None
 
-            if self.eurusd_range_fade_enabled and epic in ('CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP'):
+            if self.eurusd_range_fade_enabled and epic in (
+                'CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP',
+                'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
+                'CS.D.AUDUSD.MINI.IP', 'CS.D.USDCHF.MINI.IP',
+                'CS.D.USDCAD.MINI.IP', 'CS.D.NZDUSD.MINI.IP',
+                'CS.D.AUDJPY.MINI.IP',
+            ):
                 try:
                     self.logger.debug(f"🔍 [RANGE_FADE] Starting detection for {epic}")
                     erf_signal = self.detect_eurusd_range_fade_signals(

@@ -27,7 +27,17 @@ logger = logging.getLogger(__name__)
 
 EURUSD_EPIC = "CS.D.EURUSD.CEEM.IP"
 EURJPY_EPIC = "CS.D.EURJPY.MINI.IP"
-SUPPORTED_EPICS = [EURUSD_EPIC, EURJPY_EPIC]
+SUPPORTED_EPICS = [
+    EURUSD_EPIC,
+    EURJPY_EPIC,
+    "CS.D.GBPUSD.MINI.IP",
+    "CS.D.USDJPY.MINI.IP",
+    "CS.D.AUDUSD.MINI.IP",
+    "CS.D.USDCHF.MINI.IP",
+    "CS.D.USDCAD.MINI.IP",
+    "CS.D.NZDUSD.MINI.IP",
+    "CS.D.AUDJPY.MINI.IP",
+]
 _TRUE_STR = {"1", "true", "yes", "on", "y", "t"}
 
 

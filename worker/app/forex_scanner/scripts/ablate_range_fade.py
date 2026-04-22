@@ -1,14 +1,19 @@
 #!/usr/bin/env python3
-"""Gate ablation for the EURUSD range-fade strategy.
+"""Gate ablation for the RANGE_FADE strategy (epic-parameterized).
 
-Runs a baseline config, then a series of single-gate-relaxed variants
-(each removing ONE filter at a time), plus a fully-relaxed upper bound.
-Reports signals/month and PF delta vs baseline so you can see which
-gates carry edge vs. which just shrink sample size.
+Inverse-ablation design: start from a PERMISSIVE baseline (all filter gates
+relaxed), then add each gate back one at a time. Reports signals/month and PF
+delta vs. baseline so you can see which gates carry edge vs. which just shrink
+sample size.
+
+JPY-pair awareness: SL/TP default to 10/15 pips for JPY crosses and 8/12 for
+majors, matching the per-pair conventions elsewhere in the repo. Override with
+--sl/--tp if needed.
 
 Usage:
-    docker exec task-worker python /app/forex_scanner/scripts/ablate_range_fade.py
-    docker exec task-worker python /app/forex_scanner/scripts/ablate_range_fade.py --days 90
+    docker exec task-worker python /app/forex_scanner/scripts/ablate_range_fade.py --epic CS.D.EURUSD.CEEM.IP
+    docker exec task-worker python /app/forex_scanner/scripts/ablate_range_fade.py --epic CS.D.GBPUSD.MINI.IP --days 90
+    docker exec task-worker python /app/forex_scanner/scripts/ablate_range_fade.py --epic CS.D.USDJPY.MINI.IP --sl 10 --tp 15
 """
 from __future__ import annotations
 
@@ -20,26 +25,31 @@ from typing import Dict, List, Optional
 
 
 BACKTEST_CMD = ["python", "/app/forex_scanner/backtest_cli.py"]
-EPIC = "CS.D.EURUSD.CEEM.IP"
 STRATEGY = "RANGE_FADE"
 
 
-BASELINE: Dict[str, object] = {
-    "erf_profile": "5m",
-    "monitor_only": "false",
-    "rsi_oversold": 50,
-    "rsi_overbought": 50,
-    "london_start_hour_utc": 0,
-    "new_york_end_hour_utc": 23,
-    "range_proximity_pips": 999.0,
-    "max_current_range_pips": 999.0,
-    "min_band_width_pips": 0.0,
-    "max_band_width_pips": 9999.0,
-    "allow_neutral_htf": "true",
-    "signal_cooldown_minutes": 0,
-    "fixed_stop_loss_pips": 8,
-    "fixed_take_profit_pips": 12,
-}
+def default_sl_tp(epic: str) -> tuple:
+    """JPY crosses have 10x larger pip values — use wider defaults."""
+    return (10, 15) if "JPY" in epic.upper() else (8, 12)
+
+
+def build_baseline(sl: int, tp: int) -> Dict[str, object]:
+    return {
+        "erf_profile": "5m",
+        "monitor_only": "false",
+        "rsi_oversold": 50,
+        "rsi_overbought": 50,
+        "london_start_hour_utc": 0,
+        "new_york_end_hour_utc": 23,
+        "range_proximity_pips": 999.0,
+        "max_current_range_pips": 999.0,
+        "min_band_width_pips": 0.0,
+        "max_band_width_pips": 9999.0,
+        "allow_neutral_htf": "true",
+        "signal_cooldown_minutes": 0,
+        "fixed_stop_loss_pips": sl,
+        "fixed_take_profit_pips": tp,
+    }
 
 
 ABLATIONS: List[Dict[str, object]] = [
@@ -101,8 +111,8 @@ def _parse_int_last(text: str, label: str) -> Optional[int]:
     return int(matches[-1]) if matches else None
 
 
-def run_backtest(label: str, days: int, overrides: Dict[str, object]) -> RunResult:
-    cmd = BACKTEST_CMD + ["--epic", EPIC, "--days", str(days), "--strategy", STRATEGY] + _override_args(overrides)
+def run_backtest(label: str, days: int, overrides: Dict[str, object], epic: str) -> RunResult:
+    cmd = BACKTEST_CMD + ["--epic", epic, "--days", str(days), "--strategy", STRATEGY] + _override_args(overrides)
     proc = subprocess.run(cmd, capture_output=True, text=True)
     out = proc.stdout + "\n" + proc.stderr
 
@@ -134,17 +144,28 @@ def signals_per_month(res: RunResult) -> float:
 
 def main() -> int:
     parser = argparse.ArgumentParser()
+    parser.add_argument("--epic", required=True, help="IG epic, e.g. CS.D.EURUSD.CEEM.IP")
     parser.add_argument("--days", type=int, default=90)
+    parser.add_argument("--sl", type=int, default=None, help="Fixed SL pips (auto-selected by JPY if omitted)")
+    parser.add_argument("--tp", type=int, default=None, help="Fixed TP pips (auto-selected by JPY if omitted)")
     args = parser.parse_args()
+
+    default_sl, default_tp = default_sl_tp(args.epic)
+    sl = args.sl if args.sl is not None else default_sl
+    tp = args.tp if args.tp is not None else default_tp
+    baseline = build_baseline(sl, tp)
+    pair_label = args.epic.split(".")[2] if args.epic.count(".") >= 2 else args.epic
+
+    print(f"[ablate_range_fade] epic={args.epic} days={args.days} SL/TP={sl}/{tp}", flush=True)
 
     results: List[RunResult] = []
     baseline_res: Optional[RunResult] = None
 
     for i, ablation in enumerate(ABLATIONS, start=1):
         label = str(ablation.get("__label__", f"ablation_{i}"))
-        overrides = {**BASELINE, **{k: v for k, v in ablation.items() if not k.startswith("__")}}
+        overrides = {**baseline, **{k: v for k, v in ablation.items() if not k.startswith("__")}}
         print(f"[{i:02d}/{len(ABLATIONS)}] running: {label}", flush=True)
-        res = run_backtest(label, args.days, overrides)
+        res = run_backtest(label, args.days, overrides, args.epic)
 
         if not res.ok:
             print(f"    FAILED: {res.error[-400:]}", flush=True)
@@ -159,11 +180,11 @@ def main() -> int:
             )
 
         results.append(res)
-        if label.startswith("baseline"):
+        if label.startswith("PERMISSIVE"):
             baseline_res = res
 
     print("\n" + "=" * 100, flush=True)
-    print(f"ABLATION REPORT — EURUSD RANGE_FADE, {args.days}d window", flush=True)
+    print(f"ABLATION REPORT — {pair_label} RANGE_FADE, {args.days}d window (SL/TP={sl}/{tp})", flush=True)
     print("=" * 100, flush=True)
     print(f"{'gate relaxed':<42} {'n':>5} {'sig/mo':>8} {'pf':>6} {'wr%':>6} {'exp':>7} {'d(sig/mo)':>10} {'d(pf)':>7}", flush=True)
     print("-" * 100, flush=True)
