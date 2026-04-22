@@ -34,6 +34,7 @@ Design decisions (bake the lessons from RANGING_MARKET in from day 1)
 """
 from __future__ import annotations
 
+import copy
 import logging
 import os
 from dataclasses import dataclass, field
@@ -284,10 +285,14 @@ class MeanReversionStrategy(StrategyInterface):
         - S/R proximity bonus
     """
 
-    def __init__(self, config=None, logger=None, db_manager=None):
+    def __init__(self, config=None, logger=None, db_manager=None, config_override: Optional[Dict[str, Any]] = None):
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
         self.config = get_mean_reversion_config()
+
+        if config_override:
+            self.config = copy.deepcopy(self.config)
+            self._apply_config_override(config_override)
 
         self._cooldowns: Dict[str, datetime] = {}
         self._current_timestamp: Optional[datetime] = None
@@ -296,7 +301,71 @@ class MeanReversionStrategy(StrategyInterface):
             f"[MEAN_REVERSION] v{self.config.version} initialized | "
             f"hard ADX: 15m≤{self.config.adx_hard_ceiling_primary} "
             f"1h≤{self.config.adx_hard_ceiling_htf}"
+            + (f" | overrides={len(config_override)}" if config_override else "")
         )
+
+    # ------------------------------------------------------------------
+    # Ablation / backtest-isolation support
+    # ------------------------------------------------------------------
+
+    _PAIR_LEVEL_KEYS = {"is_enabled", "monitor_only"}
+
+    @staticmethod
+    def _coerce_value(key: str, value: Any, reference: Any) -> Any:
+        """Type-coerce override value to match the reference attribute's type."""
+        if isinstance(reference, bool):
+            if isinstance(value, bool):
+                return value
+            return str(value).strip().lower() in ("true", "1", "yes", "on")
+        if isinstance(reference, int) and not isinstance(reference, bool):
+            try:
+                return int(float(value))
+            except (ValueError, TypeError):
+                return reference
+        if isinstance(reference, float):
+            try:
+                return float(value)
+            except (ValueError, TypeError):
+                return reference
+        return value
+
+    def _apply_config_override(self, overrides: Dict[str, Any]) -> None:
+        """Apply a flat key=value override dict to the per-instance config copy.
+
+        Global attributes (rsi_oversold, bb_mult, adx_hard_ceiling_*, ...) are
+        written onto the MeanReversionConfig dataclass and any shadowing per-pair
+        entries are wiped so the override wins. Pair-level flags (is_enabled,
+        monitor_only) are broadcast across every loaded pair override so a
+        single-pair backtest isn't blocked by DB state.
+        """
+        pair_rows = getattr(self.config, "_pair_overrides", None) or {}
+
+        for raw_key, raw_value in overrides.items():
+            key = str(raw_key)
+            if key in self._PAIR_LEVEL_KEYS:
+                # Force the flag onto every loaded pair override row + wipe
+                # JSONB shadow. Global dataclass has no attribute for these.
+                for row in pair_rows.values():
+                    coerced = self._coerce_value(key, raw_value, row.get(key, False))
+                    row[key] = coerced
+                    jsonb = row.get("parameter_overrides") or {}
+                    if key in jsonb:
+                        jsonb.pop(key, None)
+                        row["parameter_overrides"] = jsonb
+                continue
+
+            # Global attr path: wipe per-pair shadows, then set global.
+            for row in pair_rows.values():
+                row.pop(key, None)
+                jsonb = row.get("parameter_overrides") or {}
+                if key in jsonb:
+                    jsonb.pop(key, None)
+                    row["parameter_overrides"] = jsonb
+
+            if hasattr(self.config, key):
+                current = getattr(self.config, key)
+                coerced = self._coerce_value(key, raw_value, current)
+                setattr(self.config, key, coerced)
 
     @property
     def strategy_name(self) -> str:

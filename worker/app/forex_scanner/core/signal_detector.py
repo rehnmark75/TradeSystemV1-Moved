@@ -1724,9 +1724,11 @@ class SignalDetector:
                         config=None,
                         logger=self.logger,
                         db_manager=self.db_manager,
+                        config_override=self._config_override,
                     )
                     self.mean_reversion_strategy.data_fetcher = self.data_fetcher
-                    self.logger.info("✅ Mean Reversion strategy lazy-loaded")
+                    override_note = f" with {len(self._config_override)} overrides" if self._config_override else ""
+                    self.logger.info(f"✅ Mean Reversion strategy lazy-loaded{override_note}")
                 except ImportError as e:
                     self.logger.warning(f"⚠️ Could not import Mean Reversion strategy: {e}")
                     return None
