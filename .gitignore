@@ -91,6 +91,9 @@ docs/
 vector-db/vectordb/32cb61c2-d8ab-4295-b0ed-f764a453d8a2/length.bin
 worker/app/stock_scanner/logs/
 
+# Per-strategy ablation/backtest output logs (reproducible artifacts)
+worker/app/forex_scanner/logs/ablate_*/
+
 # Claude analysis output files (generated runtime data)
 worker/app/claude_analysis_enhanced/
 worker/app/claude_rejections/
