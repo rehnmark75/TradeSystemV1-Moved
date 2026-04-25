@@ -52,7 +52,15 @@ function parseWindow(value: string | null): number {
 }
 
 type SimResult = {
-  outcome: "WIN" | "LOSS" | "BREAKEVEN" | "TRAILED" | "TRAILED_FORCED" | "STILL_OPEN" | "NO_DATA";
+  outcome:
+    | "WIN"
+    | "LOSS"
+    | "BREAKEVEN"
+    | "TRAILED"
+    | "TRAILED_FORCED"
+    | "FLAT_CLOSED"
+    | "STILL_OPEN"
+    | "NO_DATA";
   pips: number;
   minutes_to_resolve: number | null;
   max_favorable_pips: number;
@@ -68,11 +76,11 @@ function simulateTrade(
   slPips: number,
   tpPips: number,
   trailing: TrailingConfig | null,
-  candles: Array<{ start_time: Date; high: number; low: number }>,
+  candles: Array<{ start_time: Date; high: number; low: number; close: number }>,
   alertTime: Date
 ): SimResult {
   const pip = pipSize(row.epic);
-  const entry = row.price;
+  const entry = Number(row.price);
   const isLong = ["BULL", "BUY", "LONG"].includes(row.signal_type.toUpperCase());
   const tp = isLong ? entry + tpPips * pip : entry - tpPips * pip;
 
@@ -213,13 +221,18 @@ function simulateTrade(
     }
   }
 
-  // End of walk. For alerts older than 48h, a realistic assumption is the trade resolved long ago
-  // (broker or operator closed the position). Force-close at the current locked stop — the guaranteed
-  // outcome given the stop trailed to that level. For alerts <48h old, treat as genuinely live.
+  // End of walk. The alert signal is closed even when the hypothetical TP/SL did not hit.
+  // For older trailed alerts, keep the conservative locked-stop handling; otherwise
+  // close the counterfactual at the latest real candle close.
   const candleSpanHours =
     candles.length > 0
       ? (candles[candles.length - 1].start_time.getTime() - alertTime.getTime()) / 3600000
       : 0;
+  const lastCandle = candles[candles.length - 1];
+  const flatClosePipsRaw = isLong
+    ? (lastCandle.close - entry) / pip
+    : (entry - lastCandle.close) / pip;
+  const flatClosePips = Math.round(flatClosePipsRaw * 10) / 10;
   const OLD_ALERT_THRESHOLD_HOURS = 48;
   const isOldAlert = alertAgeHours >= OLD_ALERT_THRESHOLD_HOURS;
 
@@ -250,28 +263,30 @@ function simulateTrade(
         alert_age_hours: Math.round(alertAgeHours * 10) / 10,
       };
     }
-    // Stop never advanced in an old alert — drifted around without resolving. Treat as expired (no outcome).
+    // Stop never advanced in an old alert. The signal is closed, so mark the
+    // counterfactual flat at the latest real candle close instead of unresolved.
     return {
-      outcome: "STILL_OPEN",
-      pips: 0,
-      minutes_to_resolve: null,
+      outcome: "FLAT_CLOSED",
+      pips: flatClosePips,
+      minutes_to_resolve: Math.round(candleSpanHours * 60),
       max_favorable_pips: Math.round(peakMfe * 10) / 10,
       max_adverse_pips: Math.round(peakAdv * 10) / 10,
-      exit_reason: `no resolve in ${Math.round(candleSpanHours / 24)}d — stop never advanced, TP never hit`,
+      exit_reason: `flat close at latest candle (${flatClosePips >= 0 ? "+" : ""}${flatClosePips} pips) — TP/SL not hit over ${Math.round(candleSpanHours / 24)}d`,
       stop_path: stopPath,
       locked_pips: stopLockPips,
       alert_age_hours: Math.round(alertAgeHours * 10) / 10,
     };
   }
 
-  // Recent alert (<48h old) — trade may genuinely still be live
+  // The alert signal is closed even when the hypothetical TP/SL did not hit.
+  // Mark it flat at the latest real candle close so the tab does not show stale unresolved rows.
   return {
-    outcome: "STILL_OPEN",
-    pips: 0,
-    minutes_to_resolve: null,
+    outcome: "FLAT_CLOSED",
+    pips: flatClosePips,
+    minutes_to_resolve: Math.round(candleSpanHours * 60),
     max_favorable_pips: Math.round(peakMfe * 10) / 10,
     max_adverse_pips: Math.round(peakAdv * 10) / 10,
-    exit_reason: `trade still live (${Math.round(alertAgeHours)}h old, ${stopLabel} stop @ ${stopLockPips >= 0 ? "+" : ""}${Math.round(stopLockPips * 10) / 10} pips)`,
+    exit_reason: `flat close at latest candle (${flatClosePips >= 0 ? "+" : ""}${flatClosePips} pips) — TP/SL not hit, ${stopLabel} stop @ ${stopLockPips >= 0 ? "+" : ""}${Math.round(stopLockPips * 10) / 10} pips`,
     stop_path: stopPath,
     locked_pips: stopLockPips,
     alert_age_hours: Math.round(alertAgeHours * 10) / 10,
@@ -378,7 +393,7 @@ export async function GET(request: Request) {
         // Prefer 1m; fall back to 5m when 1m unavailable
         const candles1m = await forexPool.query(
           `
-          SELECT start_time, high, low FROM ig_candles
+          SELECT start_time, high, low, close FROM ig_candles
           WHERE epic = $1 AND timeframe = 1
             AND start_time >= $2 AND start_time <= $3
           ORDER BY start_time ASC
@@ -390,7 +405,7 @@ export async function GET(request: Request) {
         if (!candles.length) {
           const candles5m = await forexPool.query(
             `
-            SELECT start_time, high, low FROM ig_candles
+            SELECT start_time, high, low, close FROM ig_candles
             WHERE epic = $1 AND timeframe = 5
               AND start_time >= $2 AND start_time <= $3
             ORDER BY start_time ASC
@@ -410,6 +425,7 @@ export async function GET(request: Request) {
             start_time: new Date(c.start_time),
             high: Number(c.high),
             low: Number(c.low),
+            close: Number(c.close),
           })),
           alertTime
         );
@@ -427,9 +443,9 @@ export async function GET(request: Request) {
       })
     );
 
-    // Aggregate stats — TRAILED_FORCED counts as a resolved trailed profit
+    // Aggregate stats — TRAILED_FORCED and FLAT_CLOSED are resolved counterfactual outcomes
     const resolved = results.filter((r) =>
-      ["WIN", "LOSS", "BREAKEVEN", "TRAILED", "TRAILED_FORCED"].includes(r.outcome)
+      ["WIN", "LOSS", "BREAKEVEN", "TRAILED", "TRAILED_FORCED", "FLAT_CLOSED"].includes(r.outcome)
     );
     const wins = resolved.filter((r) => r.outcome === "WIN");
     const trailed = resolved.filter(
@@ -437,6 +453,7 @@ export async function GET(request: Request) {
     );
     const breakevens = resolved.filter((r) => r.outcome === "BREAKEVEN");
     const losses = resolved.filter((r) => r.outcome === "LOSS");
+    const flatClosed = resolved.filter((r) => r.outcome === "FLAT_CLOSED");
     const stillOpen = results.filter((r) => r.outcome === "STILL_OPEN");
     const noData = results.filter((r) => r.outcome === "NO_DATA");
 
@@ -500,6 +517,7 @@ export async function GET(request: Request) {
         losses: losses.length,
         trailed: trailed.length,
         breakevens: breakevens.length,
+        flat_closed: flatClosed.length,
         still_open: stillOpen.length,
         no_data: noData.length,
         net_pips: Math.round(netPips * 10) / 10,

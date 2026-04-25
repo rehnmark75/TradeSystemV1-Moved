@@ -30,7 +30,15 @@ type RejectionRow = {
   tp_pips: number;
   trailing_used: boolean;
   candle_resolution: "1m" | "5m" | "none";
-  outcome: "WIN" | "LOSS" | "BREAKEVEN" | "TRAILED" | "TRAILED_FORCED" | "STILL_OPEN" | "NO_DATA";
+  outcome:
+    | "WIN"
+    | "LOSS"
+    | "BREAKEVEN"
+    | "TRAILED"
+    | "TRAILED_FORCED"
+    | "FLAT_CLOSED"
+    | "STILL_OPEN"
+    | "NO_DATA";
   pips: number;
   minutes_to_resolve: number | null;
   max_favorable_pips: number;
@@ -72,6 +80,7 @@ type Payload = {
     losses: number;
     trailed: number;
     breakevens: number;
+    flat_closed: number;
     still_open: number;
     no_data: number;
     net_pips: number;
@@ -120,6 +129,7 @@ const outcomeClass = (outcome: RejectionRow["outcome"]) => {
       return "rej-outcome rej-outcome-good";
     case "TRAILED":
     case "TRAILED_FORCED":
+    case "FLAT_CLOSED":
       return "rej-outcome rej-outcome-mixed";
     case "BREAKEVEN":
       return "rej-outcome rej-outcome-neutral";
@@ -142,6 +152,8 @@ const outcomeLabel = (outcome: RejectionRow["outcome"]) => {
       return "WOULD HAVE TRAILED";
     case "TRAILED_FORCED":
       return "WOULD HAVE TRAILED (FORCED)";
+    case "FLAT_CLOSED":
+      return "FLAT CLOSED";
     case "BREAKEVEN":
       return "WOULD HAVE BE'D";
     case "STILL_OPEN":
@@ -325,13 +337,13 @@ export default function ClaudeRejectionsPage() {
                 </strong>
               </div>
               <div className="summary-card">
-                Wins / Losses / Trailed / BE
+                Wins / Losses / Trailed / Flat / BE
                 <strong>
-                  {stats.wins} / {stats.losses} / {stats.trailed} / {stats.breakevens}
+                  {stats.wins} / {stats.losses} / {stats.trailed} / {stats.flat_closed} / {stats.breakevens}
                 </strong>
               </div>
               <div className="summary-card">
-                Unresolved (<code>&lt;48h</code>)
+                Unresolved
                 <strong>{stats.still_open}</strong>
               </div>
               <div className={`summary-card rej-verdict rej-verdict-${verdictTone(stats.verdict)}`}>
