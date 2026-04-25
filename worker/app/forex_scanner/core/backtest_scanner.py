@@ -897,6 +897,8 @@ class BacktestScanner(IntelligentForexScanner):
                 'XAU_GOLD': 'detect_xau_gold_signals',  # Gold-optimized 3-tier SMC
                 'XAU': 'detect_xau_gold_signals',
                 'GOLD': 'detect_xau_gold_signals',
+                'RANGE_STRUCTURE': 'detect_range_structure_signals',
+                'RS': 'detect_range_structure_signals',
             }
 
             # Use specific strategy if requested, otherwise use all strategies
