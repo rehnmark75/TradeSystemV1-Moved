@@ -405,16 +405,24 @@ class MeanReversionStrategy(StrategyInterface):
         adx_value = self._get_adx(df)
         adx_htf = self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None
 
-        # Hard ADX gates — always enforced (no trust_regime_routing bypass)
+        # Hard ADX gates — always enforced (no trust_regime_routing bypass).
+        # Fail-closed: missing/NaN ADX blocks the signal (a reversion strategy
+        # with no regime context is unsafe).
         if self.config.hard_adx_gate_enabled:
             pri_ceiling = self.config.get_pair_adx_hard_ceiling_primary(epic)
-            if adx_value is not None and adx_value > pri_ceiling:
+            htf_ceiling = self.config.get_pair_adx_hard_ceiling_htf(epic)
+            if adx_value is None or pd.isna(adx_value):
+                self.logger.debug(f"[MEAN_REVERSION] ❌ {epic} 15m ADX unavailable — fail-closed")
+                return None
+            if adx_value > pri_ceiling:
                 self.logger.debug(
                     f"[MEAN_REVERSION] ❌ {epic} 15m ADX {adx_value:.1f} > {pri_ceiling}"
                 )
                 return None
-            htf_ceiling = self.config.get_pair_adx_hard_ceiling_htf(epic)
-            if adx_htf is not None and adx_htf > htf_ceiling:
+            if adx_htf is None or pd.isna(adx_htf):
+                self.logger.debug(f"[MEAN_REVERSION] ❌ {epic} 1h ADX unavailable — fail-closed")
+                return None
+            if adx_htf > htf_ceiling:
                 self.logger.debug(
                     f"[MEAN_REVERSION] ❌ {epic} 1h ADX {adx_htf:.1f} > {htf_ceiling}"
                 )
@@ -468,6 +476,31 @@ class MeanReversionStrategy(StrategyInterface):
         monitor_only = self.config.is_pair_monitor_only(epic)
 
         now = datetime.now(timezone.utc)
+
+        # Regime label derived from ADX rather than hardcoded "ranging" — the
+        # alert pipeline will otherwise relabel from ADX anyway.
+        if adx_value is None or pd.isna(adx_value):
+            regime_label = "unknown"
+        elif adx_value < 18:
+            regime_label = "ranging"
+        elif adx_value < 25:
+            regime_label = "weak_trend"
+        else:
+            regime_label = "trending"
+
+        # UTC session label so analytics/LPF can scope by session.
+        h = now.hour
+        if 23 <= h or h < 7:
+            session = "asian"
+        elif 7 <= h < 12:
+            session = "london"
+        elif 12 <= h < 16:
+            session = "overlap"
+        elif 16 <= h < 21:
+            session = "newyork"
+        else:
+            session = "off_hours"
+
         signal = {
             "signal": direction,
             "signal_type": direction.lower(),
@@ -489,8 +522,9 @@ class MeanReversionStrategy(StrategyInterface):
             "adx": adx_value,
             "adx_htf": adx_htf,
             "rsi": latest_rsi,
-            "market_regime": "ranging",
-            "regime": "ranging",
+            "market_regime": regime_label,
+            "regime": regime_label,
+            "market_session": session,
 
             "monitor_only": monitor_only,
 
