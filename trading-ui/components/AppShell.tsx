@@ -38,6 +38,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "Operations",
     items: [
       { href: "/infrastructure", label: "Infrastructure", shortLabel: "Infra" },
+      { href: "/system/log-search", label: "Log Search", shortLabel: "Logs" },
       { href: "/system", label: "System Pulse", shortLabel: "System" },
       { href: "/settings", label: "Strategy Settings", shortLabel: "Settings" },
     ],

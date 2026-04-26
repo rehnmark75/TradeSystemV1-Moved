@@ -194,6 +194,8 @@ services:
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - ROBOMARKETS_API_URL=${ROBOMARKETS_API_URL:-https://api.stockstrader.com/api/v1}
+    volumes:
+      - ./logs:/app/system-logs:ro
     networks:
       - lab-net
     depends_on:

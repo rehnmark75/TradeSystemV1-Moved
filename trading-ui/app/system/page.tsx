@@ -525,6 +525,22 @@ function LogsTab() {
 
   return (
     <div>
+      <div className="panel" style={{ marginBottom: "16px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: "14px", flexWrap: "wrap" }}>
+        <div>
+          <div style={{ fontFamily: "'IBM Plex Mono', monospace", fontSize: "0.72rem", letterSpacing: "0.14em", textTransform: "uppercase", color: "var(--accent)" }}>
+            Advanced Search
+          </div>
+          <p style={{ margin: "6px 0 0", color: "var(--muted)", fontSize: "0.88rem" }}>
+            Search scanner log files, dev logs, stream logs, and recent container output from one dedicated console.
+          </p>
+        </div>
+        <Link
+          href="/system/log-search"
+          style={{ border: "1px solid rgba(124, 199, 255, 0.35)", borderRadius: "10px", padding: "9px 14px", color: "#dff2ff", background: "rgba(124, 199, 255, 0.1)", fontWeight: 700, fontSize: "0.86rem" }}
+        >
+          Open Log Search
+        </Link>
+      </div>
       {/* Search controls */}
       <div style={{ display: "flex", gap: "10px", flexWrap: "wrap", alignItems: "flex-end", marginBottom: "16px" }}>
         <div style={{ flex: "1 1 200px" }}>
@@ -602,7 +618,7 @@ function LogsTab() {
       </div>
       <div style={{ fontSize: "0.72rem", color: "var(--muted)", marginTop: "6px" }}>
         {results ? `${results.length} search results` : `${displayLines.length} recent lines (live)`}
-        {" · "}Log search requires <code>fastapi-stream /logs/search</code> endpoint (Phase 6 — see follow-ups if not yet deployed)
+        {" · "}Advanced search now reads mounted log files in <code>trading-ui</code> and can include recent container output.
       </div>
     </div>
   );
