@@ -317,6 +317,23 @@ class BacktestDataValidator:
             return 15  # Default
 
 
+# Epic alias map: live IG epic -> historical backtest epic stored in ig_candles_backtest.
+# Gold is streamed live as CS.D.CFEGOLD.CEE.IP but the Dukascopy/Kaggle backfill was
+# loaded under CS.D.CFEGOLD.KAGGLE.IP. All backtest data lookups must use the alias so
+# the memory cache and DB fallback hit the correct rows.
+_BACKTEST_EPIC_ALIASES: dict = {
+    'CS.D.CFEGOLD.CEE.IP': 'CS.D.CFEGOLD.KAGGLE.IP',
+}
+
+# Reverse map: historical epic -> live epic (used to translate results back if needed)
+_BACKTEST_EPIC_ALIASES_REVERSE: dict = {v: k for k, v in _BACKTEST_EPIC_ALIASES.items()}
+
+
+def _resolve_backtest_epic(epic: str) -> str:
+    """Return the historical epic to use for ig_candles_backtest lookups."""
+    return _BACKTEST_EPIC_ALIASES.get(epic, epic)
+
+
 class BacktestDataFetcher(DataFetcher):
     """Enhanced DataFetcher optimized for backtest scenarios"""
 
@@ -379,11 +396,23 @@ class BacktestDataFetcher(DataFetcher):
             # CRITICAL FIX (Jan 2026): Don't use force_reload=True when running parallel variations
             # force_reload=True causes race conditions where one thread clears the cache while another is reading
             # The cache lock in load_data_for_period handles thread safety correctly with force_reload=False
+
+            # Translate live epics to their historical aliases in ig_candles_backtest.
+            # e.g. CS.D.CFEGOLD.CEE.IP -> CS.D.CFEGOLD.KAGGLE.IP (Dukascopy backfill).
+            cache_epics = [_resolve_backtest_epic(e) for e in epics] if epics else epics
+
+            # XAU/Gold needs 880h (~37 days) lookback for EMA200 + ATR-percentile warmup.
+            # Use the larger of 168h (standard 7-day warmup) and 880h when gold is present.
+            needs_gold_warmup = epics and any(
+                'GOLD' in e.upper() or 'XAU' in e.upper() for e in epics
+            )
+            cache_lookback_hours = 880 if needs_gold_warmup else 168
+
             self.memory_cache.load_data_for_period(
                 start_date=start_date,
                 end_date=end_date,
-                epics=epics,
-                lookback_hours=168,  # 7 days for indicator warmup
+                epics=cache_epics,
+                lookback_hours=cache_lookback_hours,
                 force_reload=False  # Let the cache check if it already covers the period
             )
         else:
@@ -580,8 +609,13 @@ class BacktestDataFetcher(DataFetcher):
         try:
             # If we're in backtest mode and have a current timestamp, filter data accordingly
             if hasattr(self, 'current_backtest_time') and self.current_backtest_time:
+                # Resolve epic alias: live epics (e.g. CEE gold) map to their historical
+                # ig_candles_backtest counterpart (e.g. KAGGLE gold) for all data lookups.
+                hist_epic = _resolve_backtest_epic(epic)
+
                 # PERFORMANCE FIX: Check resampled cache first to avoid expensive re-resampling
-                cache_key = f"{epic}_{timeframe}"
+                # Key uses hist_epic so alias and non-alias calls share the same cache entry.
+                cache_key = f"{hist_epic}_{timeframe}"
 
                 if cache_key in self._resampled_cache:
                     # Cache HIT - reuse previously resampled data
@@ -613,11 +647,13 @@ class BacktestDataFetcher(DataFetcher):
                         self.current_backtest_time = self.backtest_end_date
 
                     try:
-                        # Pass extended lookback if calculated
+                        # Pass extended lookback if calculated.
+                        # Use hist_epic so the parent DataFetcher queries the correct
+                        # historical source (ig_candles_backtest alias, e.g. KAGGLE gold).
                         cache_kwargs = kwargs.copy()
                         if extended_lookback_hours:
                             cache_kwargs['lookback_hours'] = extended_lookback_hours
-                        full_df = super().get_enhanced_data(epic, pair, timeframe, **cache_kwargs)
+                        full_df = super().get_enhanced_data(hist_epic, pair, timeframe, **cache_kwargs)
                     finally:
                         # Restore original backtest time
                         self.current_backtest_time = original_backtest_time
@@ -844,7 +880,12 @@ class BacktestDataFetcher(DataFetcher):
             else:
                 end_utc = tz_manager.get_current_utc_time()
 
-            self.logger.debug(f"📊 Backtest fetch: {epic} {timeframe}, {since_utc} to {end_utc}")
+            # Resolve live epic to its historical alias for all cache/DB lookups.
+            hist_epic = _resolve_backtest_epic(epic)
+            if hist_epic != epic:
+                self.logger.debug(f"🔀 Epic alias: {epic} -> {hist_epic} for backtest data lookup")
+
+            self.logger.debug(f"📊 Backtest fetch: {hist_epic} {timeframe}, {since_utc} to {end_utc}")
 
             # Convert timeframe to minutes
             timeframe_map = {
@@ -862,10 +903,10 @@ class BacktestDataFetcher(DataFetcher):
             needs_resampling = False
 
             if self.memory_cache and self.memory_cache.is_loaded:
-                # Check what timeframes are available in cache for this epic
+                # Check what timeframes are available in cache for this epic (using alias)
                 available_tfs = []
-                if epic in self.memory_cache.cache:
-                    available_tfs = list(self.memory_cache.cache[epic].keys())
+                if hist_epic in self.memory_cache.cache:
+                    available_tfs = list(self.memory_cache.cache[hist_epic].keys())
 
                 if tf_minutes in available_tfs:
                     # Target timeframe exists directly - no resampling needed!
@@ -904,13 +945,13 @@ class BacktestDataFetcher(DataFetcher):
                 end_naive = end_utc.replace(tzinfo=None) if end_utc.tzinfo else end_utc
 
                 df = self.memory_cache.get_historical_data(
-                    epic, source_tf, since_naive, end_naive
+                    hist_epic, source_tf, since_naive, end_naive
                 )
 
                 if df is not None and not df.empty:
-                    self.logger.debug(f"⚡ Memory cache hit: {epic} {timeframe}, {len(df)} source rows")
+                    self.logger.debug(f"⚡ Memory cache hit: {hist_epic} {timeframe}, {len(df)} source rows")
                 else:
-                    self.logger.debug(f"⚠️ Memory cache miss for {epic} {source_tf}m, {since_naive} to {end_naive}")
+                    self.logger.debug(f"⚠️ Memory cache miss for {hist_epic} {source_tf}m, {since_naive} to {end_naive}")
 
             # 🐌 SLOW PATH: Database fallback
             if df is None or df.empty:
@@ -918,7 +959,7 @@ class BacktestDataFetcher(DataFetcher):
                 # Only use ig_candles for 1m base data
                 use_backtest_table = source_tf in (5, 15, 60, 240)
                 table_name = "ig_candles_backtest" if use_backtest_table else "ig_candles"
-                self.logger.debug(f"💾 Database fallback for {epic} {timeframe} from {table_name}")
+                self.logger.debug(f"💾 Database fallback for {hist_epic} {timeframe} from {table_name}")
 
                 query = f"""
                 SELECT start_time,
@@ -933,7 +974,7 @@ class BacktestDataFetcher(DataFetcher):
                 """
 
                 params = {
-                    'epic': epic,
+                    'epic': hist_epic,   # use alias so DB hits the correct rows
                     'source_tf': source_tf,
                     'since_utc': since_utc,
                     'end_utc': end_utc

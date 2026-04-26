@@ -47,8 +47,14 @@ def main():
         while i < len(args):
             arg = args[i]
 
+            # Handle gold epic shortcut (full IG epic passed directly)
+            if arg == "CS.D.CFEGOLD.CEE.IP":
+                processed_args.extend(["--epic", arg])
+                print(f"📊 Testing XAUUSD (Gold) — {arg}")
+                epic_specified = True
+
             # Handle epic shortcuts (e.g., "EURUSD" -> "CS.D.EURUSD.CEEM.IP", others -> "CS.D.PAIR.MINI.IP")
-            if arg in ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD", "EURJPY", "AUDJPY", "GBPJPY", "EURGBP"]:
+            elif arg in ["EURUSD", "GBPUSD", "USDJPY", "AUDUSD", "USDCHF", "USDCAD", "NZDUSD", "EURJPY", "AUDJPY", "GBPJPY", "EURGBP"]:
                 # EURUSD uses CEEM, all others use MINI
                 if arg == "EURUSD":
                     processed_args.extend(["--epic", f"CS.D.{arg}.CEEM.IP"])
@@ -65,7 +71,7 @@ def main():
             # Handle strategy shortcuts
             # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
             # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
-            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "EURUSD_RANGE_FADE", "ERF", "RANGE_FADE_5M", "RF5", "EURUSD_RANGE_FADE_5M", "ERF5"]:
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "EURUSD_RANGE_FADE", "ERF", "RANGE_FADE_5M", "RF5", "EURUSD_RANGE_FADE_5M", "ERF5", "XAU_GOLD", "XAU", "GOLD"]:
                 strategy_mapping = {
                     "SMC": "SMC_SIMPLE",
                     "SMC_SIMPLE": "SMC_SIMPLE",
@@ -80,6 +86,9 @@ def main():
                     "RF5": "RANGE_FADE_5M",
                     "EURUSD_RANGE_FADE_5M": "EURUSD_RANGE_FADE_5M",
                     "ERF5": "EURUSD_RANGE_FADE_5M",
+                    "XAU_GOLD": "XAU_GOLD",
+                    "XAU": "XAU_GOLD",
+                    "GOLD": "XAU_GOLD",
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])

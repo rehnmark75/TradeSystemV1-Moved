@@ -99,6 +99,18 @@ except ImportError:
     except ImportError:
         CONFIG_SERVICES_AVAILABLE = False
 
+# Import XAU_GOLD config service to inject gold epics into the scan loop
+try:
+    from forex_scanner.services.xau_gold_config_service import get_xau_gold_config
+    XAU_GOLD_CONFIG_AVAILABLE = True
+except ImportError:
+    try:
+        from services.xau_gold_config_service import get_xau_gold_config
+        XAU_GOLD_CONFIG_AVAILABLE = True
+    except ImportError:
+        XAU_GOLD_CONFIG_AVAILABLE = False
+        get_xau_gold_config = None
+
 # Import intelligence config service for cleanup settings
 try:
     from forex_scanner.services.intelligence_config_service import get_intelligence_config
@@ -165,7 +177,21 @@ class IntelligentForexScanner:
 
         # Core configuration from database - NO FALLBACK
         self.db_manager = db_manager
-        self.epic_list = epic_list or self._smc_cfg.get_effective_enabled_pairs()
+        base_epics = epic_list or self._smc_cfg.get_effective_enabled_pairs()
+
+        # Inject XAU_GOLD enabled epics into scan loop so _is_gold_epic branch fires.
+        # Without this, gold epics never appear in the iteration and XAU_GOLD produces 0 signals.
+        gold_epics: List[str] = []
+        if XAU_GOLD_CONFIG_AVAILABLE and get_xau_gold_config is not None:
+            try:
+                xau_cfg = get_xau_gold_config()
+                gold_epics = [e for e in xau_cfg.enabled_pairs if e not in base_epics]
+                if gold_epics:
+                    self.logger.info(f"✅ XAU_GOLD: injecting {gold_epics} into scan loop")
+            except Exception as _xau_e:
+                self.logger.warning(f"⚠️ XAU_GOLD config load failed (gold epics skipped): {_xau_e}")
+
+        self.epic_list = base_epics + gold_epics
         self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
         self.scan_interval = scan_interval
         self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False
