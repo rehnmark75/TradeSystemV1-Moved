@@ -54,7 +54,13 @@ export async function GET(
         ? override.is_enabled
         : null;
     const effectiveEnabled = overrideEnabled === null ? globalEnabled : Boolean(overrideEnabled);
-    const monitorOnly = Boolean(override?.parameter_overrides?.monitor_only);
+    const monitorOnlyColumn =
+      override && Object.prototype.hasOwnProperty.call(override, "monitor_only")
+        ? override.monitor_only
+        : null;
+    const monitorOnlyJsonb = override?.parameter_overrides?.monitor_only ?? null;
+    const monitorOnly =
+      monitorOnlyColumn !== null ? Boolean(monitorOnlyColumn) : Boolean(monitorOnlyJsonb);
 
     const effective = { ...globalConfig };
     if (override) {

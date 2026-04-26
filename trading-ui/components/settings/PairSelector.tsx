@@ -7,13 +7,21 @@ interface PairSelectorProps {
   pairs: string[];
   value: string;
   overrideCounts: Map<string, number>;
+  pairStatuses?: Map<string, "active" | "monitor" | "disabled">;
   onChange: (epic: string) => void;
 }
+
+const STATUS_LABELS = {
+  active: "Active",
+  monitor: "Monitor",
+  disabled: "Disabled",
+} as const;
 
 export default function PairSelector({
   pairs,
   value,
   overrideCounts,
+  pairStatuses = new Map(),
   onChange,
 }: PairSelectorProps) {
   const [open, setOpen] = useState(false);
@@ -70,6 +78,7 @@ export default function PairSelector({
           <div className="pair-selector-list">
             {filtered.map((epic) => {
               const count = overrideCounts.get(epic) ?? 0;
+              const status = pairStatuses.get(epic);
               const isActive = epic === value;
               return (
                 <button
@@ -86,9 +95,16 @@ export default function PairSelector({
                     {epicToDisplayName(epic)}
                   </span>
                   <span className="pair-selector-option-epic">{epic}</span>
-                  {count > 0 ? (
-                    <span className="pair-selector-option-badge">{count} overrides</span>
-                  ) : null}
+                  <span className="pair-selector-option-meta">
+                    {status ? (
+                      <span className={`pair-status-badge pair-status-${status}`}>
+                        {STATUS_LABELS[status]}
+                      </span>
+                    ) : null}
+                    {count > 0 ? (
+                      <span className="pair-selector-option-badge">{count} overrides</span>
+                    ) : null}
+                  </span>
                 </button>
               );
             })}

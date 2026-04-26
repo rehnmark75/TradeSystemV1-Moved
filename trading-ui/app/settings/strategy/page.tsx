@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import CategoryNav, { type CategoryNavItem } from "../../../components/settings/CategoryNav";
 import SettingsToolbar, { type SettingsMode } from "../../../components/settings/SettingsToolbar";
 import ParameterContextPanel from "../../../components/settings/ParameterContextPanel";
@@ -15,6 +15,7 @@ import { useStrategyPairOverrides } from "../../../hooks/settings/usePairOverrid
 import { apiUrl } from "../../../lib/settings/api";
 import { logTelemetry } from "../../../lib/settings/telemetry";
 import { useEnvironment } from "../../../lib/environment";
+import { epicToDisplayName } from "../../../lib/settings/epicDisplay";
 import type { SmcParameterMetadata } from "../../../types/settings";
 
 type EffectivePayload = {
@@ -28,6 +29,22 @@ type EffectivePayload = {
     effective_enabled: boolean;
     monitor_only: boolean;
   };
+};
+
+type VisiblePairStatus = "active" | "monitor" | "disabled";
+type StrategyStatusSummary = {
+  label: string;
+  counts: Record<VisiblePairStatus, number>;
+  pairs: Array<{
+    epic: string;
+    status: VisiblePairStatus;
+    override_count: number;
+    inherited: boolean;
+  }>;
+};
+
+type StatusSummaryPayload = {
+  strategies: Partial<Record<StrategyKey, StrategyStatusSummary>>;
 };
 
 const SYSTEM_FIELDS = new Set([
@@ -163,7 +180,7 @@ const STRATEGIES: Record<StrategyKey, {
   },
 };
 
-type PairStatus = "inherit" | "active" | "monitor" | "disabled";
+type PairStatus = "inherit" | VisiblePairStatus;
 const STATUS_LABELS: Record<PairStatus, string> = {
   inherit: "Inherit",
   active: "Active",
@@ -191,6 +208,25 @@ export default function UnifiedStrategySettings() {
   const { environment } = useEnvironment();
   const [strategy, setStrategy] = useState<StrategyKey>("smc");
   const strategyDef = STRATEGIES[strategy];
+  const [statusSummary, setStatusSummary] = useState<StatusSummaryPayload["strategies"]>({});
+  const [statusSummaryError, setStatusSummaryError] = useState<string | null>(null);
+
+  const loadStatusSummary = useCallback(async () => {
+    setStatusSummaryError(null);
+    try {
+      const response = await fetch(
+        apiUrl(`/api/settings/strategy/status-summary?config_set=${encodeURIComponent(environment)}`)
+      );
+      const payload = await response.json();
+      if (!response.ok) {
+        throw new Error(payload.error ?? "Failed to load strategy status summary");
+      }
+      setStatusSummary(payload.strategies ?? {});
+    } catch (error) {
+      setStatusSummaryError(error instanceof Error ? error.message : "Failed to load strategy status summary");
+      setStatusSummary({});
+    }
+  }, [environment]);
 
   // Mode
   const [mode, setMode] = useState<SettingsMode>("global");
@@ -255,6 +291,10 @@ export default function UnifiedStrategySettings() {
     logTelemetry({ event_type: "page_view", page: "/settings/strategy" });
   }, []);
 
+  useEffect(() => {
+    loadStatusSummary();
+  }, [loadStatusSummary]);
+
   // Load override columns
   useEffect(() => {
     fetch(apiUrl(strategyDef.columnEndpoint))
@@ -279,8 +319,9 @@ export default function UnifiedStrategySettings() {
   const allPairs = useMemo(() => {
     const pairs = new Set<string>([...enabledPairs, ...knownPairs]);
     overrides.forEach((o) => pairs.add(o.epic));
+    statusSummary[strategy]?.pairs.forEach((pair) => pairs.add(pair.epic));
     return Array.from(pairs).sort();
-  }, [enabledPairs, knownPairs, overrides]);
+  }, [enabledPairs, knownPairs, overrides, statusSummary, strategy]);
 
   // Auto-select first pair
   useEffect(() => {
@@ -347,6 +388,14 @@ export default function UnifiedStrategySettings() {
     });
     return counts;
   }, [overrides]);
+
+  const pairStatuses = useMemo(() => {
+    const statuses = new Map<string, VisiblePairStatus>();
+    statusSummary[strategy]?.pairs.forEach((pair) => {
+      statuses.set(pair.epic, pair.status);
+    });
+    return statuses;
+  }, [statusSummary, strategy]);
 
   // Dirty pair override keys
   const dirtyKeys = useMemo(() => {
@@ -547,6 +596,7 @@ export default function UnifiedStrategySettings() {
         setSaveError("Failed to save global settings. Check the latest error on the page and try again.");
         return;
       }
+      await loadStatusSummary();
       setShowSaveModal(false);
       return;
     }
@@ -579,6 +629,7 @@ export default function UnifiedStrategySettings() {
         await createOverride(selectedEpic, updates, { updatedBy: "admin", changeReason: reason });
       }
       await reloadOverrides();
+      await loadStatusSummary();
       const refreshed = await fetch(apiUrl(`${strategyDef.effectiveBase}/${selectedEpic}?config_set=${encodeURIComponent(environment)}`)).then((r) => r.json());
       setEffective(refreshed);
       setShowSaveModal(false);
@@ -684,6 +735,7 @@ export default function UnifiedStrategySettings() {
         pairs={allPairs}
         selectedPair={selectedEpic}
         pairOverrideCounts={overrideCounts}
+        pairStatuses={pairStatuses}
         onPairChange={setSelectedEpic}
         query={query}
         onQueryChange={setQuery}
@@ -697,17 +749,63 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion", "range-fade", "range-structure"] as const).map((key) => (
-          <button
-            key={key}
-            type="button"
-            className={`pair-status-btn strategy-selector-btn ${strategy === key ? "selected" : ""}`}
-            onClick={() => setStrategy(key)}
-          >
-            {STRATEGIES[key].label}
-          </button>
-        ))}
+        {(["smc", "xau-gold", "mean-reversion", "range-fade", "range-structure"] as const).map((key) => {
+          const summary = statusSummary[key];
+          const counts = summary?.counts;
+          return (
+            <button
+              key={key}
+              type="button"
+              className={`pair-status-btn strategy-selector-btn ${strategy === key ? "selected" : ""}`}
+              onClick={() => setStrategy(key)}
+            >
+              <span className="strategy-selector-label">{STRATEGIES[key].label}</span>
+              <span className="strategy-selector-summary" aria-label={`${STRATEGIES[key].label} pair status summary`}>
+                <span className="strategy-selector-count strategy-selector-count-active">
+                  <span className="strategy-selector-dot" />
+                  {counts?.active ?? 0}
+                </span>
+                <span className="strategy-selector-count strategy-selector-count-monitor">
+                  <span className="strategy-selector-dot" />
+                  {counts?.monitor ?? 0}
+                </span>
+                <span className="strategy-selector-count strategy-selector-count-disabled">
+                  <span className="strategy-selector-dot" />
+                  {counts?.disabled ?? 0}
+                </span>
+              </span>
+              {summary?.pairs.length ? (
+                <span className="strategy-selector-popover" role="tooltip">
+                  <span className="strategy-selector-popover-title">
+                    {STRATEGIES[key].label} epics
+                  </span>
+                  <span className="strategy-selector-popover-list">
+                    {summary.pairs.map((pair) => (
+                      <span className="strategy-selector-popover-row" key={pair.epic}>
+                        <span>
+                          <span className="strategy-selector-popover-name">
+                            {epicToDisplayName(pair.epic)}
+                          </span>
+                          <span className="strategy-selector-popover-epic">
+                            {pair.epic}
+                          </span>
+                        </span>
+                        <span className={`pair-status-badge pair-status-${pair.status}`}>
+                          {STATUS_LABELS[pair.status]}
+                        </span>
+                      </span>
+                    ))}
+                  </span>
+                </span>
+              ) : null}
+            </button>
+          );
+        })}
       </div>
+
+      {statusSummaryError ? (
+        <div className="settings-inline-error">{statusSummaryError}</div>
+      ) : null}
 
       {mode === "pair" && selectedEpic ? (
         <div className="pair-status-bar">

@@ -19,6 +19,7 @@ interface SettingsToolbarProps {
   pairs?: string[];
   selectedPair?: string;
   pairOverrideCounts?: Map<string, number>;
+  pairStatuses?: Map<string, "active" | "monitor" | "disabled">;
   onPairChange?: (epic: string) => void;
   // Search
   query: string;
@@ -45,6 +46,7 @@ export default function SettingsToolbar({
   pairs = [],
   selectedPair = "",
   pairOverrideCounts = new Map(),
+  pairStatuses = new Map(),
   onPairChange,
   query,
   onQueryChange,
@@ -75,6 +77,7 @@ export default function SettingsToolbar({
             pairs={pairs}
             value={selectedPair}
             overrideCounts={pairOverrideCounts}
+            pairStatuses={pairStatuses}
             onChange={onPairChange}
           />
         ) : null}
