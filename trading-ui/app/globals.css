@@ -5004,6 +5004,521 @@ table {
   padding-left: 18px;
 }
 
+.trailing-page {
+  --trailing-surface: rgba(8, 18, 32, 0.98);
+  --trailing-surface-2: rgba(13, 28, 48, 0.96);
+  --trailing-line: rgba(125, 162, 214, 0.18);
+  --trailing-line-strong: rgba(126, 184, 239, 0.34);
+  --trailing-accent: #7eb8ef;
+  --trailing-warn: #f0b45f;
+}
+
+.trailing-hero {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 24px;
+  border-radius: 18px;
+  background:
+    linear-gradient(135deg, rgba(14, 32, 54, 0.98), rgba(8, 17, 31, 0.96)),
+    repeating-linear-gradient(90deg, rgba(126, 184, 239, 0.08) 0 1px, transparent 1px 86px);
+}
+
+.trailing-hero h1 {
+  letter-spacing: 0;
+}
+
+.trailing-hero-stats,
+.trailing-insight-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 10px;
+}
+
+.trailing-hero-stats {
+  grid-template-columns: repeat(3, minmax(92px, 1fr));
+  min-width: 340px;
+}
+
+.trailing-hero-stats div,
+.trailing-insight-strip div {
+  border: 1px solid var(--trailing-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.035);
+  padding: 10px 12px;
+}
+
+.trailing-hero-stats span,
+.trailing-insight-strip span,
+.trailing-search span {
+  display: block;
+  margin-bottom: 4px;
+  color: var(--muted-2);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.trailing-hero-stats strong,
+.trailing-insight-strip strong {
+  color: var(--ink);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.15rem;
+  letter-spacing: 0;
+}
+
+.trailing-toolbar {
+  display: flex;
+  align-items: stretch;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin: 16px 0 12px;
+}
+
+.trailing-profile-switch,
+.trailing-stage-tabs {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--trailing-line);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.trailing-profile-switch button,
+.trailing-stage-tabs button,
+.trailing-reload,
+.trailing-save-cell button {
+  min-height: 36px;
+  border: 0;
+  border-radius: 6px;
+  color: var(--muted);
+  background: transparent;
+  font-weight: 700;
+  letter-spacing: 0;
+  cursor: pointer;
+}
+
+.trailing-profile-switch button,
+.trailing-stage-tabs button {
+  padding: 0 12px;
+}
+
+.trailing-profile-switch button.active,
+.trailing-stage-tabs button.active {
+  color: #06111f;
+  background: var(--trailing-accent);
+}
+
+.trailing-search {
+  min-width: 240px;
+  flex: 1;
+}
+
+.trailing-search input {
+  width: 100%;
+  min-height: 46px;
+  border: 1px solid var(--trailing-line);
+  border-radius: 8px;
+  background: rgba(8, 18, 32, 0.82);
+  color: var(--ink);
+  padding: 0 12px;
+}
+
+.trailing-filter-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 46px;
+  padding: 0 12px;
+  border: 1px solid var(--trailing-line);
+  border-radius: 8px;
+  color: var(--ink);
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.trailing-reload {
+  border: 1px solid var(--trailing-line);
+  padding: 0 14px;
+  background: rgba(126, 184, 239, 0.08);
+  color: var(--ink);
+}
+
+.trailing-stage-tabs {
+  margin-bottom: 12px;
+  overflow-x: auto;
+  max-width: 100%;
+}
+
+.trailing-stage-tabs button {
+  white-space: nowrap;
+}
+
+.trailing-insight-strip {
+  margin-bottom: 12px;
+}
+
+.trailing-table-shell {
+  border: 1px solid var(--trailing-line);
+  border-radius: 8px;
+  background: var(--trailing-surface);
+  overflow: auto;
+  max-height: calc(100vh - 370px);
+  min-height: 420px;
+}
+
+.trailing-config-table {
+  width: 100%;
+  min-width: 1120px;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: 0.82rem;
+}
+
+.trailing-config-table th,
+.trailing-config-table td {
+  border-bottom: 1px solid var(--trailing-line);
+  border-right: 1px solid rgba(125, 162, 214, 0.08);
+}
+
+.trailing-config-table th {
+  position: sticky;
+  top: 0;
+  z-index: 4;
+  background: rgba(8, 18, 32, 0.98);
+  color: var(--muted);
+}
+
+.trailing-config-table thead tr:nth-child(2) th {
+  top: 37px;
+}
+
+.trailing-epic-head,
+.trailing-epic-cell {
+  position: sticky;
+  left: 0;
+  z-index: 5;
+  width: 190px;
+  min-width: 190px;
+  text-align: left;
+}
+
+.trailing-epic-head {
+  padding: 0 12px;
+  background: rgba(9, 20, 36, 1);
+}
+
+.trailing-epic-cell {
+  padding: 8px 10px;
+  background: rgba(11, 24, 42, 1);
+  box-shadow: 8px 0 16px rgba(0, 0, 0, 0.18);
+}
+
+.trailing-epic-cell strong,
+.trailing-epic-cell span {
+  display: block;
+}
+
+.trailing-epic-cell strong {
+  color: var(--ink);
+  font-size: 0.84rem;
+}
+
+.trailing-epic-cell span {
+  margin-top: 3px;
+  color: var(--muted-2);
+  font-size: 0.63rem;
+  letter-spacing: 0;
+}
+
+.trailing-group-head {
+  height: 36px;
+  padding: 0 10px;
+  color: #cde9ff;
+  text-align: center;
+  text-transform: uppercase;
+  letter-spacing: 0.12em;
+  font-size: 0.68rem;
+  border-bottom-color: var(--trailing-line-strong);
+}
+
+.trailing-field-head {
+  min-width: 116px;
+  max-width: 136px;
+  height: 44px;
+  padding: 0 8px;
+  white-space: normal;
+  line-height: 1.18;
+  text-align: center;
+}
+
+.trailing-action-head {
+  width: 98px;
+  min-width: 98px;
+  padding: 0 8px;
+}
+
+.trailing-config-table tbody tr {
+  background: var(--trailing-surface-2);
+}
+
+.trailing-config-table tbody tr:nth-child(even) {
+  background: rgba(10, 23, 40, 0.96);
+}
+
+.trailing-config-table tbody tr:hover,
+.trailing-config-table tbody tr:hover .trailing-epic-cell {
+  background: rgba(22, 45, 72, 0.98);
+}
+
+.trailing-config-table tbody tr.default-row,
+.trailing-config-table tbody tr.default-row .trailing-epic-cell {
+  background: rgba(32, 44, 38, 0.98);
+}
+
+.trailing-config-table tbody tr.changed-row,
+.trailing-config-table tbody tr.changed-row .trailing-epic-cell {
+  background: rgba(42, 34, 21, 0.98);
+}
+
+.trailing-config-table td {
+  padding: 4px;
+}
+
+.trailing-config-table td input[type="number"] {
+  width: 86px;
+  min-height: 26px;
+  border: 1px solid rgba(125, 162, 214, 0.18);
+  border-radius: 999px;
+  background: rgba(7, 18, 32, 0.92);
+  color: var(--ink);
+  padding: 0 9px;
+  text-align: right;
+  font: inherit;
+  font-variant-numeric: tabular-nums;
+}
+
+.trailing-config-table td input[type="number"]:focus {
+  outline: 2px solid rgba(126, 184, 239, 0.34);
+  border-color: rgba(126, 184, 239, 0.72);
+}
+
+.trailing-config-table td.changed-cell input {
+  border-color: rgba(240, 180, 95, 0.85);
+  background: rgba(50, 35, 12, 0.88);
+}
+
+.trailing-bool-cell,
+.trailing-save-cell {
+  text-align: center;
+}
+
+.trailing-mini-toggle {
+  display: inline-flex;
+  align-items: center;
+}
+
+.trailing-mini-toggle input {
+  position: absolute;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.trailing-mini-toggle span {
+  width: 38px;
+  height: 22px;
+  border: 1px solid var(--trailing-line);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.trailing-mini-toggle span::before {
+  content: "";
+  display: block;
+  width: 16px;
+  height: 16px;
+  margin: 2px;
+  border-radius: 50%;
+  background: var(--muted-2);
+  transition: transform 140ms ease, background 140ms ease;
+}
+
+.trailing-mini-toggle input:checked + span {
+  border-color: rgba(126, 184, 239, 0.65);
+  background: rgba(126, 184, 239, 0.24);
+}
+
+.trailing-mini-toggle input:checked + span::before {
+  transform: translateX(16px);
+  background: var(--trailing-accent);
+}
+
+.trailing-save-cell button {
+  min-width: 72px;
+  border: 1px solid var(--trailing-line);
+  background: rgba(126, 184, 239, 0.1);
+  color: var(--ink);
+}
+
+.trailing-save-cell button:disabled {
+  cursor: default;
+  opacity: 0.5;
+}
+
+.changed-row .trailing-save-cell button:not(:disabled) {
+  border-color: rgba(240, 180, 95, 0.75);
+  background: rgba(240, 180, 95, 0.16);
+}
+
+.trailing-save-error {
+  margin-top: 4px;
+  color: #ffb4a8;
+  font-size: 0.7rem;
+}
+
+.trailing-empty {
+  padding: 28px;
+  text-align: center;
+  color: var(--muted);
+}
+
+.htf-decision-grid {
+  display: grid;
+  grid-template-columns: minmax(260px, 1.5fr) repeat(3, minmax(180px, 1fr));
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.htf-decision-card {
+  border: 1px solid rgba(125, 162, 214, 0.16);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.025);
+  padding: 14px 16px;
+}
+
+.htf-decision-primary {
+  background: linear-gradient(135deg, rgba(18, 44, 70, 0.88), rgba(12, 24, 42, 0.94));
+  border-color: rgba(126, 184, 239, 0.3);
+}
+
+.htf-decision-card span {
+  display: block;
+  margin-bottom: 8px;
+  color: var(--muted-2);
+  font-size: 0.68rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+}
+
+.htf-decision-card strong {
+  display: block;
+  color: var(--ink);
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1.35rem;
+  letter-spacing: 0;
+}
+
+.htf-decision-card p {
+  margin: 8px 0 0;
+  color: var(--muted-2);
+  line-height: 1.45;
+}
+
+.htf-positive {
+  color: #7dd3a8 !important;
+}
+
+.htf-negative {
+  color: #ff9b8f !important;
+}
+
+.htf-tag {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(125, 162, 214, 0.18);
+  color: var(--muted);
+  background: rgba(255, 255, 255, 0.035);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.04em;
+  white-space: nowrap;
+}
+
+.htf-tag-favorable,
+.htf-tag-allow-counter {
+  border-color: rgba(125, 211, 168, 0.42);
+  color: #bff4d5;
+  background: rgba(20, 104, 64, 0.24);
+}
+
+.htf-tag-avoid,
+.htf-tag-block-counter {
+  border-color: rgba(255, 155, 143, 0.42);
+  color: #ffd1cb;
+  background: rgba(132, 42, 35, 0.24);
+}
+
+.htf-tag-watch,
+.htf-tag-prefer-aligned {
+  border-color: rgba(240, 180, 95, 0.42);
+  color: #ffe1ac;
+  background: rgba(129, 85, 23, 0.24);
+}
+
+.htf-tag-insufficient-data {
+  border-color: rgba(148, 163, 184, 0.28);
+  color: #cbd5e1;
+}
+
+@media (max-width: 980px) {
+  .trailing-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .trailing-hero-stats,
+  .trailing-insight-strip {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    min-width: 0;
+  }
+
+  .trailing-table-shell {
+    max-height: none;
+  }
+
+  .htf-decision-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .trailing-toolbar {
+    display: grid;
+  }
+
+  .trailing-profile-switch,
+  .trailing-stage-tabs {
+    width: 100%;
+  }
+
+  .trailing-profile-switch button {
+    flex: 1;
+  }
+
+  .trailing-hero-stats,
+  .trailing-insight-strip {
+    grid-template-columns: 1fr;
+  }
+
+  .htf-decision-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
 .override-indicator {
   width: 8px;
   height: 8px;

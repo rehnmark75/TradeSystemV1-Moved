@@ -26,6 +26,40 @@ type BoolField = "enable_partial_close";
 
 type AnyField = NumericField | BoolField;
 
+type StageFilter = "all" | "early" | "stage1" | "stage2" | "stage3" | "partials";
+
+const FIELD_GROUPS: Array<{
+  id: StageFilter;
+  label: string;
+  fields: AnyField[];
+}> = [
+  {
+    id: "early",
+    label: "Breakeven",
+    fields: ["early_breakeven_trigger_points", "early_breakeven_buffer_points"],
+  },
+  {
+    id: "stage1",
+    label: "Stage 1",
+    fields: ["stage1_trigger_points", "stage1_lock_points"],
+  },
+  {
+    id: "stage2",
+    label: "Stage 2",
+    fields: ["stage2_trigger_points", "stage2_lock_points"],
+  },
+  {
+    id: "stage3",
+    label: "Stage 3",
+    fields: ["stage3_trigger_points", "stage3_atr_multiplier", "stage3_min_distance", "min_trail_distance"],
+  },
+  {
+    id: "partials",
+    label: "Partials",
+    fields: ["break_even_trigger_points", "enable_partial_close", "partial_close_trigger_points", "partial_close_size"],
+  },
+];
+
 const NUMERIC_FIELDS: NumericField[] = [
   "early_breakeven_trigger_points",
   "early_breakeven_buffer_points",
@@ -61,6 +95,16 @@ const FIELD_LABELS: Record<AnyField, string> = {
   partial_close_size: "Partial close size (0.0-1.0)",
 };
 
+const compactEpic = (epic: string) =>
+  epic
+    .replace(/^CS\.D\./, "")
+    .replace(/\.MINI\.IP$/, "")
+    .replace(/\.CEEM\.IP$/, "")
+    .replace(/\.IP$/, "");
+
+const formatNumber = (value: number | null | undefined) =>
+  value === null || value === undefined ? "—" : String(value);
+
 export default function TrailingSettingsPage() {
   const { environment } = useEnvironment();
   const [isScalp, setIsScalp] = useState(false);
@@ -69,6 +113,9 @@ export default function TrailingSettingsPage() {
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   const [saveState, setSaveState] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
   const [saveError, setSaveError] = useState<Record<string, string>>({});
+  const [query, setQuery] = useState("");
+  const [stageFilter, setStageFilter] = useState<StageFilter>("all");
+  const [showChangedOnly, setShowChangedOnly] = useState(false);
 
   const rowKey = (r: TrailingConfigRow) => `${r.epic}::${r.is_scalp}`;
 
@@ -123,124 +170,255 @@ export default function TrailingSettingsPage() {
     return Boolean(d && Object.keys(d).length > 0);
   };
 
+  const changedCount = useMemo(() => Object.keys(drafts).length, [drafts]);
+
   const getCell = (row: TrailingConfigRow, field: AnyField) => {
     const d = drafts[rowKey(row)];
     if (d && field in d) return d[field];
     return (row as unknown as Record<string, unknown>)[field];
   };
 
-  const sortedRows = useMemo(() => rows, [rows]);
+  const visibleGroups = useMemo(
+    () =>
+      stageFilter === "all"
+        ? FIELD_GROUPS
+        : FIELD_GROUPS.filter((group) => group.id === stageFilter),
+    [stageFilter]
+  );
+
+  const visibleFields = useMemo(
+    () => visibleGroups.flatMap((group) => group.fields),
+    [visibleGroups]
+  );
+
+  const numericVisibleFields = useMemo(
+    () => visibleFields.filter((field): field is NumericField => NUMERIC_FIELDS.includes(field as NumericField)),
+    [visibleFields]
+  );
+
+  const boolVisibleFields = useMemo(
+    () => visibleFields.filter((field): field is BoolField => BOOL_FIELDS.includes(field as BoolField)),
+    [visibleFields]
+  );
+
+  const filteredRows = useMemo(() => {
+    const needle = query.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (showChangedOnly && !hasChanges(row)) return false;
+      if (!needle) return true;
+      return row.epic.toLowerCase().includes(needle) || compactEpic(row.epic).toLowerCase().includes(needle);
+    });
+  }, [rows, query, showChangedOnly, drafts]);
+
+  const profileLabel = isScalp ? "Scalp" : "Standard";
+  const defaultRow = rows.find((row) => row.epic === "DEFAULT");
+  const partialsEnabled = rows.filter((row) => row.enable_partial_close).length;
 
   return (
-    <div className="settings-panel">
-      <div className="settings-hero">
-        <div className="mission-kicker">Risk Mechanics</div>
-        <h1>Trailing Stop Settings</h1>
-        <p>
-          Per-pair trailing stop stages. Demo and live are independent — changes
-          here apply only to the <strong>{environment.toUpperCase()}</strong> environment.
-        </p>
+    <div className="settings-panel trailing-page">
+      <div className="settings-hero trailing-hero">
+        <div>
+          <div className="mission-kicker">Risk Mechanics</div>
+          <h1>Trailing Stop Settings</h1>
+          <p>
+            Per-pair trailing stop stages. Demo and live are independent; this view is editing{" "}
+            <strong>{environment.toUpperCase()}</strong>.
+          </p>
+        </div>
+        <div className="trailing-hero-stats" aria-label="Trailing config summary">
+          <div>
+            <span>Profile</span>
+            <strong>{profileLabel}</strong>
+          </div>
+          <div>
+            <span>Rows</span>
+            <strong>{rows.length}</strong>
+          </div>
+          <div>
+            <span>Drafts</span>
+            <strong>{changedCount}</strong>
+          </div>
+        </div>
       </div>
 
-      <div className="settings-form-actions" style={{ gap: 12, alignItems: "center" }}>
-        <label style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+      <div className="trailing-toolbar">
+        <div className="trailing-profile-switch" aria-label="Trailing profile">
+          <button
+            type="button"
+            className={!isScalp ? "active" : ""}
+            onClick={() => setIsScalp(false)}
+          >
+            Standard
+          </button>
+          <button
+            type="button"
+            className={isScalp ? "active" : ""}
+            onClick={() => setIsScalp(true)}
+          >
+            Scalp
+          </button>
+        </div>
+
+        <label className="trailing-search">
+          <span>Search epic</span>
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="AUDUSD, DEFAULT..."
+          />
+        </label>
+
+        <label className="trailing-filter-toggle">
           <input
             type="checkbox"
-            checked={isScalp}
-            onChange={(e) => setIsScalp(e.target.checked)}
+            checked={showChangedOnly}
+            onChange={(event) => setShowChangedOnly(event.target.checked)}
           />
-          Scalp configs (is_scalp=true)
+          Changed only
         </label>
-        <button onClick={() => reload()}>Reload</button>
+
+        <button className="trailing-reload" type="button" onClick={() => reload()}>
+          Reload
+        </button>
       </div>
+
+      <div className="trailing-stage-tabs" aria-label="Trailing stage columns">
+        {(["all", "early", "stage1", "stage2", "stage3", "partials"] as StageFilter[]).map((stage) => (
+          <button
+            key={stage}
+            type="button"
+            className={stageFilter === stage ? "active" : ""}
+            onClick={() => setStageFilter(stage)}
+          >
+            {stage === "all" ? "All columns" : FIELD_GROUPS.find((group) => group.id === stage)?.label}
+          </button>
+        ))}
+      </div>
+
+      {!loading && !error ? (
+        <div className="trailing-insight-strip">
+          <div>
+            <span>Default early BE</span>
+            <strong>
+              {formatNumber(defaultRow?.early_breakeven_trigger_points)} / {formatNumber(defaultRow?.early_breakeven_buffer_points)}
+            </strong>
+          </div>
+          <div>
+            <span>Default stage locks</span>
+            <strong>
+              {formatNumber(defaultRow?.stage1_lock_points)} / {formatNumber(defaultRow?.stage2_lock_points)}
+            </strong>
+          </div>
+          <div>
+            <span>Partial close enabled</span>
+            <strong>{partialsEnabled}</strong>
+          </div>
+          <div>
+            <span>Visible pairs</span>
+            <strong>{filteredRows.length}</strong>
+          </div>
+        </div>
+      ) : null}
 
       {loading ? (
         <div className="settings-placeholder">Loading...</div>
       ) : error ? (
         <div className="settings-placeholder">Error: {error}</div>
       ) : (
-        <div className="settings-card" style={{ overflowX: "auto" }}>
-          <table className="trailing-config-table" style={{ borderCollapse: "collapse", width: "100%", fontSize: "0.85rem" }}>
+        <div className="trailing-table-shell">
+          <table className="trailing-config-table">
             <thead>
               <tr>
-                <th
-                  style={{
-                    textAlign: "left",
-                    position: "sticky",
-                    left: 0,
-                    background: "linear-gradient(180deg, rgba(17, 28, 46, 0.98), rgba(12, 21, 36, 0.98))",
-                  }}
-                >
+                <th className="trailing-epic-head" rowSpan={2}>
                   Epic
                 </th>
-                {NUMERIC_FIELDS.map((f) => (
-                  <th key={f} title={FIELD_LABELS[f]} style={{ textAlign: "right", padding: "6px 8px", whiteSpace: "nowrap" }}>
+                {visibleGroups.map((group) => (
+                  <th key={group.id} className="trailing-group-head" colSpan={group.fields.length}>
+                    {group.label}
+                  </th>
+                ))}
+                <th className="trailing-action-head" rowSpan={2}>State</th>
+              </tr>
+              <tr>
+                {numericVisibleFields.map((f) => (
+                  <th key={f} title={FIELD_LABELS[f]} className="trailing-field-head">
                     {FIELD_LABELS[f]}
                   </th>
                 ))}
-                {BOOL_FIELDS.map((f) => (
-                  <th key={f} title={FIELD_LABELS[f]} style={{ padding: "6px 8px" }}>
+                {boolVisibleFields.map((f) => (
+                  <th key={f} title={FIELD_LABELS[f]} className="trailing-field-head">
                     {FIELD_LABELS[f]}
                   </th>
                 ))}
-                <th style={{ padding: "6px 8px" }}>Save</th>
               </tr>
             </thead>
             <tbody>
-              {sortedRows.map((row) => {
+              {filteredRows.map((row) => {
                 const key = rowKey(row);
                 const state = saveState[key] ?? "idle";
+                const rowHasChanges = hasChanges(row);
                 return (
                   <tr
                     key={key}
-                    style={{
-                      background: row.epic === "DEFAULT" ? "rgba(255, 255, 255, 0.03)" : undefined,
-                      borderBottom: "1px solid var(--border)",
-                    }}
+                    className={`${row.epic === "DEFAULT" ? "default-row" : ""} ${rowHasChanges ? "changed-row" : ""}`}
                   >
-                    <td style={{ padding: "4px 8px", fontWeight: 600, position: "sticky", left: 0, background: row.epic === "DEFAULT" ? "#f7f7fa" : "#fff" }}>
-                      {row.epic}
+                    <td className="trailing-epic-cell">
+                      <strong>{compactEpic(row.epic)}</strong>
+                      <span>{row.epic}</span>
                     </td>
-                    {NUMERIC_FIELDS.map((f) => {
+                    {numericVisibleFields.map((f) => {
                       const val = getCell(row, f);
+                      const isChanged = drafts[key] && f in drafts[key];
                       return (
-                        <td key={f} style={{ padding: "2px 4px" }}>
+                        <td key={f} className={isChanged ? "changed-cell" : ""}>
                           <input
                             type="number"
                             step="any"
                             value={val === null || val === undefined ? "" : String(val)}
                             onChange={(e) => onEdit(row, f, e.target.value)}
-                            style={{ width: 80, padding: "2px 4px", textAlign: "right" }}
+                            aria-label={`${compactEpic(row.epic)} ${FIELD_LABELS[f]}`}
                           />
                         </td>
                       );
                     })}
-                    {BOOL_FIELDS.map((f) => {
+                    {boolVisibleFields.map((f) => {
                       const val = getCell(row, f);
                       return (
-                        <td key={f} style={{ padding: "2px 4px", textAlign: "center" }}>
-                          <input
-                            type="checkbox"
-                            checked={Boolean(val)}
-                            onChange={(e) => onEdit(row, f, e.target.checked)}
-                          />
+                        <td key={f} className="trailing-bool-cell">
+                          <label className="trailing-mini-toggle">
+                            <input
+                              type="checkbox"
+                              checked={Boolean(val)}
+                              onChange={(e) => onEdit(row, f, e.target.checked)}
+                              aria-label={`${compactEpic(row.epic)} ${FIELD_LABELS[f]}`}
+                            />
+                            <span />
+                          </label>
                         </td>
                       );
                     })}
-                    <td style={{ padding: "2px 4px", textAlign: "center" }}>
+                    <td className="trailing-save-cell">
                       <button
-                        disabled={!hasChanges(row) || state === "saving"}
+                        type="button"
+                        disabled={!rowHasChanges || state === "saving"}
                         onClick={() => onSave(row)}
                       >
-                        {state === "saving" ? "..." : state === "saved" ? "✓" : "Save"}
+                        {state === "saving" ? "Saving" : state === "saved" ? "Saved" : rowHasChanges ? "Save" : "Clean"}
                       </button>
                       {state === "error" && saveError[key] ? (
-                        <div style={{ color: "#b91c1c", fontSize: "0.7rem" }}>{saveError[key]}</div>
+                        <div className="trailing-save-error">{saveError[key]}</div>
                       ) : null}
                     </td>
                   </tr>
                 );
               })}
+              {filteredRows.length === 0 ? (
+                <tr>
+                  <td className="trailing-empty" colSpan={visibleFields.length + 2}>
+                    No trailing configs match the current filters.
+                  </td>
+                </tr>
+              ) : null}
             </tbody>
           </table>
         </div>
