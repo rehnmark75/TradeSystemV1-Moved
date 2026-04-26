@@ -52,6 +52,8 @@ class TradeLog(Base):
     direction = Column(String, nullable=False)
     timestamp = Column(DateTime, default=datetime.utcnow)
     moved_to_breakeven = Column(Boolean, nullable=False, default=False)
+    moved_to_stage1 = Column(Boolean, nullable=False, default=False)
+    moved_to_stage2 = Column(Boolean, nullable=False, default=False)
 
     # IG-specific fields
     deal_id = Column(String, nullable=True)

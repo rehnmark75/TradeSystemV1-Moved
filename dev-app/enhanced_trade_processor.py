@@ -69,6 +69,12 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             self.enhanced_status_manager = EnhancedTradeStatusManager(trading_headers)
             self.logger.info("✅ Enhanced status manager initialized in trade processor")
 
+        # Cache for per-trade SL/TP-derived configs. Once early BE moves sl_price past
+        # entry, sl_pips is no longer the original risk, so we cannot recompute the
+        # SL/TP-proportional config. Cache the first valid result and reuse it for the
+        # rest of the trade lifecycle.
+        self._sltp_config_cache: Dict[int, TrailingConfig] = {}
+
         # Log profit protection rule
         if getattr(config, 'enable_profit_protection_rule', False):
             self.logger.info(f"🛡️ [PROFIT PROTECTION] Enabled: {config.profit_protection_trigger}pt → {config.profit_protection_stop}pt stop")
@@ -110,6 +116,19 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
 
             # Get pair-specific static config with scalp flag
             pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
+
+            # If we already resolved a SL/TP-proportional config for this trade earlier
+            # (pre-BE), reuse it. After early BE moves sl_price past entry, sl_pips
+            # becomes invalid and we'd otherwise silently revert to the static pair_config.
+            cached = self._sltp_config_cache.get(trade.id) if trade.id is not None else None
+            if cached is not None:
+                self.logger.debug(
+                    f"📊 [SL/TP TRAILING] Trade {trade.id}: Reusing cached SL/TP-derived config"
+                )
+                # Continue to ATR overlay below using the cached pair_config dict.
+                # cached is a TrailingConfig; we need its dict-form for downstream merging.
+                # Stash on locals so downstream code paths still work uniformly.
+                return cached
 
             # v5.0.0: SL/TP-proportional trailing config
             sl_tp_applied = False
@@ -229,6 +248,12 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 partial_close_trigger_points=pair_config.get('partial_close_trigger_points',
                                                              self.default_config.partial_close_trigger_points),
             )
+
+            # Cache only when SL/TP-proportional was actually applied — that's the
+            # value we want to preserve across BE so post-BE stages don't revert to
+            # static. ATR-only configs are recomputed each call (cheap and stable).
+            if sl_tp_applied and trade.id is not None:
+                self._sltp_config_cache[trade.id] = config
 
             return config
 
@@ -624,6 +649,7 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 return True
             elif final_status == "closed":
                 self.logger.info(f"📊 [TRADE CLOSED] Trade {trade.id}: Detected as closed - {getattr(trade, 'exit_reason', 'unknown reason')}")
+                self._sltp_config_cache.pop(trade.id, None)
             elif final_status in ["rejected", "invalid_deal", "expired"]:
                 self.logger.warning(f"⚠️ [TRADE INVALID] Trade {trade.id}: Status {final_status} - {getattr(trade, 'exit_reason', 'unknown reason')}")
             elif final_status == "missing_on_ig":

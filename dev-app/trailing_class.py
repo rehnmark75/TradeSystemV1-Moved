@@ -2246,11 +2246,12 @@ class EnhancedTradeProcessor:
                 if profit_points >= stage3_trigger:
                     # Stage 3: Percentage-based trailing
                     self.logger.info(f"🚀 [STAGE 3 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 3 trigger {stage3_trigger}pts - Percentage trailing")
-                    # Use progressive 3-stage strategy with SCALP config
+                    # Use the per-trade dynamic config (SL/TP-proportional + ATR-adaptive)
+                    # selected in get_config_for_trade(). Rebuilding from epic here would
+                    # discard those values and revert to static DB defaults.
                     is_scalp = getattr(trade, 'is_scalp_trade', False)
-                    self.logger.info(f"🔧 [STAGE3 DEBUG] Creating Progressive3StageTrailing for scalp={is_scalp}...")
-                    scalp_config = TrailingConfig.from_epic(trade.symbol, is_scalp_trade=is_scalp)
-                    progressive_strategy = Progressive3StageTrailing(scalp_config, self.logger)
+                    self.logger.info(f"🔧 [STAGE3 DEBUG] Creating Progressive3StageTrailing for scalp={is_scalp} using self.config...")
+                    progressive_strategy = Progressive3StageTrailing(self.config, self.logger)
                     self.logger.info(f"🔧 [STAGE3 DEBUG] Calling calculate_trail_level...")
                     try:
                         new_trail_level = progressive_strategy.calculate_trail_level(trade, current_price, [], db)
@@ -2409,8 +2410,11 @@ class EnhancedTradeProcessor:
                             adjustment_points = int(adjustment_distance / point_value)
                             if adjustment_points > 0:
                                 direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
-                                self.logger.info(f"📤 [STAGE 1 SEND] Trade {trade.id}: Moving to profit lock (+{lock_points}pts), adjustment={adjustment_points}pts")
-                                success = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                                self.logger.info(f"📤 [STAGE 1 SEND] Trade {trade.id}: Moving to profit lock at {stage1_stop:.5f} (+{lock_points}pts), adjustment={adjustment_points}pts")
+                                success = self._send_stop_adjustment(
+                                    trade, adjustment_points, direction_stop, 0,
+                                    new_stop_level=stage1_stop
+                                )
                                 if isinstance(success, dict) and success.get("status") == "updated":
                                     old_sl = trade.sl_price
                                     old_status = trade.status
@@ -2538,8 +2542,12 @@ class EnhancedTradeProcessor:
                             # Determine direction for adjustment
                             direction_stop = "increase" if trade.direction.upper() == "BUY" else "decrease"
 
-                            # Send the adjustment
-                            api_result = self._send_stop_adjustment(trade, adjustment_points, direction_stop, 0)
+                            # Send the adjustment with the absolute level the strategy validated
+                            # so the IG adjust service does not derive it from current IG state.
+                            api_result = self._send_stop_adjustment(
+                                trade, adjustment_points, direction_stop, 0,
+                                new_stop_level=new_trail_level
+                            )
 
                             if isinstance(api_result, dict) and api_result.get("status") == "updated":
                                 # Extract IG's actual stop level from the API response
