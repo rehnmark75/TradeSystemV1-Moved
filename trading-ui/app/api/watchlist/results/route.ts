@@ -11,10 +11,28 @@ export async function GET(request: Request) {
   const scanDate = searchParams.get("date");
   const limit = Number(searchParams.get("limit") || 100);
   const validatedOnly = searchParams.get("validated") === "true";
+  const sort = (searchParams.get("sort") || "fresh").toLowerCase();
 
   if (!watchlist) {
     return NextResponse.json({ error: "watchlist is required" }, { status: 400 });
   }
+
+  // Whitelist sort modes — never interpolate user input directly into SQL.
+  const SORT_CLAUSES_CROSSOVER: Record<string, string> = {
+    fresh: "w.crossover_date DESC NULLS LAST, w.volume DESC",
+    oldest: "w.crossover_date ASC NULLS LAST, w.volume DESC",
+    volume: "w.volume DESC",
+    score: "w.trade_ready_score DESC NULLS LAST, w.crossover_date DESC NULLS LAST",
+    rs: "w.rs_percentile DESC NULLS LAST, w.crossover_date DESC NULLS LAST",
+  };
+  const SORT_CLAUSES_EVENT: Record<string, string> = {
+    fresh: "w.scan_date DESC, w.volume DESC",
+    volume: "w.volume DESC",
+    score: "w.trade_ready_score DESC NULLS LAST, w.scan_date DESC",
+    rs: "w.rs_percentile DESC NULLS LAST, w.scan_date DESC",
+  };
+  const orderByCrossover = SORT_CLAUSES_CROSSOVER[sort] ?? SORT_CLAUSES_CROSSOVER.fresh;
+  const orderByEvent = SORT_CLAUSES_EVENT[sort] ?? SORT_CLAUSES_EVENT.fresh;
 
   const client = await pool.connect();
   try {
@@ -166,7 +184,7 @@ export async function GET(request: Request) {
         WHERE w.watchlist_name = $1
           AND w.status = 'active'
           ${validatedOnly ? "AND w.signal_validated IS TRUE" : ""}
-        ORDER BY w.crossover_date DESC NULLS LAST, w.volume DESC
+        ORDER BY ${orderByCrossover}
         LIMIT $2
       `;
       const result = await client.query(query, [watchlist, limit]);
@@ -188,8 +206,14 @@ export async function GET(request: Request) {
         w.price_change_1d,
         w.scan_date,
         w.crossover_date,
-        1 as days_on_list,
+        CASE
+          WHEN w.crossover_date IS NULL THEN 1
+          ELSE (CURRENT_DATE - w.crossover_date) + 1
+        END as days_on_list,
         w.avg_daily_change_5d,
+        w.trade_ready,
+        w.trade_ready_score,
+        w.structure_rr_ratio,
         w.daq_score,
         w.daq_grade,
         w.daq_earnings_risk,
@@ -304,7 +328,7 @@ export async function GET(request: Request) {
           WHERE watchlist_name = $1
         ))
         ${validatedOnly ? "AND w.signal_validated IS TRUE" : ""}
-      ORDER BY w.scan_date DESC, w.volume DESC
+      ORDER BY ${orderByEvent}
       LIMIT $3
     `;
     const result = await client.query(query, [watchlist, scanDate, limit]);

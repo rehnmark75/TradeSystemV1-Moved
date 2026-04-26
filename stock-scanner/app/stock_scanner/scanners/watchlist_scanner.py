@@ -104,6 +104,17 @@ class WatchlistScanner:
     MIN_VOLUME = 1_000_000  # 1M minimum daily volume
     MIN_HISTORY_DAYS = 250  # Need at least 250 days for EMA 200
 
+    # Quality gates for NEW crossover signals (mirror watchlist_backtest_service).
+    # Continuations of already-active entries are not re-gated — only fresh signals.
+    SIGNAL_EMA50_SLOPE_MIN = 1.005       # EMA50 must rise >=0.5% over 5 bars
+    SIGNAL_EMA20_SLOPE_MIN = 1.005       # EMA20 must rise >=0.5% over 5 bars
+    SIGNAL_REL_VOL_MIN = 1.25            # Crossover-day volume >=1.25x 20d avg
+    SIGNAL_RS_PERCENTILE_MIN = 60.0      # Relative strength >=60th percentile
+    SIGNAL_EARNINGS_BLACKOUT_DAYS = 7    # Skip if earnings within N days
+
+    REGIME_INDEX_TICKER = 'QQQ'          # Market regime proxy (SPY not loaded)
+    REGIME_EMA_FIELD = 'ema_200'         # Index must be > this EMA for risk-on
+
     def __init__(self, db_manager):
         """
         Initialize the watchlist scanner.
@@ -173,6 +184,74 @@ class WatchlistScanner:
         logger.info(f"Cleaned up entries older than {max_age_days} days or expired")
         return count
 
+    async def _check_market_regime(self, scan_date: date) -> bool:
+        """
+        Risk-on when the regime index closes above its 200-day EMA.
+
+        Continuations are not re-gated; only NEW crossovers are skipped when
+        the market is in a downtrend (fades dominate that environment).
+        """
+        try:
+            df = await self.data_provider.get_historical_data(
+                ticker=self.REGIME_INDEX_TICKER,
+                start_date=scan_date - timedelta(days=365),
+                end_date=scan_date,
+                timeframe='1d',
+            )
+            if df.empty or len(df) < 200:
+                logger.warning(
+                    f"Regime gate: insufficient {self.REGIME_INDEX_TICKER} history "
+                    f"(rows={len(df)}); allowing signals"
+                )
+                return True
+            latest = df.iloc[-1]
+            close = float(latest['close'])
+            ema_200 = float(latest.get(self.REGIME_EMA_FIELD, 0))
+            if ema_200 <= 0:
+                logger.warning("Regime gate: EMA200 missing on index; allowing signals")
+                return True
+            risk_on = close > ema_200
+            logger.info(
+                f"Regime gate: {self.REGIME_INDEX_TICKER} close={close:.2f} "
+                f"vs EMA200={ema_200:.2f} → {'RISK-ON' if risk_on else 'RISK-OFF'}"
+            )
+            return risk_on
+        except Exception as e:
+            logger.warning(f"Regime gate failed ({e}); allowing signals (fail-open)")
+            return True
+
+    async def _load_rs_percentiles(self) -> Dict[str, float]:
+        """Map ticker → latest RS percentile from stock_screening_metrics."""
+        query = """
+            SELECT ticker, rs_percentile
+            FROM stock_screening_metrics
+            WHERE calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+              AND rs_percentile IS NOT NULL
+        """
+        try:
+            rows = await self.db.fetch(query)
+            return {r['ticker']: float(r['rs_percentile']) for r in rows}
+        except Exception as e:
+            logger.warning(f"Failed to load RS percentiles ({e}); RS gate disabled")
+            return {}
+
+    async def _load_earnings_blackout(self, scan_date: date) -> Set[str]:
+        """Tickers with earnings within SIGNAL_EARNINGS_BLACKOUT_DAYS."""
+        query = """
+            SELECT ticker, earnings_date
+            FROM stock_instruments
+            WHERE is_active = true
+              AND earnings_date IS NOT NULL
+              AND earnings_date >= $1::date
+              AND earnings_date <= $1::date + ($2 || ' days')::interval
+        """
+        try:
+            rows = await self.db.fetch(query, scan_date, self.SIGNAL_EARNINGS_BLACKOUT_DAYS)
+            return {r['ticker'] for r in rows}
+        except Exception as e:
+            logger.warning(f"Failed to load earnings blackout ({e}); earnings gate disabled")
+            return set()
+
     async def get_all_active_tickers(self) -> List[str]:
         """Get all active stock tickers from stock_instruments."""
         query = """
@@ -216,6 +295,16 @@ class WatchlistScanner:
             scan_date = calculation_date
 
         logger.info(f"Starting watchlist scans for {scan_date}")
+
+        # Pre-scan quality data: market regime, RS percentiles, earnings blackout.
+        # These gate NEW crossovers only — continuations of active entries are unaffected.
+        market_risk_on = await self._check_market_regime(scan_date)
+        rs_map = await self._load_rs_percentiles()
+        earnings_blackout = await self._load_earnings_blackout(scan_date)
+        logger.info(
+            f"Quality gates: regime={'on' if market_risk_on else 'OFF'} | "
+            f"rs_map={len(rs_map)} tickers | earnings_blackout={len(earnings_blackout)} tickers"
+        )
 
         # Get all active tickers
         tickers = await self.get_all_active_tickers()
@@ -314,6 +403,13 @@ class WatchlistScanner:
                         status='active',
                     )
 
+                # Shared quality gates for NEW crossovers (EMA20/EMA50). Computed once.
+                rel_vol = (volume / avg_volume) if avg_volume > 0 else 0.0
+                ema_50_5bars_ago = float(df['ema_50'].iloc[-6]) if len(df) >= 6 and 'ema_50' in df.columns else 0.0
+                ema_20_5bars_ago = float(df['ema_20'].iloc[-6]) if len(df) >= 6 and 'ema_20' in df.columns else 0.0
+                rs_pct = rs_map.get(ticker)
+                earnings_block = ticker in earnings_blackout
+
                 # ===== CROSSOVER WATCHLISTS (with tracking) =====
 
                 # 1. EMA 50 Crossover
@@ -330,7 +426,18 @@ class WatchlistScanner:
                         results[wl_name].append(make_result(wl_name, existing.crossover_date))
                         continued[wl_name] += 1
                     # If not valid, don't add to seen_tickers (will be expired later)
-                elif is_new_crossover:
+                elif is_new_crossover and self._passes_signal_gates(
+                    ticker=ticker,
+                    wl_name=wl_name,
+                    market_risk_on=market_risk_on,
+                    rel_vol=rel_vol,
+                    ema_now=ema_50,
+                    ema_5bars_ago=ema_50_5bars_ago,
+                    slope_min=self.SIGNAL_EMA50_SLOPE_MIN,
+                    macd_histogram=macd_histogram,
+                    rs_pct=rs_pct,
+                    earnings_block=earnings_block,
+                ):
                     # New crossover - use actual candle date, not scan date
                     results[wl_name].append(make_result(wl_name, actual_candle_date))
                     new_crossovers[wl_name] += 1
@@ -347,7 +454,18 @@ class WatchlistScanner:
                         results[wl_name].append(make_result(wl_name, existing.crossover_date))
                         continued[wl_name] += 1
                     # If not valid, don't add to seen_tickers (will be expired later)
-                elif is_new_crossover:
+                elif is_new_crossover and self._passes_signal_gates(
+                    ticker=ticker,
+                    wl_name=wl_name,
+                    market_risk_on=market_risk_on,
+                    rel_vol=rel_vol,
+                    ema_now=ema_20,
+                    ema_5bars_ago=ema_20_5bars_ago,
+                    slope_min=self.SIGNAL_EMA20_SLOPE_MIN,
+                    macd_histogram=macd_histogram,
+                    rs_pct=rs_pct,
+                    earnings_block=earnings_block,
+                ):
                     # New crossover - use actual candle date, not scan date
                     results[wl_name].append(make_result(wl_name, actual_candle_date))
                     new_crossovers[wl_name] += 1
@@ -364,7 +482,18 @@ class WatchlistScanner:
                         results[wl_name].append(make_result(wl_name, existing.crossover_date))
                         continued[wl_name] += 1
                     # If not valid, don't add to seen_tickers (will be expired later)
-                elif is_new_crossover:
+                elif is_new_crossover and self._passes_signal_gates(
+                    ticker=ticker,
+                    wl_name=wl_name,
+                    market_risk_on=market_risk_on,
+                    rel_vol=rel_vol,
+                    ema_now=0.0,            # slope check skipped for MACD list
+                    ema_5bars_ago=0.0,
+                    slope_min=0.0,
+                    macd_histogram=macd_histogram,
+                    rs_pct=rs_pct,
+                    earnings_block=earnings_block,
+                ):
                     # New crossover - use actual candle date, not scan date
                     results[wl_name].append(make_result(wl_name, actual_candle_date))
                     new_crossovers[wl_name] += 1
@@ -406,6 +535,64 @@ class WatchlistScanner:
                 logger.info(f"  {wl_name}: {len(results[wl_name])} stocks (event-based)")
 
         return results
+
+    def _passes_signal_gates(
+        self,
+        ticker: str,
+        wl_name: str,
+        market_risk_on: bool,
+        rel_vol: float,
+        ema_now: float,
+        ema_5bars_ago: float,
+        slope_min: float,
+        macd_histogram: float,
+        rs_pct: Optional[float],
+        earnings_block: bool,
+    ) -> bool:
+        """
+        Quality gates applied ONLY to new crossover signals.
+
+        - Market regime: index above its 200 EMA
+        - Relative volume: crossover-day volume >=1.25x 20d average
+        - EMA slope: EMA(N) rising >=0.5% over last 5 bars (skipped if slope_min=0)
+        - MACD direction: histogram > 0 (momentum confirmation)
+        - Relative strength: RS percentile >=60 (skipped if RS unknown — fail-open)
+        - Earnings: skip if earnings within 7 days
+        """
+        if not market_risk_on:
+            logger.debug(f"{ticker}/{wl_name} blocked: market regime risk-off")
+            return False
+
+        if rel_vol < self.SIGNAL_REL_VOL_MIN:
+            logger.debug(f"{ticker}/{wl_name} blocked: rel_vol={rel_vol:.2f} < {self.SIGNAL_REL_VOL_MIN}")
+            return False
+
+        # Slope check (skipped for MACD list which passes slope_min=0)
+        if slope_min > 0:
+            if ema_5bars_ago <= 0:
+                logger.debug(f"{ticker}/{wl_name} blocked: missing EMA history for slope check")
+                return False
+            if ema_now < ema_5bars_ago * slope_min:
+                logger.debug(
+                    f"{ticker}/{wl_name} blocked: EMA slope "
+                    f"{ema_now / ema_5bars_ago:.4f} < {slope_min:.4f}"
+                )
+                return False
+
+        if macd_histogram <= 0:
+            logger.debug(f"{ticker}/{wl_name} blocked: MACD histogram <=0 ({macd_histogram:.4f})")
+            return False
+
+        # RS gate is fail-open: only block when we have data and it's below threshold.
+        if rs_pct is not None and rs_pct < self.SIGNAL_RS_PERCENTILE_MIN:
+            logger.debug(f"{ticker}/{wl_name} blocked: RS {rs_pct:.0f} < {self.SIGNAL_RS_PERCENTILE_MIN}")
+            return False
+
+        if earnings_block:
+            logger.debug(f"{ticker}/{wl_name} blocked: earnings within {self.SIGNAL_EARNINGS_BLACKOUT_DAYS}d")
+            return False
+
+        return True
 
     def _check_still_above_ema(
         self,
