@@ -31,7 +31,7 @@ const NAV_SECTIONS: NavSection[] = [
     title: "FX Stack",
     items: [
       { href: "/forex", label: "Forex Overview", shortLabel: "Forex" },
-      { href: "/chart", label: "Execution Charting", shortLabel: "Chart" },
+      { href: "/forex/chart", label: "Execution Charting", shortLabel: "Chart" },
     ],
   },
   {

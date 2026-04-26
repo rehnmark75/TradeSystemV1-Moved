@@ -308,6 +308,15 @@ class SMCRejectionHistoryManager:
                 market_hour = self._safe_int(data.get('market_hour'))
                 market_session = data.get('market_session') or self._get_session_name(market_hour)
 
+                # smc_rejection_outcomes.chk_direction only accepts BULL/BEAR; some
+                # upstream paths emit BUY/SELL. Normalize at the boundary so dirty
+                # values can't propagate to the outcomes-analyzer downstream.
+                _direction = data.get('attempted_direction')
+                if _direction == 'BUY':
+                    _direction = 'BULL'
+                elif _direction == 'SELL':
+                    _direction = 'BEAR'
+
                 values = (
                     data.get('scan_timestamp', datetime.now(timezone.utc)),
                     data.get('epic', ''),
@@ -315,7 +324,7 @@ class SMCRejectionHistoryManager:
                     data.get('rejection_stage'),
                     data.get('rejection_reason', ''),
                     self._safe_json(data.get('rejection_details')),
-                    data.get('attempted_direction'),
+                    _direction,
                     self._safe_float(data.get('current_price')),
                     self._safe_float(data.get('bid_price')),
                     self._safe_float(data.get('ask_price')),

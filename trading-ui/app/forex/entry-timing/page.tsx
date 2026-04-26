@@ -28,14 +28,24 @@ type EntryTimingTrade = {
   time_to_mae_seconds: number | null;
   signal_price: number | null;
   signal_trigger: string | null;
+  trigger_type: string | null;
+  strategy: string;
+  setup_family: string;
   entry_type: string | null;
+  order_type: string | null;
   pullback_depth: number | null;
   confidence_score: number | null;
   market_session: string | null;
+  timeframe: string | null;
+  risk_reward_ratio: number | null;
+  spread_pips: number | null;
+  settings_context: { label: string; value: string | number | boolean | null }[];
 };
 
 type EntryTimingSummary = {
-  entry_type: string;
+  strategy: string;
+  setup_family?: string;
+  entry_type?: string;
   total_trades: number;
   wins: number;
   losses: number;
@@ -47,9 +57,12 @@ type EntryTimingSummary = {
   zero_mfe_pct: number;
   avg_confidence: number | null;
   avg_pullback_depth: number | null;
+  avg_rr?: number | null;
+  avg_spread_pips?: number | null;
 };
 
 type EntryTimingTriggerSummary = {
+  strategy: string;
   signal_trigger: string;
   entry_type: string;
   total_trades: number;
@@ -68,6 +81,8 @@ type EntryTimingPayload = {
   trades: EntryTimingTrade[];
   summary: EntryTimingSummary[];
   by_trigger: EntryTimingTriggerSummary[];
+  strategy_summary: EntryTimingSummary[];
+  strategy_options: string[];
 };
 
 const DAY_OPTIONS = [1, 3, 7, 14, 30];
@@ -100,11 +115,12 @@ export default function ForexEntryTimingPage() {
   const [payload, setPayload] = useState<EntryTimingPayload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [strategyFilter, setStrategyFilter] = useState("ALL");
 
   const loadTiming = () => {
     setLoading(true);
     setError(null);
-    fetch(`/trading/api/forex/entry-timing/?days=${days}&env=${environment}`)
+    fetch(`/trading/api/forex/entry-timing/?days=${days}&env=${environment}&strategy=${encodeURIComponent(strategyFilter)}`)
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch(() => setError("Failed to load entry timing analysis."))
@@ -113,11 +129,13 @@ export default function ForexEntryTimingPage() {
 
   useEffect(() => {
     loadTiming();
-  }, [days, environment]);
+  }, [days, environment, strategyFilter]);
 
   const trades = payload?.trades ?? [];
   const summary = payload?.summary ?? [];
   const byTrigger = payload?.by_trigger ?? [];
+  const strategySummary = payload?.strategy_summary ?? [];
+  const strategyOptions = payload?.strategy_options ?? [];
 
   const closedTrades = useMemo(
     () => trades.filter((trade) => ["WIN", "LOSS"].includes(trade.result)),
@@ -187,6 +205,17 @@ export default function ForexEntryTimingPage() {
               ))}
             </select>
           </div>
+          <div>
+            <label>Strategy</label>
+            <select value={strategyFilter} onChange={(event) => setStrategyFilter(event.target.value)}>
+              <option value="ALL">All strategies</option>
+              {strategyOptions.map((strategy) => (
+                <option key={strategy} value={strategy}>
+                  {strategy}
+                </option>
+              ))}
+            </select>
+          </div>
           <button className="section-tab active" onClick={loadTiming}>
             Refresh
           </button>
@@ -203,6 +232,10 @@ export default function ForexEntryTimingPage() {
               <div className="summary-card">
                 Closed Trades
                 <strong>{closedTrades.length}</strong>
+              </div>
+              <div className="summary-card">
+                Strategies
+                <strong>{strategySummary.length}</strong>
               </div>
               <div className="summary-card">
                 Zero MFE Trades
@@ -227,10 +260,50 @@ export default function ForexEntryTimingPage() {
             </div>
 
             <div className="panel table-panel">
-              <div className="chart-title">Performance by Entry Type</div>
+              <div className="chart-title">Performance by Strategy</div>
               <table className="forex-table">
                 <thead>
                   <tr>
+                    <th>Strategy</th>
+                    <th>Trades</th>
+                    <th>Win %</th>
+                    <th>Avg P&amp;L</th>
+                    <th>Total P&amp;L</th>
+                    <th>Avg MAE</th>
+                    <th>Avg MFE</th>
+                    <th>Zero MFE %</th>
+                    <th>Avg Conf</th>
+                    <th>Avg RR</th>
+                    <th>Avg Spread</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {strategySummary.map((row) => (
+                    <tr key={row.strategy}>
+                      <td>{row.strategy}</td>
+                      <td>{row.total_trades}</td>
+                      <td>{formatPercent(row.win_rate)}</td>
+                      <td>{formatNumber(row.avg_pnl)}</td>
+                      <td>{formatNumber(row.total_pnl)}</td>
+                      <td>{formatNumber(row.avg_mae_pips ?? 0, 1)}</td>
+                      <td>{formatNumber(row.avg_mfe_pips ?? 0, 1)}</td>
+                      <td>{formatPercent(row.zero_mfe_pct)}</td>
+                      <td>{formatNumber(row.avg_confidence ?? 0, 2)}</td>
+                      <td>{formatNumber(row.avg_rr ?? 0, 2)}</td>
+                      <td>{formatNumber(row.avg_spread_pips ?? 0, 1)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="panel table-panel">
+              <div className="chart-title">Performance by Strategy Setup</div>
+              <table className="forex-table">
+                <thead>
+                  <tr>
+                    <th>Strategy</th>
+                    <th>Setup</th>
                     <th>Entry Type</th>
                     <th>Trades</th>
                     <th>Win %</th>
@@ -244,8 +317,10 @@ export default function ForexEntryTimingPage() {
                   </tr>
                 </thead>
                 <tbody>
-                  {summary.map((row) => (
-                    <tr key={row.entry_type}>
+                  {summary.map((row, index) => (
+                    <tr key={`${row.strategy}-${row.entry_type}-${index}`}>
+                      <td>{row.strategy}</td>
+                      <td>{row.setup_family ?? "-"}</td>
                       <td>{row.entry_type}</td>
                       <td>{row.total_trades}</td>
                       <td>{formatPercent(row.win_rate)}</td>
@@ -267,6 +342,7 @@ export default function ForexEntryTimingPage() {
               <table className="forex-table">
                 <thead>
                   <tr>
+                    <th>Strategy</th>
                     <th>Trigger</th>
                     <th>Entry Type</th>
                     <th>Trades</th>
@@ -281,7 +357,8 @@ export default function ForexEntryTimingPage() {
                 </thead>
                 <tbody>
                   {byTrigger.map((row, index) => (
-                    <tr key={`${row.signal_trigger}-${row.entry_type}-${index}`}>
+                    <tr key={`${row.strategy}-${row.signal_trigger}-${row.entry_type}-${index}`}>
+                      <td>{row.strategy}</td>
                       <td>{row.signal_trigger}</td>
                       <td>{row.entry_type}</td>
                       <td>{row.total_trades}</td>
@@ -340,6 +417,7 @@ export default function ForexEntryTimingPage() {
                     <tr>
                       <th>Time</th>
                       <th>Pair</th>
+                      <th>Strategy</th>
                       <th>Entry Type</th>
                       <th>Trigger</th>
                       <th>Result</th>
@@ -347,6 +425,7 @@ export default function ForexEntryTimingPage() {
                       <th>MFE</th>
                       <th>Slippage</th>
                       <th>Confidence</th>
+                      <th>Settings Context</th>
                     </tr>
                   </thead>
                   <tbody>
@@ -354,6 +433,7 @@ export default function ForexEntryTimingPage() {
                       <tr key={row.id}>
                         <td>{formatDateTime(row.trade_timestamp)}</td>
                         <td>{row.symbol_short}</td>
+                        <td>{row.strategy}</td>
                         <td>{row.entry_type ?? "-"}</td>
                         <td>{row.signal_trigger ?? "-"}</td>
                         <td>{row.result}</td>
@@ -361,6 +441,11 @@ export default function ForexEntryTimingPage() {
                         <td>{formatNumber(row.mfe_pips ?? 0, 1)}</td>
                         <td>{formatNumber(row.slippage_pips ?? 0, 1)}</td>
                         <td>{formatNumber(row.confidence_score ?? 0, 2)}</td>
+                        <td>
+                          {row.settings_context?.length
+                            ? row.settings_context.map((item) => `${item.label}: ${item.value}`).join(" | ")
+                            : "-"}
+                        </td>
                       </tr>
                     ))}
                   </tbody>

@@ -4,57 +4,58 @@ import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import EnvironmentToggle from "../../../components/EnvironmentToggle";
 import ForexNav from "../_components/ForexNav";
+import { useEnvironment } from "../../../lib/environment";
 
-type CacheRow = {
+type PolicyCandidate = {
+  trigger: number;
+  reachRate: number;
+  saveRate: number;
+  cutWinnerRisk: number;
+  score: number;
+};
+
+type PolicyRow = {
+  strategy: string;
   epic: string;
   epic_display: string;
   direction: string;
-  trade_count: number;
+  trades: number;
+  wins: number;
+  losses: number;
   win_rate: number;
   avg_mfe: number;
-  median_mfe: number;
-  percentile_25_mfe: number;
-  percentile_75_mfe: number;
+  median_winner_mfe: number;
+  p75_winner_mfe: number;
   avg_mae: number;
-  median_mae: number;
-  percentile_75_mae: number;
-  percentile_95_mae: number;
-  max_mae: number;
-  optimal_be_trigger: number;
-  conservative_be_trigger: number;
-  current_be_trigger: number;
-  optimal_stop_loss: number;
-  current_stop_loss: number;
-  configured_stop_loss: number;
-  sl_recommendation: string;
-  sl_priority: string;
+  p75_mae: number;
+  current_be_rate: number;
+  recommended_trigger: number | null;
+  reach_rate: number;
+  save_rate: number;
+  cut_winner_risk: number;
+  policy_score: number;
   recommendation: string;
   priority: string;
-  confidence: string;
-  be_reach_rate: number;
-  be_protection_rate: number;
-  be_profit_rate: number;
-  analysis_notes: string | null;
-  analyzed_at: string;
-  trades_analyzed: number[] | null;
-  be_diff: number;
-  sl_diff: number;
-  sl_mismatch: boolean;
+  rationale: string;
+  candidates: PolicyCandidate[];
 };
 
 type SummaryPayload = {
-  epicDirectionPairs: number;
-  totalTradesAnalyzed: number;
-  highPriorityBe: number;
-  highPrioritySl: number;
-  avgWinRate: number;
-  analyzedAt: string | null;
+  groups: number;
+  trades: number;
+  win_rate: number;
+  actionable: number;
+  high_priority: number;
+  avg_current_be_rate: number;
 };
 
 type Payload = {
-  cacheExists: boolean;
+  source: string;
+  days: number;
+  env: string;
+  strategy_options: string[];
   summary: SummaryPayload | null;
-  rows: CacheRow[];
+  rows: PolicyRow[];
 };
 
 const formatNumber = (value: number | null | undefined, digits = 1) =>
@@ -71,24 +72,6 @@ const formatWhole = (value: number | null | undefined) =>
 const formatPercent = (value: number | null | undefined) =>
   typeof value === "number" && Number.isFinite(value) ? `${value.toFixed(1)}%` : "N/A";
 
-const formatSigned = (value: number | null | undefined) => {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "N/A";
-  return value > 0 ? `+${value.toFixed(0)}` : value.toFixed(0);
-};
-
-const formatDate = (value: string | null | undefined) => {
-  if (!value) return "N/A";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleString("sv-SE", {
-    year: "numeric",
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
 const priorityTone = (value: string | null | undefined) => {
   if (value === "high") return "warn";
   if (value === "medium") return "off";
@@ -96,6 +79,9 @@ const priorityTone = (value: string | null | undefined) => {
 };
 
 export default function ForexBreakevenOptimizerPage() {
+  const { environment } = useEnvironment();
+  const [days, setDays] = useState(60);
+  const [strategyFilter, setStrategyFilter] = useState("ALL");
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -105,26 +91,26 @@ export default function ForexBreakevenOptimizerPage() {
     setLoading(true);
     setError(null);
 
-    fetch("/trading/api/forex/breakeven-optimizer/", { signal: controller.signal })
+    fetch(`/trading/api/forex/breakeven-optimizer/?days=${days}&env=${environment}&strategy=${encodeURIComponent(strategyFilter)}`, { signal: controller.signal })
       .then((res) => res.json())
       .then((data) => setPayload(data))
       .catch((err) => {
         if (err.name !== "AbortError") {
-          setError("Failed to load breakeven optimizer cache.");
+          setError("Failed to load breakeven policy evaluator.");
         }
       })
       .finally(() => setLoading(false));
 
     return () => controller.abort();
-  }, []);
+  }, [days, environment, strategyFilter]);
 
-  const topBeRows = useMemo(
-    () => [...(payload?.rows ?? [])].sort((a, b) => Math.abs(b.be_diff) - Math.abs(a.be_diff)).slice(0, 5),
+  const topPolicyRows = useMemo(
+    () => [...(payload?.rows ?? [])].sort((a, b) => b.policy_score - a.policy_score).slice(0, 6),
     [payload?.rows]
   );
 
-  const topSlRows = useMemo(
-    () => [...(payload?.rows ?? [])].sort((a, b) => Math.abs(b.sl_diff) - Math.abs(a.sl_diff)).slice(0, 5),
+  const highRiskRows = useMemo(
+    () => [...(payload?.rows ?? [])].sort((a, b) => b.cut_winner_risk - a.cut_winner_risk).slice(0, 6),
     [payload?.rows]
   );
 
@@ -150,7 +136,7 @@ export default function ForexBreakevenOptimizerPage() {
       <div className="header">
         <div>
           <h1>Breakeven Optimizer</h1>
-          <p>Review cached MFE/MAE analysis to see where break-even triggers and initial stop-loss settings look misaligned with realized trade behavior.</p>
+          <p>Evaluate live break-even policy candidates by strategy, pair, and direction using MFE, MAE, loser protection, and winner interruption risk.</p>
         </div>
         <div className="header-chip">Forex</div>
       </div>
@@ -159,83 +145,99 @@ export default function ForexBreakevenOptimizerPage() {
 
       {error ? <div className="error">{error}</div> : null}
 
-      {!loading && payload && !payload.cacheExists ? (
-        <div className="panel">
-          <div className="chart-title">Unavailable</div>
-          <div className="chart-placeholder">
-            The `breakeven_analysis_cache` table is not present in the forex database yet.
+      <div className="panel">
+        <div className="forex-controls">
+          <div>
+            <label>Window</label>
+            <select value={days} onChange={(event) => setDays(Number(event.target.value))}>
+              {[14, 30, 60, 90, 180].map((option) => (
+                <option key={option} value={option}>{option}d</option>
+              ))}
+            </select>
           </div>
+          <div>
+            <label>Strategy</label>
+            <select value={strategyFilter} onChange={(event) => setStrategyFilter(event.target.value)}>
+              <option value="ALL">All strategies</option>
+              {(payload?.strategy_options ?? []).map((strategy) => (
+                <option key={strategy} value={strategy}>{strategy}</option>
+              ))}
+            </select>
+          </div>
+          <div className="forex-badge">Source: live trade_log</div>
         </div>
-      ) : null}
+      </div>
 
       <div className="metrics-grid">
         <div className="summary-card">
-          Epic/Direction Pairs
-          <strong>{summary?.epicDirectionPairs ?? 0}</strong>
+          Policy Groups
+          <strong>{summary?.groups ?? 0}</strong>
         </div>
         <div className="summary-card">
-          Trades Analyzed
-          <strong>{summary?.totalTradesAnalyzed ?? 0}</strong>
+          Closed Trades
+          <strong>{summary?.trades ?? 0}</strong>
         </div>
         <div className="summary-card">
-          High Priority BE
-          <strong>{summary?.highPriorityBe ?? 0}</strong>
+          Actionable Policies
+          <strong>{summary?.actionable ?? 0}</strong>
         </div>
         <div className="summary-card">
-          High Priority SL
-          <strong>{summary?.highPrioritySl ?? 0}</strong>
+          High Priority
+          <strong>{summary?.high_priority ?? 0}</strong>
         </div>
         <div className="summary-card">
-          Avg Win Rate
-          <strong>{formatPercent(summary?.avgWinRate)}</strong>
+          Win Rate
+          <strong>{formatPercent(summary?.win_rate)}</strong>
         </div>
       </div>
 
       <div className="panel">
-        <div className="chart-title">Snapshot Status</div>
+        <div className="chart-title">Policy Model</div>
         <div className="stack-list">
           <div className="analysis-card">
-            <strong>Cached analysis</strong>
-            <p>This page currently reads the latest cached optimizer results from the old Streamlit workflow rather than rerunning the Python MFE/MAE analysis inside `trading-ui`.</p>
+            <strong>What this evaluates</strong>
+            <p>For each strategy, pair, and direction, candidate BE triggers are scored by loser protection minus winner interruption risk. This avoids blindly raising BE to levels that trades rarely reach.</p>
           </div>
           <div className="analysis-card">
-            <strong>Last analyzed</strong>
-            <p>{formatDate(summary?.analyzedAt)}</p>
+            <strong>Current BE usage</strong>
+            <p>Average current BE execution rate is {formatPercent(summary?.avg_current_be_rate)} across visible groups.</p>
           </div>
         </div>
       </div>
 
       <div className="forex-grid">
         <div className="panel table-panel">
-          <div className="chart-title">Largest BE Gaps</div>
+          <div className="chart-title">Best BE Test Candidates</div>
           {loading ? (
-            <div className="chart-placeholder">Loading optimizer summary...</div>
+            <div className="chart-placeholder">Loading BE policy candidates...</div>
           ) : (
             <table className="forex-table">
               <thead>
                 <tr>
+                  <th>Strategy</th>
                   <th>Epic</th>
                   <th>Dir</th>
-                  <th>Current</th>
-                  <th>Optimal</th>
-                  <th>Diff</th>
+                  <th>Trigger</th>
+                  <th>Save%</th>
+                  <th>Cut Risk</th>
                   <th>Action</th>
                 </tr>
               </thead>
               <tbody>
-                {topBeRows.map((row) => (
-                  <tr key={`${row.epic}-${row.direction}-be`}>
+                {topPolicyRows.map((row) => (
+                  <tr key={`${row.strategy}-${row.epic}-${row.direction}-be`}>
+                    <td>{row.strategy}</td>
                     <td>{row.epic_display}</td>
                     <td>{row.direction}</td>
-                    <td>{formatWhole(row.current_be_trigger)}</td>
-                    <td>{formatWhole(row.optimal_be_trigger)}</td>
-                    <td>{formatSigned(row.be_diff)}</td>
+                    <td>{formatWhole(row.recommended_trigger)}</td>
+                    <td>{formatPercent(row.save_rate)}</td>
+                    <td>{formatPercent(row.cut_winner_risk)}</td>
                     <td>{row.recommendation}</td>
                   </tr>
                 ))}
-                {!topBeRows.length ? (
+                {!topPolicyRows.length ? (
                   <tr>
-                    <td colSpan={6}>No cached break-even recommendations available.</td>
+                    <td colSpan={7}>No BE policy candidates available.</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -244,35 +246,37 @@ export default function ForexBreakevenOptimizerPage() {
         </div>
 
         <div className="panel table-panel">
-          <div className="chart-title">Largest SL Gaps</div>
+          <div className="chart-title">Highest Winner Interruption Risk</div>
           {loading ? (
-            <div className="chart-placeholder">Loading stop-loss summary...</div>
+            <div className="chart-placeholder">Loading risk summary...</div>
           ) : (
             <table className="forex-table">
               <thead>
                 <tr>
+                  <th>Strategy</th>
                   <th>Epic</th>
                   <th>Dir</th>
-                  <th>Config</th>
-                  <th>Optimal</th>
-                  <th>Diff</th>
-                  <th>Action</th>
+                  <th>Trigger</th>
+                  <th>Reach%</th>
+                  <th>Cut Risk</th>
+                  <th>Recommendation</th>
                 </tr>
               </thead>
               <tbody>
-                {topSlRows.map((row) => (
-                  <tr key={`${row.epic}-${row.direction}-sl`}>
+                {highRiskRows.map((row) => (
+                  <tr key={`${row.strategy}-${row.epic}-${row.direction}-risk`}>
+                    <td>{row.strategy}</td>
                     <td>{row.epic_display}</td>
                     <td>{row.direction}</td>
-                    <td>{formatWhole(row.configured_stop_loss)}</td>
-                    <td>{formatWhole(row.optimal_stop_loss)}</td>
-                    <td>{formatSigned(row.sl_diff)}</td>
-                    <td>{row.sl_recommendation}</td>
+                    <td>{formatWhole(row.recommended_trigger)}</td>
+                    <td>{formatPercent(row.reach_rate)}</td>
+                    <td>{formatPercent(row.cut_winner_risk)}</td>
+                    <td>{row.recommendation}</td>
                   </tr>
                 ))}
-                {!topSlRows.length ? (
+                {!highRiskRows.length ? (
                   <tr>
-                    <td colSpan={6}>No cached stop-loss recommendations available.</td>
+                    <td colSpan={7}>No winner interruption risk rows available.</td>
                   </tr>
                 ) : null}
               </tbody>
@@ -282,51 +286,53 @@ export default function ForexBreakevenOptimizerPage() {
       </div>
 
       <div className="panel table-panel">
-        <div className="chart-title">Breakeven Recommendations</div>
+        <div className="chart-title">Live BE Policy Evaluation</div>
         {loading ? (
-          <div className="chart-placeholder">Loading break-even table...</div>
+          <div className="chart-placeholder">Loading policy table...</div>
         ) : (
           <table className="forex-table">
             <thead>
               <tr>
+                <th>Strategy</th>
                 <th>Epic</th>
                 <th>Dir</th>
                 <th>Trades</th>
                 <th>Win%</th>
                 <th>Avg MFE</th>
-                <th>Med MFE</th>
+                <th>Median Winner MFE</th>
                 <th>Avg MAE</th>
-                <th>Optimal BE</th>
-                <th>Current BE</th>
-                <th>Diff</th>
+                <th>Candidate BE</th>
+                <th>Reach%</th>
+                <th>Save%</th>
+                <th>Cut Risk</th>
                 <th>Action</th>
                 <th>Priority</th>
-                <th>Confidence</th>
               </tr>
             </thead>
             <tbody>
               {(payload?.rows ?? []).map((row) => (
-                <tr key={`${row.epic}-${row.direction}-be-table`}>
+                <tr key={`${row.strategy}-${row.epic}-${row.direction}-be-table`}>
+                  <td>{row.strategy}</td>
                   <td>{row.epic_display}</td>
                   <td>{row.direction}</td>
-                  <td>{row.trade_count}</td>
+                  <td>{row.trades}</td>
                   <td>{formatPercent(row.win_rate)}</td>
                   <td>{formatWhole(row.avg_mfe)}</td>
-                  <td>{formatWhole(row.median_mfe)}</td>
+                  <td>{formatWhole(row.median_winner_mfe)}</td>
                   <td>{formatWhole(row.avg_mae)}</td>
-                  <td>{formatWhole(row.optimal_be_trigger)}</td>
-                  <td>{formatWhole(row.current_be_trigger)}</td>
-                  <td>{formatSigned(row.be_diff)}</td>
+                  <td>{formatWhole(row.recommended_trigger)}</td>
+                  <td>{formatPercent(row.reach_rate)}</td>
+                  <td>{formatPercent(row.save_rate)}</td>
+                  <td>{formatPercent(row.cut_winner_risk)}</td>
                   <td>{row.recommendation}</td>
                   <td>
                     <span className={`status-pill ${priorityTone(row.priority)}`}>{row.priority.toUpperCase()}</span>
                   </td>
-                  <td>{row.confidence.toUpperCase()}</td>
                 </tr>
               ))}
               {!payload?.rows?.length ? (
                 <tr>
-                  <td colSpan={13}>No cached optimizer rows found.</td>
+                  <td colSpan={14}>No live BE policy rows found.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -335,47 +341,41 @@ export default function ForexBreakevenOptimizerPage() {
       </div>
 
       <div className="panel table-panel">
-        <div className="chart-title">Stop-Loss Recommendations</div>
+        <div className="chart-title">Candidate Trigger Breakdown</div>
         {loading ? (
-          <div className="chart-placeholder">Loading stop-loss table...</div>
+          <div className="chart-placeholder">Loading candidate table...</div>
         ) : (
           <table className="forex-table">
             <thead>
               <tr>
+                <th>Strategy</th>
                 <th>Epic</th>
                 <th>Dir</th>
-                <th>Trades</th>
-                <th>Avg MAE</th>
-                <th>P95 MAE</th>
-                <th>Optimal SL</th>
-                <th>Config SL</th>
-                <th>Actual SL</th>
-                <th>Diff</th>
-                <th>Action</th>
-                <th>Priority</th>
+                <th>Trigger</th>
+                <th>Reach%</th>
+                <th>Save%</th>
+                <th>Cut Risk</th>
+                <th>Score</th>
               </tr>
             </thead>
             <tbody>
-              {(payload?.rows ?? []).map((row) => (
-                <tr key={`${row.epic}-${row.direction}-sl-table`}>
-                  <td>{row.epic_display}</td>
-                  <td>{row.direction}</td>
-                  <td>{row.trade_count}</td>
-                  <td>{formatWhole(row.avg_mae)}</td>
-                  <td>{formatWhole(row.percentile_95_mae)}</td>
-                  <td>{formatWhole(row.optimal_stop_loss)}</td>
-                  <td>{formatWhole(row.configured_stop_loss)}</td>
-                  <td>{`${formatWhole(row.current_stop_loss)}${row.sl_mismatch ? " !" : ""}`}</td>
-                  <td>{formatSigned(row.sl_diff)}</td>
-                  <td>{row.sl_recommendation}</td>
-                  <td>
-                    <span className={`status-pill ${priorityTone(row.sl_priority)}`}>{row.sl_priority.toUpperCase()}</span>
-                  </td>
-                </tr>
-              ))}
+              {(payload?.rows ?? []).flatMap((row) =>
+                row.candidates.slice(0, 4).map((candidate) => (
+                  <tr key={`${row.strategy}-${row.epic}-${row.direction}-${candidate.trigger}`}>
+                    <td>{row.strategy}</td>
+                    <td>{row.epic_display}</td>
+                    <td>{row.direction}</td>
+                    <td>{formatWhole(candidate.trigger)}</td>
+                    <td>{formatPercent(candidate.reachRate)}</td>
+                    <td>{formatPercent(candidate.saveRate)}</td>
+                    <td>{formatPercent(candidate.cutWinnerRisk)}</td>
+                    <td>{formatNumber(candidate.score, 0)}</td>
+                  </tr>
+                ))
+              )}
               {!payload?.rows?.length ? (
                 <tr>
-                  <td colSpan={11}>No cached stop-loss rows found.</td>
+                  <td colSpan={8}>No candidate rows found.</td>
                 </tr>
               ) : null}
             </tbody>
@@ -384,36 +384,30 @@ export default function ForexBreakevenOptimizerPage() {
       </div>
 
       <div className="panel">
-        <div className="chart-title">Detailed Analysis</div>
+        <div className="chart-title">Policy Notes</div>
         <div className="stack-list">
           {(payload?.rows ?? []).map((row) => (
-            <div key={`${row.epic}-${row.direction}-detail`} className="analysis-card">
+            <div key={`${row.strategy}-${row.epic}-${row.direction}-detail`} className="analysis-card">
               <strong>
-                {row.epic_display} {row.direction} ({row.trade_count} trades)
+                {row.strategy} {row.epic_display} {row.direction} ({row.trades} trades)
               </strong>
               <p>
-                BE: current {formatNumber(row.current_be_trigger, 0)} vs optimal {formatNumber(row.optimal_be_trigger, 1)}.
-                Suggested action: {row.recommendation}.
+                {row.rationale}
               </p>
               <p>
-                SL: configured {formatNumber(row.configured_stop_loss, 0)}, actual {formatNumber(row.current_stop_loss, 0)},
-                optimal {formatNumber(row.optimal_stop_loss, 1)}. Action: {row.sl_recommendation}.
+                Winner profile: median winner MFE {formatNumber(row.median_winner_mfe, 1)}p, p75 winner MFE {formatNumber(row.p75_winner_mfe, 1)}p.
+                Heat profile: avg MAE {formatNumber(row.avg_mae, 1)}p, p75 MAE {formatNumber(row.p75_mae, 1)}p.
               </p>
               <p>
-                Efficiency: reach {formatPercent(row.be_reach_rate)}, protection {formatPercent(row.be_protection_rate)},
-                profit continuation {formatPercent(row.be_profit_rate)}.
+                Current BE execution rate is {formatPercent(row.current_be_rate)}. Priority{" "}
+                <span className={`status-pill ${priorityTone(row.priority)}`}>{row.priority.toUpperCase()}</span>.
               </p>
-              <p>
-                Priority <span className={`status-pill ${priorityTone(row.priority)}`}>{row.priority.toUpperCase()}</span>{" "}
-                and SL priority <span className={`status-pill ${priorityTone(row.sl_priority)}`}>{row.sl_priority.toUpperCase()}</span>.
-              </p>
-              {row.analysis_notes ? <p>{row.analysis_notes}</p> : null}
             </div>
           ))}
           {!loading && !payload?.rows?.length ? (
             <div className="analysis-card">
-              <strong>No cached analysis available</strong>
-              <p>The Streamlit optimizer cache is empty, so there is nothing useful to display yet.</p>
+              <strong>No live policy rows available</strong>
+              <p>No closed trades matched the current environment, window, and strategy filters.</p>
             </div>
           ) : null}
         </div>

@@ -4364,10 +4364,26 @@ class SMCSimpleStrategy:
                     # v2.24.1: Get per-pair qualification mode (JPY pairs use ACTIVE, others use global)
                     effective_mode = self._signal_qualifier.mode  # Default to global mode
 
-                    # v2.38.0: Per-pair filter selection from parameter_overrides
-                    # Store original filter states to restore after this signal
-                    original_rsi_enabled = self._signal_qualifier.rsi_filter_enabled
-                    original_two_pole_enabled = self._signal_qualifier.two_pole_filter_enabled
+                    # v2.38.0: Per-pair filter selection from parameter_overrides.
+                    # Store original filter states so they can be restored after
+                    # this signal is processed (per-pair overrides are scoped to
+                    # one signal, not persisted on the shared qualifier instance).
+                    # Each tuple: (override_key_in_jsonb, qualifier_attr_name).
+                    PER_PAIR_FILTER_OVERRIDES = (
+                        ('scalp_rsi_filter_enabled',          'rsi_filter_enabled'),
+                        ('scalp_two_pole_filter_enabled',     'two_pole_filter_enabled'),
+                        ('scalp_macd_filter_enabled',         'macd_filter_enabled'),
+                        ('scalp_anti_chop_enabled',           'anti_chop_enabled'),
+                        ('scalp_body_dominance_enabled',      'body_dominance_enabled'),
+                        ('scalp_consecutive_candles_enabled', 'consecutive_candles_enabled'),
+                        ('scalp_micro_regime_enabled',        'micro_regime_enabled'),
+                        ('scalp_micro_range_enabled',         'micro_range_enabled'),
+                        ('scalp_momentum_candle_enabled',     'momentum_candle_enabled'),
+                    )
+                    _original_filter_states = {
+                        attr: getattr(self._signal_qualifier, attr)
+                        for _, attr in PER_PAIR_FILTER_OVERRIDES
+                    }
 
                     if hasattr(self, '_db_config') and self._db_config:
                         # CLI override takes precedence over per-pair DB qualification mode
@@ -4380,15 +4396,15 @@ class SMCSimpleStrategy:
                                 effective_mode = pair_mode
                                 self._signal_qualifier.mode = pair_mode  # Temporarily set for this signal
 
-                        # v2.38.0: Check for per-pair filter overrides in parameter_overrides
-                        # Backtest CLI overrides (_config_override) take precedence over DB pair overrides
+                        # v2.38.0: Check for per-pair filter overrides in parameter_overrides.
+                        # Backtest CLI overrides (_config_override) take precedence over DB pair overrides.
                         pair_overrides = self._db_config._pair_overrides.get(epic, {})
                         param_overrides = pair_overrides.get('parameter_overrides', {})
                         if param_overrides:
-                            if 'scalp_rsi_filter_enabled' in param_overrides and 'scalp_rsi_filter_enabled' not in (self._config_override or {}):
-                                self._signal_qualifier.rsi_filter_enabled = param_overrides['scalp_rsi_filter_enabled']
-                            if 'scalp_two_pole_filter_enabled' in param_overrides and 'scalp_two_pole_filter_enabled' not in (self._config_override or {}):
-                                self._signal_qualifier.two_pole_filter_enabled = param_overrides['scalp_two_pole_filter_enabled']
+                            cli_override_keys = self._config_override or {}
+                            for override_key, attr_name in PER_PAIR_FILTER_OVERRIDES:
+                                if override_key in param_overrides and override_key not in cli_override_keys:
+                                    setattr(self._signal_qualifier, attr_name, param_overrides[override_key])
 
                     qual_passed, qual_score, qual_results = self._signal_qualifier.qualify_signal(
                         signal=signal,
@@ -4426,8 +4442,8 @@ class SMCSimpleStrategy:
                     self.logger.warning(f"⚠️ Signal qualification failed: {qual_error}")
                 finally:
                     # v2.38.0: Restore original filter states after processing this signal
-                    self._signal_qualifier.rsi_filter_enabled = original_rsi_enabled
-                    self._signal_qualifier.two_pole_filter_enabled = original_two_pole_enabled
+                    for attr_name, original_value in _original_filter_states.items():
+                        setattr(self._signal_qualifier, attr_name, original_value)
 
             # v2.31.1: Track signal passed all filters for backtest stats
             self._track_signal_passed()

@@ -612,7 +612,7 @@ class SMCMarketStructure:
             
             confluence_required = config.get('confluence_required', 2)
             
-            for i, row in df.iterrows():
+            for position, (row_label, row) in enumerate(df.iterrows()):
                 if row['structure_break']:
                     # Found structure break - generate signal
                     break_type = row['break_type']
@@ -620,15 +620,19 @@ class SMCMarketStructure:
                     significance = row['structure_significance']
                     
                     # Check confluence factors
-                    confluence_score = self._calculate_confluence(df, i, break_direction, config)
+                    confluence_score = self._calculate_confluence(
+                        df, position, break_direction, config
+                    )
                     
                     if confluence_score >= confluence_required:
                         signal_type = 'BULL' if break_direction == 'bullish' else 'BEAR'
                         signal_strength = min(significance * confluence_score / confluence_required, 1.0)
                         
-                        df.at[i, 'smc_structure_signal'] = signal_type
-                        df.at[i, 'smc_signal_strength'] = signal_strength
-                        df.at[i, 'smc_entry_reason'] = f"{break_type}_{break_direction}_confluence_{confluence_score}"
+                        df.at[row_label, 'smc_structure_signal'] = signal_type
+                        df.at[row_label, 'smc_signal_strength'] = signal_strength
+                        df.at[row_label, 'smc_entry_reason'] = (
+                            f"{break_type}_{break_direction}_confluence_{confluence_score}"
+                        )
             
             return df
             

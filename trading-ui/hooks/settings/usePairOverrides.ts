@@ -37,7 +37,7 @@ export function useStrategyPairOverrides(baseEndpoint: string, configSet?: strin
   useEffect(() => {
     loadOverrides();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [effectiveConfigSet]);
+  }, [baseEndpoint, effectiveConfigSet]);
 
   const saveOverride = async (epic: string, updates: Record<string, unknown>, meta: {
     updatedBy: string;

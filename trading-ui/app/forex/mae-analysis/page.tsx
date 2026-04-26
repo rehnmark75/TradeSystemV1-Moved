@@ -340,7 +340,11 @@ export default function ForexMaeAnalysisPage() {
         )} pips covers 75% of winner heat, while the current average stop is only ${formatNumber(
           currentStop
         )}. Many valid trades may be getting cut before they recover.`;
-      } else if (medianWinnerMae < currentStop * 0.55 && (medianLoserMae ?? 0) >= currentStop * 0.8) {
+      } else if (
+        medianWinnerMae != null &&
+        medianWinnerMae < currentStop * 0.55 &&
+        (medianLoserMae ?? 0) >= currentStop * 0.8
+      ) {
         interpretationTitle = "Stop may be wider than needed";
         interpretationBody = `Winning trades usually stay relatively clean, with median winner MAE around ${formatNumber(
           medianWinnerMae
