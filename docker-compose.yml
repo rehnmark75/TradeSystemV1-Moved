@@ -107,10 +107,12 @@ services:
     volumes:
       - ./certs:/etc/letsencrypt
       - ./certbot/www:/var/www/certbot
+      - ./nginx/nginx.https.conf:/etc/nginx/nginx.conf:ro
     ports:
       - "80:80"
       - "4443:4443"
       - "4446:4446"
+      - "8080:8080"
     command: /bin/sh -c "sleep 5 && nginx -g 'daemon off;'"
     depends_on:
       - fastapi-dev
