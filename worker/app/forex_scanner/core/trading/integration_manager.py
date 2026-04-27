@@ -359,6 +359,9 @@ class IntegrationManager:
             return signals
 
         # Guard: Skip Claude for disabled pairs and monitor-only pairs (saves API cost)
+        # SMC pair-table check applies only to SMC strategies; other strategies
+        # (RANGE_FADE, MEAN_REVERSION, RANGE_STRUCTURE, XAU_GOLD) enforce their own
+        # enabled/monitor flags via their own config services upstream.
         enabled_signals = []
         skipped_signals = []
         if _SMC_CONFIG_AVAILABLE:
@@ -366,13 +369,15 @@ class IntegrationManager:
                 smc_cfg = _get_smc_config()
                 for sig in signals:
                     epic = sig.get('epic', '')
+                    strat = str(sig.get('strategy', '')).upper()
+                    is_smc = strat.startswith('SMC')
                     skip_reason = None
                     # Strategy-level monitor_only flag (set by strategy itself; covers any strategy)
                     if sig.get('monitor_only', False):
                         skip_reason = 'signal_monitor_only'
-                    elif epic and not smc_cfg.is_pair_enabled(epic):
+                    elif is_smc and epic and not smc_cfg.is_pair_enabled(epic):
                         skip_reason = 'pair_not_enabled'
-                    elif epic:
+                    elif is_smc and epic:
                         pair_overrides = smc_cfg._pair_overrides.get(epic, {})
                         if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
                             skip_reason = 'monitor_only'

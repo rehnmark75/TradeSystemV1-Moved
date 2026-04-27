@@ -250,7 +250,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
             "version": cfg.version,
             "market_regime": "range_fade",
             "regime": "range_fade",
-            "monitor_only": cfg.monitor_only,
+            "monitor_only": cfg.is_pair_monitor_only(epic),
             "adx": self._get_adx(df),
             "adx_htf": self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None,
             "rsi": latest_rsi,

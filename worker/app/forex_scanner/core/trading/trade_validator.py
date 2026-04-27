@@ -585,9 +585,11 @@ class TradeValidator:
             return True, "Claude skipped (signal monitor_only)", None
 
         # Skip Claude for disabled pairs and monitor-only pairs (saves API cost).
-        # Mirrors IntegrationManager.analyze_signals_with_claude gate (integration_manager.py:361-392).
+        # SMC-only: other strategies (RANGE_FADE, MEAN_REVERSION, RANGE_STRUCTURE, XAU_GOLD)
+        # enforce their own enabled/monitor flags upstream via their own config services.
         _epic_check = signal.get('epic', '')
-        if _epic_check:
+        _strategy_name = str(signal.get('strategy', '')).upper()
+        if _epic_check and _strategy_name.startswith('SMC'):
             try:
                 from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
                 _smc_cfg = get_smc_simple_config()
