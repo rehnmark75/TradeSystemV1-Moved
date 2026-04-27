@@ -242,11 +242,13 @@ class TradePnLCorrelator:
                 "Version": "2"  # V2 supports date filtering
             }
 
-            # V2 API parameters with date range
+            # V2 API parameters with date range.
+            # IG treats `to` as exclusive midnight, so closes on the current day
+            # (date-only) get cut off. Push `to` to tomorrow so today is included.
             params = {
                 "from": start_time.strftime("%Y-%m-%d"),
-                "to": end_time.strftime("%Y-%m-%d"),
-                "maxSpanSeconds": days_back * 86400,  # Convert days to seconds
+                "to": (end_time + timedelta(days=1)).strftime("%Y-%m-%d"),
+                "maxSpanSeconds": (days_back + 1) * 86400,
                 "pageSize": 500
             }
 
