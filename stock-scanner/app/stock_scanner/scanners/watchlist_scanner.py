@@ -112,8 +112,10 @@ class WatchlistScanner:
     SIGNAL_RS_PERCENTILE_MIN = 60.0      # Relative strength >=60th percentile
     SIGNAL_EARNINGS_BLACKOUT_DAYS = 7    # Skip if earnings within N days
 
-    REGIME_INDEX_TICKER = 'QQQ'          # Market regime proxy (SPY not loaded)
-    REGIME_EMA_FIELD = 'ema_200'         # Index must be > this EMA for risk-on
+    # Market regime: index ETFs (QQQ/SPY) aren't tracked in stock_instruments,
+    # so we use breadth (% of stocks above their SMA200) from the daily
+    # screening snapshot. >=50% above SMA200 = risk-on.
+    REGIME_BREADTH_THRESHOLD = 0.50
 
     def __init__(self, db_manager):
         """
@@ -186,34 +188,48 @@ class WatchlistScanner:
 
     async def _check_market_regime(self, scan_date: date) -> bool:
         """
-        Risk-on when the regime index closes above its 200-day EMA.
+        Risk-on when market breadth is healthy: ≥50% of tracked stocks trade
+        above their 200-day SMA on the latest screening snapshot.
 
-        Continuations are not re-gated; only NEW crossovers are skipped when
-        the market is in a downtrend (fades dominate that environment).
+        Index ETFs (QQQ/SPY) are not in stock_instruments, so we use breadth
+        from stock_screening_metrics instead of an index EMA200. Continuations
+        are not re-gated; only NEW crossovers are skipped in risk-off.
         """
         try:
-            df = await self.data_provider.get_historical_data(
-                ticker=self.REGIME_INDEX_TICKER,
-                start_date=scan_date - timedelta(days=365),
-                end_date=scan_date,
-                timeframe='1d',
+            row = await self.db.fetchrow(
+                """
+                SELECT
+                    COUNT(*) FILTER (
+                        WHERE current_price IS NOT NULL
+                          AND sma_200 IS NOT NULL
+                          AND sma_200 > 0
+                          AND current_price > sma_200
+                    )::float AS above,
+                    COUNT(*) FILTER (
+                        WHERE current_price IS NOT NULL
+                          AND sma_200 IS NOT NULL
+                          AND sma_200 > 0
+                    )::float AS total
+                FROM stock_screening_metrics
+                WHERE calculation_date = (
+                    SELECT MAX(calculation_date) FROM stock_screening_metrics
+                )
+                """
             )
-            if df.empty or len(df) < 200:
+            total = float(row['total']) if row else 0.0
+            above = float(row['above']) if row else 0.0
+            if total < 100:
                 logger.warning(
-                    f"Regime gate: insufficient {self.REGIME_INDEX_TICKER} history "
-                    f"(rows={len(df)}); allowing signals"
+                    f"Regime gate: insufficient breadth sample (total={int(total)}); "
+                    f"allowing signals"
                 )
                 return True
-            latest = df.iloc[-1]
-            close = float(latest['close'])
-            ema_200 = float(latest.get(self.REGIME_EMA_FIELD, 0))
-            if ema_200 <= 0:
-                logger.warning("Regime gate: EMA200 missing on index; allowing signals")
-                return True
-            risk_on = close > ema_200
+            pct_above = above / total
+            risk_on = pct_above >= self.REGIME_BREADTH_THRESHOLD
             logger.info(
-                f"Regime gate: {self.REGIME_INDEX_TICKER} close={close:.2f} "
-                f"vs EMA200={ema_200:.2f} → {'RISK-ON' if risk_on else 'RISK-OFF'}"
+                f"Regime gate: breadth {above:.0f}/{total:.0f} "
+                f"({pct_above:.1%} above SMA200) → "
+                f"{'RISK-ON' if risk_on else 'RISK-OFF'}"
             )
             return risk_on
         except Exception as e:
@@ -243,10 +259,10 @@ class WatchlistScanner:
             WHERE is_active = true
               AND earnings_date IS NOT NULL
               AND earnings_date >= $1::date
-              AND earnings_date <= $1::date + ($2 || ' days')::interval
+              AND earnings_date <= $1::date + ($2::text || ' days')::interval
         """
         try:
-            rows = await self.db.fetch(query, scan_date, self.SIGNAL_EARNINGS_BLACKOUT_DAYS)
+            rows = await self.db.fetch(query, scan_date, str(self.SIGNAL_EARNINGS_BLACKOUT_DAYS))
             return {r['ticker'] for r in rows}
         except Exception as e:
             logger.warning(f"Failed to load earnings blackout ({e}); earnings gate disabled")
