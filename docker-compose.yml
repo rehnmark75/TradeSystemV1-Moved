@@ -222,8 +222,8 @@ services:
       - OAUTH2_PROXY_SET_XAUTHREQUEST=true
       - OAUTH2_PROXY_PASS_ACCESS_TOKEN=false
       - OAUTH2_PROXY_SKIP_PROVIDER_BUTTON=true
-      - OAUTH2_PROXY_WHITELIST_DOMAINS=.klirr.i234.me,.trader.nordicbynature.se
-      - OAUTH2_PROXY_COOKIE_DOMAINS=.klirr.i234.me,.trader.nordicbynature.se
+      - OAUTH2_PROXY_WHITELIST_DOMAINS=klirr.i234.me,trader.nordicbynature.se
+      - OAUTH2_PROXY_COOKIE_DOMAINS=klirr.i234.me,trader.nordicbynature.se
     volumes:
       - ./nginx/oauth2/allowed-emails.txt:/etc/oauth2-proxy/allowed-emails.txt:ro
     networks:
