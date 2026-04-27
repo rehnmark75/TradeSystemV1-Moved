@@ -1800,7 +1800,7 @@ class SignalDetector:
                 epic=epic,
                 pair=pair,
                 timeframe=timeframe,
-                lookback_hours=48,
+                lookback_hours=240,
             )
             if df_trigger is None or df_trigger.empty:
                 self.logger.debug(f"[RANGE_FADE] No {timeframe} data for {epic}")
@@ -1810,7 +1810,7 @@ class SignalDetector:
                 epic=epic,
                 pair=pair,
                 timeframe='1h',
-                lookback_hours=96,
+                lookback_hours=336,
             )
 
             signal = self.eurusd_range_fade_strategy.detect_signal(
