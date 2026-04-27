@@ -1449,23 +1449,21 @@ class SignalProcessor:
         """
         try:
             entry_price = float(signal.get('entry_price', signal.get('price', 0)))
-            stop_loss = float(signal.get('stop_loss', 0))
-            take_profit = float(signal.get('take_profit', 0))
-            
-            if not all([entry_price, stop_loss, take_profit]):
+            stop_loss = float(signal.get('stop_loss', 0) or 0)
+            take_profit = float(signal.get('take_profit', 0) or 0)
+
+            if entry_price and stop_loss and take_profit:
+                risk = abs(entry_price - stop_loss)
+                reward = abs(take_profit - entry_price)
+            else:
+                risk = float(signal.get('risk_pips', 0) or signal.get('stop_loss_pips', 0) or 0)
+                reward = float(signal.get('reward_pips', 0) or signal.get('take_profit_pips', 0) or 0)
+
+            if risk == 0 or reward == 0:
                 return 0.0
-            
-            risk = abs(entry_price - stop_loss)
-            reward = abs(take_profit - entry_price)
-            
-            if risk == 0:
-                return 0.0
-            
-            ratio = reward / risk
-            
-            # Cap the ratio at reasonable levels
-            return min(ratio, 10.0)
-            
+
+            return min(reward / risk, 10.0)
+
         except Exception as e:
             self.logger.error(f"Risk-reward calculation failed: {e}")
             return 0.0

@@ -232,6 +232,21 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         score = min(1.0, 0.45 * rsi_extremity + 0.35 * min(1.0, band_penetration) + 0.20 * range_proximity)
         confidence = round(cfg.min_confidence + score * (cfg.max_confidence - cfg.min_confidence), 3)
 
+        pip_size = 0.01 if "JPY" in pair.upper() else 0.0001
+        sl_distance = cfg.fixed_stop_loss_pips * pip_size
+        tp_distance = cfg.fixed_take_profit_pips * pip_size
+        if direction == "SELL":
+            stop_loss_price = latest_close + sl_distance
+            take_profit_price = latest_close - tp_distance
+        else:
+            stop_loss_price = latest_close - sl_distance
+            take_profit_price = latest_close + tp_distance
+        rr_ratio = (
+            cfg.fixed_take_profit_pips / cfg.fixed_stop_loss_pips
+            if cfg.fixed_stop_loss_pips
+            else 0.0
+        )
+
         signal = {
             "signal": direction,
             "signal_type": direction.lower(),
@@ -239,10 +254,13 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
             "epic": epic,
             "pair": pair,
             "entry_price": latest_close,
+            "stop_loss": round(stop_loss_price, 5),
+            "take_profit": round(take_profit_price, 5),
             "stop_loss_pips": cfg.fixed_stop_loss_pips,
             "take_profit_pips": cfg.fixed_take_profit_pips,
             "risk_pips": cfg.fixed_stop_loss_pips,
             "reward_pips": cfg.fixed_take_profit_pips,
+            "risk_reward_ratio": round(rr_ratio, 4),
             "confidence": confidence,
             "confidence_score": confidence,
             "signal_timestamp": now.isoformat(),
