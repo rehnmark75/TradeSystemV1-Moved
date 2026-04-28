@@ -629,16 +629,22 @@ class OrderExecutor:
             # NOTE: virtual_sl_pips is NOT passed - VSL service uses its own per-pair config
             # (3 pips for majors, 4 pips for JPY) from config_virtual_stop.py
             # The broker SL (~10 pips) is just a safety net if streaming fails
+            # Apr 2026: scope scalp flag to SMC_SIMPLE only — other strategies (XAU_GOLD,
+            # RANGE_FADE, RANGE_STRUCTURE, MEAN_REVERSION) must NOT inherit SMC scalp trailing.
             is_scalp_trade = False
             virtual_sl_pips = None  # Let VSL service use its per-pair config
-            try:
-                from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
-                smc_config = get_smc_simple_config()
-                if getattr(smc_config, 'scalp_mode_enabled', False):
-                    is_scalp_trade = True
-                    self.logger.info(f"🎯 [SCALP MODE] VSL enabled: is_scalp_trade=True (VSL uses per-pair config)")
-            except Exception as e:
-                self.logger.debug(f"Scalp mode check failed (using default): {e}")
+            signal_strategy_name = (signal.get('strategy') or '').upper()
+            if 'SMC_SIMPLE' in signal_strategy_name or signal_strategy_name == 'SMC':
+                try:
+                    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+                    smc_config = get_smc_simple_config()
+                    if getattr(smc_config, 'scalp_mode_enabled', False):
+                        is_scalp_trade = True
+                        self.logger.info(f"🎯 [SCALP MODE] VSL enabled: is_scalp_trade=True (VSL uses per-pair config)")
+                except Exception as e:
+                    self.logger.debug(f"Scalp mode check failed (using default): {e}")
+            else:
+                self.logger.debug(f"Scalp flag skipped for non-SMC strategy: {signal_strategy_name or 'unknown'}")
 
             # v2.0.0: Execute with retry logic (now supports both market and limit orders)
             # v3.3.0: Added api_order_type and signal_price for slippage tracking

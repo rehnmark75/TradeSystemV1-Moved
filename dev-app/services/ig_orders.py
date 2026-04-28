@@ -289,15 +289,10 @@ async def partial_close_position(
         }
 
 
-def get_point_value(epic: str) -> float:
-    """Get point value for the instrument"""
-    if "JPY" in epic:
-        return 0.01
-    elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-        return 0.0001
-    elif "CFEGOLD" in epic or "GOLD" in epic:
-        return 0.1
-    return 1.0
+# Pip size resolution lives in utils.get_point_value (single source of truth).
+# Keep a re-export here so existing `from services.ig_orders import get_point_value`
+# call sites keep working without behavioral drift.
+from utils import get_point_value  # noqa: F401  (re-exported)
 
 
 def convert_stop_distance_to_price(entry_price: float, stop_distance_points: int, 

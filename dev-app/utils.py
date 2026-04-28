@@ -1,46 +1,76 @@
 """
-Trading Utility Functions
+Trading Utility Functions — SINGLE SOURCE OF TRUTH for price/point conversions.
 
-This module contains utility functions for price/point conversions and other
-trading-related calculations that are used across the application.
+================================================================================
+PIP SIZE (a.k.a. "point value") — MARKET CONSTANT
+================================================================================
+Pip size is the price-per-pip for an instrument. It is fixed by the broker /
+instrument specification and is NOT a tunable parameter.
+
+Reference values:
+    EUR/USD, GBP/USD, etc.  : 0.0001 USD per pip   (4-decimal forex)
+    USD/JPY, EUR/JPY, etc.  : 0.01   per pip       (2-decimal forex)
+    Gold (CFEGOLD/XAU)      : 0.1    USD per pip
+    Indices, other commodit.: 1.0    (default)
+
+⚠️  DO NOT CHANGE these values unless the broker changes the instrument spec.
+    Changing pip_size silently corrupts ALL SL/TP, trailing-stop, breakeven,
+    and pip-distance math — across both live trading and backtests.
+
+================================================================================
+NOT TO BE CONFUSED WITH:
+================================================================================
+1. POSITION / CONTRACT SIZE  →  configured in `config.py` → `EPIC_ORDER_SIZES`.
+   To trade BIGGER contracts (more lots), edit that dict — e.g., gold from
+   0.05 → 0.1 lots. Pip size stays the same; only your $/pip exposure changes.
+
+2. IG API "POINT" UNIT       →  IG's stopDistance / limitDistance API
+   parameters use IG points. For most FX, 1 IG point = 1 pip; for gold,
+   1 pip = 10 IG points (price-per-IG-point ≈ 0.01 for gold). The system
+   converts to IG points only at the API boundary; everywhere else uses pips.
+
+If you add a new instrument:
+    - Add its pattern to `get_point_value` below with the broker's pip size.
+    - Add its order size to `config.py → EPIC_ORDER_SIZES`.
+    - Verify on demo that SL/TP placed at "N pips" actually moves N × pip_size.
 """
+
 
 def get_point_value(epic: str) -> float:
     """
-    Get point value for the instrument based on epic name.
+    Resolve pip size (price-per-pip) from an epic string.
 
-    Args:
-        epic (str): The trading instrument epic (e.g., "USDJPY", "EURUSD")
-
-    Returns:
-        float: Point value for the instrument
+    Match order matters: JPY → forex majors → gold/XAU → fallback.
+    Gold patterns include "CFEGOLD", "GOLD", and "XAU" so that any epic /
+    symbol form ("CS.D.CFEGOLD.CEE.IP", "CFEGOLD.1.CEE", "XAUUSD", "GOLD")
+    resolves to the same pip size of 0.1.
 
     Examples:
-        >>> get_point_value("USDJPY")
-        0.01
         >>> get_point_value("CS.D.USDJPY.MINI.IP")
         0.01
-        >>> get_point_value("EURUSD")
-        0.0001
         >>> get_point_value("CS.D.EURUSD.CEEM.IP")
         0.0001
+        >>> get_point_value("CS.D.CFEGOLD.CEE.IP")
+        0.1
+        >>> get_point_value("XAUUSD")
+        0.1
         >>> get_point_value("US500")
         1.0
     """
-    # NOTE: CEEM epics use regular forex pricing (e.g., 1.1646), NOT scaled format.
-    # The previous comment was incorrect - prices in ig_candles are standard forex format.
-    # JPY pairs use 2 decimal places (0.01 per pip)
-    if "JPY" in epic:
-        return 0.01
-    # Standard forex pairs use 4 decimal places (0.0001 per pip)
-    elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-        return 0.0001
-    # Gold (CFEGOLD): 1 pip = $0.1 price movement
-    elif "CFEGOLD" in epic or "GOLD" in epic:
-        return 0.1
-    else:
-        # For indices, other commodities, etc.
+    if not epic:
         return 1.0
+    epic_upper = epic.upper()
+    # Gold first — must precede USD-pair check so "XAUUSD" doesn't fall into 0.0001.
+    if "CFEGOLD" in epic_upper or "GOLD" in epic_upper or "XAU" in epic_upper:
+        return 0.1
+    # JPY pairs (2-decimal price)
+    if "JPY" in epic_upper:
+        return 0.01
+    # Standard 4-decimal forex
+    if any(pair in epic_upper for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
+        return 0.0001
+    # Indices, untracked commodities, etc.
+    return 1.0
 
 
 def convert_stop_distance_to_price(entry_price: float, stop_distance_points: int, 

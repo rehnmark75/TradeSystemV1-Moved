@@ -333,14 +333,8 @@ class FixedPointsTrailing(TrailingStrategy):
         return safe_distance
     
     def _get_point_value(self, epic: str) -> float:
-        """Get point value for the instrument"""
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        """Get point value for the instrument (delegates to utils.get_point_value)."""
+        return get_point_value(epic)
 
 
 class PercentageTrailing(TrailingStrategy):
@@ -375,13 +369,9 @@ class PercentageTrailing(TrailingStrategy):
         return True  # Always trail with percentage method
     
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
 
 
 class ATRTrailing(TrailingStrategy):
@@ -456,13 +446,9 @@ class ATRTrailing(TrailingStrategy):
         return sum(true_ranges) / len(true_ranges)
     
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
 
 
 class ChandelierTrailing(TrailingStrategy):
@@ -535,13 +521,9 @@ class ChandelierTrailing(TrailingStrategy):
         return sum(true_ranges) / len(true_ranges) if true_ranges else None
     
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
 
 
 class SmartTrailing(TrailingStrategy):
@@ -701,13 +683,9 @@ class SmartTrailing(TrailingStrategy):
         return max(0, int(move / point_value))
     
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
 
 
 class Progressive3StageTrailing(TrailingStrategy):
@@ -1167,13 +1145,9 @@ class Progressive3StageTrailing(TrailingStrategy):
         return sum(true_ranges) / len(true_ranges) if true_ranges else None
 
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
 
 
 class AdvancedTrailingManager:
@@ -1261,13 +1235,9 @@ class AdvancedTrailingManager:
             return False
 
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
     
     def should_update_trail(self, trade: TradeLog, current_price: float, 
                           db: Session) -> bool:
@@ -1386,13 +1356,9 @@ class AdvancedTrailingManager:
             return 1
     
     def _get_point_value(self, epic: str) -> float:
-        if "JPY" in epic:
-            return 0.01
-        elif any(pair in epic for pair in ["EURUSD", "GBPUSD", "AUDUSD", "NZDUSD", "USDCAD", "USDCHF"]):
-            return 0.0001
-        elif "CFEGOLD" in epic or "GOLD" in epic:
-            return 0.1
-        return 1.0
+        # Delegates to the canonical resolver in utils.py — see that module's
+        # top docstring for the pip-size vs position-size distinction.
+        return get_point_value(epic)
 
 
 class EnhancedTradeProcessor:
