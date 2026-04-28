@@ -98,8 +98,19 @@ class DatabaseMonitoringFix:
 
             # Perform periodic discovery check for race conditions
             if datetime.now() - self.last_discovery_check > self.discovery_interval:
-                self._perform_discovery_check(db, active_trades)
+                recovered = self._perform_discovery_check(db, active_trades)
                 self.last_discovery_check = datetime.now()
+                if recovered:
+                    by_id = {t.id: t for t in active_trades}
+                    for t in recovered:
+                        by_id.setdefault(t.id, t)
+                    if len(by_id) != len(active_trades):
+                        self.logger.info(
+                            f"🔧 RECOVERY MERGED: {len(by_id) - len(active_trades)} "
+                            f"missed trade(s) added to active set"
+                        )
+                    active_trades = list(by_id.values())
+                    self.known_trade_ids = set(by_id.keys())
 
             return active_trades
 
@@ -151,6 +162,7 @@ class DatabaseMonitoringFix:
 
         except Exception as e:
             self.logger.error(f"❌ Discovery check failed: {e}")
+            return current_trades
 
         return current_trades
 
