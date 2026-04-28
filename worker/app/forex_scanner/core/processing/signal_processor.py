@@ -620,6 +620,8 @@ class SignalProcessor:
             # Traditional technical analysis strategies that DON'T use smart money
             'mean_reversion': False,
             'ranging_market': False,
+            'range_fade': False,
+            'range_structure': False,
             'zero_lag': False,
             'zero_lag_squeeze': False,
             'xau_gold': False
