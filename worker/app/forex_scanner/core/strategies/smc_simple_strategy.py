@@ -4033,6 +4033,7 @@ class SMCSimpleStrategy:
                 'strategy': 'SMC_SIMPLE',
                 'signal_type': direction,
                 'signal': direction,
+                'direction': direction,
                 'confidence_score': round(confidence, 2),
                 'epic': epic,
                 'pair': pair,
@@ -4194,7 +4195,7 @@ class SMCSimpleStrategy:
                         'swing_level': swing_level,
                         'opposite_swing': opposite_swing,
                         'break_confirmed': True,
-                        'break_type': 'swing_high' if direction == 'BEAR' else 'swing_low'
+                        'break_type': 'swing_high' if direction == 'BULL' else 'swing_low'
                     }
                 },
                 'order_flow_analysis': {

@@ -1442,8 +1442,9 @@ class TradingOrchestrator:
                                 self.logger.warning(f"❌ Risk validation failed for {signal.get('epic')}: {risk_reason}")
                                 continue
                             
-                            account_balance = 10000.0
-                            position_size, size_reason = self.risk_manager.calculate_position_size(signal, account_balance)
+                            # Let RiskManager use its DB-loaded account_balance (set in __init__).
+                            # Passing None here avoids hardcoding 10k over real balance.
+                            position_size, size_reason = self.risk_manager.calculate_position_size(signal, None)
                             
                             if position_size <= 0:
                                 self.logger.warning(f"❌ Invalid position size for {signal.get('epic')}: {size_reason}")
