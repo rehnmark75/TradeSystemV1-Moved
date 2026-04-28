@@ -23,6 +23,7 @@ Docker CMD compatibility maintained:
 import sys
 import os
 import time
+import json
 import logging
 from logging.handlers import TimedRotatingFileHandler, RotatingFileHandler
 from datetime import datetime, timedelta
@@ -642,7 +643,38 @@ def main():
     logging.getLogger().addHandler(file_handler)
 
     logger.info(f"🗂️ Log rotation configured: keeping {file_handler.backupCount} days of logs")
-    
+
+    # Lightweight `status` short-circuit: avoid building TradingSystem (which spins
+    # up the orchestrator + Claude clients + external API validation just to print
+    # diagnostics). Reads only env + config and queries DB for container/scanner
+    # state. Use `python trade_scan.py status --full` to fall through to the
+    # heavyweight live-system status report.
+    if len(sys.argv) > 1 and sys.argv[1].lower() == 'status' and '--full' not in sys.argv:
+        try:
+            import config as _cfg
+            import socket
+            quick_status = {
+                'mode': 'lightweight',
+                'host': socket.gethostname(),
+                'pid': os.getpid(),
+                'timestamp': datetime.now().isoformat(),
+                'config': {
+                    'intelligence_preset': os.environ.get('INTELLIGENCE_PRESET') or getattr(_cfg, 'INTELLIGENCE_PRESET', None),
+                    'intelligence_mode': os.environ.get('INTELLIGENCE_MODE') or getattr(_cfg, 'INTELLIGENCE_MODE', None),
+                    'enable_trading_env': os.environ.get('ENABLE_TRADING'),
+                    'enable_claude_env': os.environ.get('ENABLE_CLAUDE'),
+                    'epic_list_size': len(getattr(_cfg, 'EPIC_LIST', []) or []),
+                    'min_confidence': getattr(_cfg, 'MIN_CONFIDENCE', None),
+                    'scan_interval': getattr(_cfg, 'SCAN_INTERVAL', None),
+                },
+                'note': 'Use `status --full` to initialize TradingSystem and report runtime state.',
+            }
+            print("\n📊 System Status (lightweight):")
+            print(json.dumps(quick_status, indent=2, default=str))
+            sys.exit(0)
+        except Exception as e:
+            print(f"⚠️ Lightweight status failed ({e}); falling through to full status...")
+
     # Initialize trading system
     try:
         # FIXED: Use new intelligence preset system

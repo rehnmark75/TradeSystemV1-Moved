@@ -473,25 +473,50 @@ class SignalProcessor:
             # SMART MONEY: Step 6 - Smart Money Analysis (NEW)
             smart_money_result = None
             if self._should_analyze_with_smart_money(enhanced_signal):
-                self.logger.debug("🧠 Step 6: Applying Smart Money analysis...")
-                smart_money_result = self._run_smart_money_analysis(enhanced_signal, epic)
-                
-                if smart_money_result:
+                # Reuse upstream analysis if SignalDetector already attached one.
+                # add_smart_money_to_signals() in signal_detector.py runs before
+                # this path on the live route — re-running would double the
+                # data-fetch + analysis cost and risk overwriting fields.
+                if enhanced_signal.get('smart_money_score') is not None:
+                    smart_money_result = {
+                        'smart_money_score': enhanced_signal.get('smart_money_score'),
+                        'smart_money_validated': enhanced_signal.get('smart_money_validated', False),
+                        'smart_money_type': enhanced_signal.get('smart_money_type', 'Unknown'),
+                        'enhanced_confidence_score': enhanced_signal.get(
+                            'enhanced_confidence_score', confidence
+                        ),
+                        'reused_from_detector': True,
+                    }
                     processing_result['smart_money_analyzed'] = True
                     processing_result['smart_money_result'] = smart_money_result
-                    
-                    # Merge smart money data into signal
-                    enhanced_signal = self._merge_smart_money_results(enhanced_signal, smart_money_result)
+                    processing_result['smart_money_reused'] = True
                     self.smart_money_analyzed_count += 1
-                    
-                    self.logger.info(f"🧠 Smart Money Analysis Complete:")
-                    self.logger.info(f"   Validated: {smart_money_result.get('smart_money_validated', False)}")
-                    self.logger.info(f"   Type: {smart_money_result.get('smart_money_type', 'Unknown')}")
-                    self.logger.info(f"   Score: {smart_money_result.get('smart_money_score', 0):.3f}")
-                    self.logger.info(f"   Enhanced Confidence: {smart_money_result.get('enhanced_confidence_score', confidence):.3f}")
+                    self.logger.debug(
+                        f"🧠 Step 6: Reusing Smart Money analysis from detector "
+                        f"(score={smart_money_result['smart_money_score']:.3f})"
+                    )
+                else:
+                    self.logger.debug("🧠 Step 6: Applying Smart Money analysis...")
+                    smart_money_result = self._run_smart_money_analysis(enhanced_signal, epic)
 
-                    # SMC CONFLICT FILTER: Step 6b - Check for SMC conflicts and reject if needed
-                    # v2.43.0: Per-pair override support - check pair-level setting first, fall back to global
+                    if smart_money_result:
+                        processing_result['smart_money_analyzed'] = True
+                        processing_result['smart_money_result'] = smart_money_result
+
+                        # Merge smart money data into signal
+                        enhanced_signal = self._merge_smart_money_results(enhanced_signal, smart_money_result)
+                        self.smart_money_analyzed_count += 1
+
+                        self.logger.info(f"🧠 Smart Money Analysis Complete:")
+                        self.logger.info(f"   Validated: {smart_money_result.get('smart_money_validated', False)}")
+                        self.logger.info(f"   Type: {smart_money_result.get('smart_money_type', 'Unknown')}")
+                        self.logger.info(f"   Score: {smart_money_result.get('smart_money_score', 0):.3f}")
+                        self.logger.info(f"   Enhanced Confidence: {smart_money_result.get('enhanced_confidence_score', confidence):.3f}")
+
+                # SMC CONFLICT FILTER: Step 6b - Check for SMC conflicts and reject if needed
+                # Runs whether smart money was freshly analyzed OR reused from detector.
+                # v2.43.0: Per-pair override support - check pair-level setting first, fall back to global
+                if smart_money_result:
                     pair_smc_enabled = self._is_smc_conflict_filter_enabled(epic)
                     if pair_smc_enabled:
                         smc_conflict = self._check_smc_conflict(enhanced_signal, smart_money_result, epic)

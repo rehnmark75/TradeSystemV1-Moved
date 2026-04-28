@@ -785,7 +785,9 @@ class SignalDetector:
             # strategy the router picked. Internal hard ADX gates filter out
             # trending conditions; per-pair enable flags drop the pairs that
             # underperformed in the 90d standalone eval.
-            if self.mean_reversion_enabled and not self._is_gold_epic(epic):
+            if (self.mean_reversion_enabled
+                    and routed_strategy != 'MEAN_REVERSION'
+                    and not self._is_gold_epic(epic)):
                 try:
                     self.logger.debug(f"🔍 [MEAN_REVERSION] Starting detection for {epic}")
                     mr_signal = self.detect_mean_reversion_signals(
@@ -809,7 +811,9 @@ class SignalDetector:
             # observe its performance alongside whichever strategy the
             # router picked. Internal hard ADX gates + per-pair enable
             # flags inside the strategy filter out unsuitable conditions.
-            if self.range_structure_enabled and not self._is_gold_epic(epic):
+            if (self.range_structure_enabled
+                    and routed_strategy != 'RANGE_STRUCTURE'
+                    and not self._is_gold_epic(epic)):
                 try:
                     self.logger.debug(f"🔍 [RANGE_STRUCTURE] Starting detection for {epic}")
                     rs_signal = self.detect_range_structure_signals(
@@ -883,7 +887,11 @@ class SignalDetector:
                     if not sig.get('market_regime'):
                         sig['market_regime'] = routing_result['regime']
 
-            # Add smart money analysis to all signals (if enabled)
+            # Add smart money analysis to all signals (if enabled).
+            # SignalProcessor.process_signal() (live path) detects the
+            # 'smart_money_score' marker set here and skips re-analysis to avoid
+            # the doubled data-fetch cost. BacktestScanner does not go through
+            # SignalProcessor, so this remains the only place backtests pick it up.
             if all_signals:
                 try:
                     all_signals = add_smart_money_to_signals(all_signals, self.data_fetcher, self.db_manager)

@@ -502,14 +502,20 @@ class TradingOrchestrator:
         return preset_thresholds.get(self.intelligence_preset, 0.5)
     
     def _initialize_clean_scanner(self):
-        """Initialize scanner with PURE signal detection parameters (NO intelligence)"""
+        """Initialize scanner with PURE signal detection parameters (NO intelligence).
+
+        A live trading process with no real scanner is a critical failure — we used
+        to silently fall back to a no-op scanner that returned []. That made the
+        process look healthy while permanently producing zero signals. Now we fail
+        loudly: if every real attempt fails, raise so startup aborts.
+        """
         scanner_attempts = [
             self._try_clean_intelligent_scanner,
             self._try_core_scanner_factory,
             self._try_signal_detector_direct,
-            self._try_fallback_scanner
         ]
-        
+
+        last_error: Optional[Exception] = None
         for i, attempt_func in enumerate(scanner_attempts, 1):
             try:
                 self.logger.info(f"🔄 Clean scanner initialization attempt #{i}...")
@@ -518,11 +524,16 @@ class TradingOrchestrator:
                     self.logger.info(f"✅ Clean scanner initialized successfully (method #{i})")
                     return scanner
             except Exception as e:
+                last_error = e
                 self.logger.warning(f"⚠️ Scanner initialization attempt #{i} failed: {e}")
                 continue
-        
-        self.logger.error("❌ All scanner initialization attempts failed")
-        return None
+
+        self.logger.error("❌ All scanner initialization attempts failed — refusing to start with a no-op scanner")
+        raise RuntimeError(
+            "Scanner initialization failed: no real scanner could be constructed. "
+            "Refusing to start trading process with a degraded/no-op scanner. "
+            f"Last error: {last_error}"
+        )
     
     def _try_clean_intelligent_scanner(self):
         """Try to initialize IntelligentForexScanner with CLEAN parameters only"""
@@ -598,30 +609,6 @@ class TradingOrchestrator:
             return scanner
         except Exception as e:
             self.logger.debug(f"Minimal scanner creation failed: {e}")
-            raise
-    
-    def _try_fallback_scanner(self):
-        """Create an absolute fallback scanner"""
-        try:
-            class FallbackScanner:
-                def __init__(self, epic_list, logger):
-                    self.epic_list = epic_list
-                    self.logger = logger
-                    self.logger.warning("⚠️ Using fallback scanner - limited functionality")
-                
-                def scan_once(self):
-                    """Fallback scan that returns empty results"""
-                    self.logger.warning("⚠️ Fallback scanner: returning empty results")
-                    return []
-                
-                def stop(self):
-                    """Stop method for compatibility"""
-                    pass
-            
-            scanner = FallbackScanner(self.epic_list, self.logger)
-            return scanner
-        except Exception as e:
-            self.logger.debug(f"Fallback scanner creation failed: {e}")
             raise
     
     def _log_component_status(self):
