@@ -31,6 +31,21 @@ try:
 except ImportError:
     SCANNER_CONFIG_AVAILABLE = False
 
+# Post-Claude verdict recorder. Best-effort; never raises.
+try:
+    from forex_scanner.alerts.alert_outcome import (
+        record_execution as _record_execution,
+        record_block as _record_block,
+        reason_from_executor_error as _reason_from_executor_error,
+    )
+except ImportError:
+    def _record_execution(alert_id):  # type: ignore[no-redef]
+        return None
+    def _record_block(alert_id, reason):  # type: ignore[no-redef]
+        return None
+    def _reason_from_executor_error(msg):  # type: ignore[no-redef]
+        return f"executor_error:{msg}"
+
 # SMC config for per-pair settings (monitor_only flag)
 try:
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -411,6 +426,7 @@ class OrderManager:
                 strategy_name = signal.get('strategy', 'Unknown')
                 self.logger.info(f"👁️ MONITOR MODE: {epic} ({strategy_name}) - Signal logged but NOT executed")
                 self.logger.info(f"   ℹ️ Reason: strategy-level monitor_only=true")
+                _record_block(alert_id, f"monitor_only_strategy:{strategy_name}")
                 return {
                     'status': 'monitor_only',
                     'executed': False,
@@ -430,6 +446,7 @@ class OrderManager:
                         self.logger.info(f"👁️ MONITOR MODE: {epic} - Signal logged but NOT executed")
                         self.logger.info(f"   ℹ️ Reason: monitor_only=true in parameter_overrides")
                         self.logger.info(f"   ℹ️ To enable trading: UPDATE smc_simple_pair_overrides SET parameter_overrides = parameter_overrides - 'monitor_only' WHERE epic = '{epic}';")
+                        _record_block(alert_id, f"monitor_only_pair:{epic}")
                         return {
                             'status': 'monitor_only',
                             'executed': False,
@@ -450,16 +467,18 @@ class OrderManager:
             is_valid, reason = self._validate_signal_for_execution(signal)
             if not is_valid:
                 self.logger.error(f"❌ Signal validation failed: {reason}")
+                _record_block(alert_id, f"validation:{reason}")
                 return {
-                    'status': 'validation_failed', 
-                    'reason': reason, 
+                    'status': 'validation_failed',
+                    'reason': reason,
                     'executed': False,
                     'alert_id': alert_id
                 }
-            
+
             # Check if OrderExecutor is enabled
             if hasattr(self.order_executor, 'enabled') and not self.order_executor.enabled:
                 self.logger.info("💡 OrderExecutor is disabled - running in paper mode")
+                _record_block(alert_id, "paper_mode_disabled")
                 return {
                     'status': 'paper_mode',
                     'executed': False,
@@ -478,7 +497,8 @@ class OrderManager:
                     if alert_id:
                         self.logger.info(f"✅ Execution completed for alert_id: {alert_id}")
                     self.total_volume += signal.get('position_size', 0.1)
-                    
+                    _record_execution(alert_id)
+
                     # Track execution history
                     execution_record = {
                         'status': 'executed',
@@ -490,7 +510,7 @@ class OrderManager:
                         'confidence': confidence,
                         'alert_id': alert_id
                     }
-                    
+
                     self.execution_history.append(execution_record)
                     return execution_record
                 else:
@@ -500,6 +520,7 @@ class OrderManager:
                         self.logger.info(f"⏳ Epic in cooldown: {error_msg}")
                     else:
                         self.logger.error(f"❌ OrderExecutor failed: {error_msg}")
+                    _record_block(alert_id, _reason_from_executor_error(error_msg))
                     return {
                         'status': 'execution_failed',
                         'executed': False,
@@ -508,18 +529,20 @@ class OrderManager:
                     }
             else:
                 self.logger.error("❌ OrderExecutor.execute_signal_order method not available")
+                _record_block(alert_id, "executor_method_unavailable")
                 return {
                     'status': 'method_not_available',
                     'executed': False,
                     'reason': 'OrderExecutor.execute_signal_order method not found',
                     'alert_id': alert_id
                 }
-            
+
         except Exception as e:
             self.logger.error(f"❌ Error executing signal: {e}")
+            _record_block(signal.get('alert_id'), f"exception:{e}")
             return {
-                'status': 'error', 
-                'error': str(e), 
+                'status': 'error',
+                'error': str(e),
                 'executed': False,
                 'alert_id': signal.get('alert_id')
             }
