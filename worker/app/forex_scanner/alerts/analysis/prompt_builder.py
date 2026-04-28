@@ -597,7 +597,7 @@ REASON: Analysis error - neutral assessment"""
             return self._build_fvg_retest_prompt(signal, has_chart)
         if strategy == 'MEAN_REVERSION':
             return self._build_mean_reversion_prompt(signal, has_chart)
-        if strategy in {'RANGE_FADE', 'RANGE_FADE_5M', 'EURUSD_RANGE_FADE', 'EURUSD_RANGE_FADE_5M'}:
+        if strategy == 'RANGE_FADE':
             return self._build_eurusd_range_fade_prompt(signal, has_chart)
         return self._build_smc_prompt(signal, has_chart)
 

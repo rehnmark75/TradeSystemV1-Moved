@@ -2482,10 +2482,17 @@ class TradeValidator:
                 
                 if risk <= 0:
                     return False, f"Invalid risk calculation: {risk}"
-                
+
                 risk_reward_ratio = reward / risk
-                if risk_reward_ratio < self.min_risk_reward_ratio:
-                    return False, f"Risk/reward ratio {risk_reward_ratio:.2f} below minimum {self.min_risk_reward_ratio:.2f}"
+                # Per-strategy R:R floor (RANGE_FADE is a fade strategy with ~1.5 R:R by design;
+                # 2.0 trend-strategy floor would reject every signal).
+                strategy_rr_overrides = {
+                    'RANGE_FADE': 1.3,
+                }
+                strategy_upper = strategy.upper()
+                min_rr = strategy_rr_overrides.get(strategy_upper, self.min_risk_reward_ratio)
+                if risk_reward_ratio < min_rr:
+                    return False, f"Risk/reward ratio {risk_reward_ratio:.2f} below minimum {min_rr:.2f}"
             
             # Position size validation (if present)
             position_size = signal.get('position_size')

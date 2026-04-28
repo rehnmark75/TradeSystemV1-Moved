@@ -73,9 +73,6 @@ def apply_config_overrides(
 
 
 @register_strategy("RANGE_FADE")
-@register_strategy("RANGE_FADE_5M")
-@register_strategy("EURUSD_RANGE_FADE")
-@register_strategy("EURUSD_RANGE_FADE_5M")
 class EURUSDRangeFadeStrategy(StrategyInterface):
     def __init__(self, config=None, logger=None, db_manager=None, config_override: dict = None):
         self.logger = logger or logging.getLogger(__name__)

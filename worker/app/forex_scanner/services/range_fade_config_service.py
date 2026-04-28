@@ -42,8 +42,6 @@ _TRUE_STR = {"1", "true", "yes", "on", "y", "t"}
 
 
 def _normalize_strategy_name(name: Any) -> Any:
-    if name in ("EURUSD_RANGE_FADE", "EURUSD_RANGE_FADE_5M", "RANGE_FADE_5M", "RANGE_FADE_15M"):
-        return "RANGE_FADE"
     return name
 
 
