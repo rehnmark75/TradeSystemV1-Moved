@@ -462,17 +462,9 @@ export default function CandlestickChart() {
   );
 
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100%", background: "#0f172a", color: "#e2e8f0" }}>
+    <div className="candlestick-chart-shell">
       {/* Controls */}
-      <div style={{
-        display: "flex",
-        alignItems: "center",
-        gap: "10px",
-        padding: "8px 16px",
-        borderBottom: "1px solid #1e293b",
-        flexShrink: 0,
-        flexWrap: "wrap",
-      }}>
+      <div className="chart-control-bar">
         {/* Config set toggle */}
         <div style={{ display: "flex", gap: "4px" }}>
           {(["live", "demo"] as const).map((cs) => (
@@ -547,7 +539,7 @@ export default function CandlestickChart() {
         />
 
         {/* Date range */}
-        <div style={{ display: "flex", alignItems: "center", gap: "4px" }}>
+        <div className="chart-date-range" style={{ display: "flex", alignItems: "center", gap: "4px" }}>
           <input
             type="date"
             value={dateFrom}
@@ -644,14 +636,8 @@ export default function CandlestickChart() {
 
       {/* Legend row */}
       <div
+        className="chart-legend-bar"
         style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "16px",
-          padding: "6px 16px",
-          borderBottom: "1px solid #1e293b",
-          flexShrink: 0,
-          flexWrap: "wrap",
           fontSize: "11px",
           color: "#64748b",
         }}
@@ -712,7 +698,7 @@ export default function CandlestickChart() {
       )}
 
       {/* Chart canvas */}
-      <div ref={chartContainerRef} style={{ flex: 1, minHeight: 0, position: "relative" }}>
+      <div ref={chartContainerRef} className="chart-canvas-host">
         {hoverInfo && hoverInfo.rejections.length > 0 && (
           <RejectionTooltip info={hoverInfo} />
         )}

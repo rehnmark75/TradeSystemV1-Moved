@@ -66,7 +66,7 @@ export default function RejectionStageFilter({ selected, onChange, counts }: Pro
   }
 
   return (
-    <div ref={rootRef} style={{ position: "relative" }}>
+    <div ref={rootRef} className="rejection-stage-filter" style={{ position: "relative" }}>
       <button
         onClick={() => setOpen((v) => !v)}
         style={{
@@ -94,6 +94,7 @@ export default function RejectionStageFilter({ selected, onChange, counts }: Pro
 
       {open && (
         <div
+          className="rejection-stage-filter-menu"
           style={{
             position: "absolute",
             top: "calc(100% + 4px)",

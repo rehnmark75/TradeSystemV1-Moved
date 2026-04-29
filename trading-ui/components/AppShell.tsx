@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import type { ReactNode } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import EnvironmentToggle from "./EnvironmentToggle";
 
 type NavItem = {
@@ -75,11 +75,72 @@ function buildSectionTitle(pathname: string): string {
 
 export default function AppShell({ children }: { children: ReactNode }) {
   const pathname = usePathname();
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const breadcrumbs = buildBreadcrumbs(pathname);
   const sectionTitle = buildSectionTitle(pathname);
 
+  useEffect(() => {
+    setMobileNavOpen(false);
+  }, [pathname]);
+
+  useEffect(() => {
+    document.body.classList.toggle("app-mobile-nav-open", mobileNavOpen);
+    return () => document.body.classList.remove("app-mobile-nav-open");
+  }, [mobileNavOpen]);
+
+  const renderNav = () => (
+    <nav className="app-nav" aria-label="Primary">
+      {NAV_SECTIONS.map((section) => (
+        <div key={section.title} className="app-nav-section">
+          <div className="app-nav-title">{section.title}</div>
+          <div className="app-nav-items">
+            {section.items.map((item) => {
+              const active = isActivePath(pathname, item.href);
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  className={`app-nav-link${active ? " active" : ""}`}
+                >
+                  <span className="app-nav-link-main">{item.shortLabel ?? item.label}</span>
+                  <span className="app-nav-link-sub">{item.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+      ))}
+    </nav>
+  );
+
   return (
     <div className="app-shell">
+      <header className="app-mobile-header">
+        <Link href="/" className="app-mobile-brand">
+          K.L.I.R.R
+        </Link>
+        <div className="app-mobile-title">
+          <span>{sectionTitle}</span>
+          <strong>{breadcrumbs.join(" / ")}</strong>
+        </div>
+        <button
+          type="button"
+          className="app-mobile-menu"
+          aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
+          aria-expanded={mobileNavOpen}
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          <span />
+          <span />
+          <span />
+        </button>
+      </header>
+
+      <div
+        className={`app-mobile-backdrop${mobileNavOpen ? " open" : ""}`}
+        onClick={() => setMobileNavOpen(false)}
+      />
+
       <aside className="app-sidebar">
         <div className="app-brand-block">
           <Link href="/" className="app-brand-mark">
@@ -90,28 +151,18 @@ export default function AppShell({ children }: { children: ReactNode }) {
           </p>
         </div>
 
-        <nav className="app-nav" aria-label="Primary">
-          {NAV_SECTIONS.map((section) => (
-            <div key={section.title} className="app-nav-section">
-              <div className="app-nav-title">{section.title}</div>
-              <div className="app-nav-items">
-                {section.items.map((item) => {
-                  const active = isActivePath(pathname, item.href);
-                  return (
-                    <Link
-                      key={item.href}
-                      href={item.href}
-                      className={`app-nav-link${active ? " active" : ""}`}
-                    >
-                      <span className="app-nav-link-main">{item.shortLabel ?? item.label}</span>
-                      <span className="app-nav-link-sub">{item.label}</span>
-                    </Link>
-                  );
-                })}
-              </div>
-            </div>
-          ))}
-        </nav>
+        {renderNav()}
+      </aside>
+
+      <aside className={`app-mobile-drawer${mobileNavOpen ? " open" : ""}`}>
+        <div className="app-mobile-drawer-head">
+          <div>
+            <span>Navigation</span>
+            <strong>{sectionTitle}</strong>
+          </div>
+          <EnvironmentToggle />
+        </div>
+        {renderNav()}
       </aside>
 
       <div className="app-main">
