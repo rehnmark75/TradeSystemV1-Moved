@@ -1534,7 +1534,12 @@ class EnhancedTradeProcessor:
         Returns:
             True if profit lock was applied, False if not needed, None if error
         """
-        from config import ENABLE_GUARANTEED_PROFIT_LOCK, GUARANTEED_PROFIT_LOCK_TRIGGER, GUARANTEED_PROFIT_LOCK_MINIMUM
+        from config import (
+            ENABLE_GUARANTEED_PROFIT_LOCK,
+            GUARANTEED_PROFIT_LOCK_TRIGGER,
+            GUARANTEED_PROFIT_LOCK_MINIMUM,
+            get_trailing_config_for_epic,
+        )
 
         if not ENABLE_GUARANTEED_PROFIT_LOCK:
             return False
@@ -1545,22 +1550,44 @@ class EnhancedTradeProcessor:
 
         point_value = get_point_value(trade.symbol)
 
+        # DB-driven per-pair override (Apr 2026): scoped to gold only for now.
+        # The global 15-pip trigger fired far too early on gold (gold needs
+        # 50+ pips before BE per its trailing schedule) and clipped trades
+        # at near-BE. FX pairs continue to use the global constants.
+        symbol_upper = (trade.symbol or '').upper()
+        is_gold = 'CFEGOLD' in symbol_upper or 'XAU' in symbol_upper
+        if is_gold:
+            pair_cfg = get_trailing_config_for_epic(
+                trade.symbol,
+                is_scalp_trade=bool(getattr(trade, 'is_scalp_trade', False)),
+            ) or {}
+            trigger_pips = pair_cfg.get('early_breakeven_trigger_points') or GUARANTEED_PROFIT_LOCK_TRIGGER
+            minimum_pips = pair_cfg.get('early_breakeven_buffer_points')
+            if minimum_pips is None:
+                minimum_pips = GUARANTEED_PROFIT_LOCK_MINIMUM
+        else:
+            trigger_pips = GUARANTEED_PROFIT_LOCK_TRIGGER
+            minimum_pips = GUARANTEED_PROFIT_LOCK_MINIMUM
+
         # Calculate current profit in pips
         if trade.direction.upper() == 'BUY':
             profit_pips = (current_price - trade.entry_price) / point_value
-            guaranteed_sl = trade.entry_price + (GUARANTEED_PROFIT_LOCK_MINIMUM * point_value)
+            guaranteed_sl = trade.entry_price + (minimum_pips * point_value)
             current_stop = trade.sl_price or 0.0
-            needs_adjustment = profit_pips >= GUARANTEED_PROFIT_LOCK_TRIGGER and current_stop < guaranteed_sl
+            needs_adjustment = profit_pips >= trigger_pips and current_stop < guaranteed_sl
         else:  # SELL
             profit_pips = (trade.entry_price - current_price) / point_value
-            guaranteed_sl = trade.entry_price - (GUARANTEED_PROFIT_LOCK_MINIMUM * point_value)
+            guaranteed_sl = trade.entry_price - (minimum_pips * point_value)
             current_stop = trade.sl_price or 0.0
-            needs_adjustment = profit_pips >= GUARANTEED_PROFIT_LOCK_TRIGGER and current_stop > guaranteed_sl
+            needs_adjustment = profit_pips >= trigger_pips and current_stop > guaranteed_sl
 
         # If profit >= trigger AND current SL would result in loss
         if needs_adjustment:
-            self.logger.info(f"🛡️ [GUARANTEED PROFIT LOCK] Trade {trade.id} {trade.symbol} reached +{profit_pips:.1f} pips")
-            self.logger.info(f"   Moving SL from {current_stop:.5f} to {guaranteed_sl:.5f} (+{GUARANTEED_PROFIT_LOCK_MINIMUM} pip minimum)")
+            self.logger.info(
+                f"🛡️ [GUARANTEED PROFIT LOCK] Trade {trade.id} {trade.symbol} "
+                f"reached +{profit_pips:.1f} pips (trigger={trigger_pips})"
+            )
+            self.logger.info(f"   Moving SL from {current_stop:.5f} to {guaranteed_sl:.5f} (+{minimum_pips} pip lock)")
 
             # Calculate adjustment
             adjustment_distance = abs(guaranteed_sl - current_stop)
@@ -1581,7 +1608,7 @@ class EnhancedTradeProcessor:
 
                 try:
                     db.commit()
-                    self.logger.info(f"✅ [PROFIT LOCK SUCCESS] Trade {trade.id}: Guaranteed +{GUARANTEED_PROFIT_LOCK_MINIMUM} pip minimum locked")
+                    self.logger.info(f"✅ [PROFIT LOCK SUCCESS] Trade {trade.id}: Guaranteed +{minimum_pips} pip lock applied")
                     return True
                 except Exception as commit_error:
                     db.rollback()
