@@ -866,7 +866,7 @@ def compute_atr_trailing_config(atr_pips: float, static_config: dict) -> dict:
 # Buffer points = fixed (covers spread, not proportional)
 # ==========================================================================
 
-SLTP_TRAILING_ENABLED = True
+SLTP_TRAILING_ENABLED = False
 
 DEFAULT_TRAILING_RATIOS = {
     # Triggers as fraction of TP distance

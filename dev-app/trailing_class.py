@@ -2209,7 +2209,16 @@ class EnhancedTradeProcessor:
                 stage2_trigger = STAGE2_TRIGGER_POINTS
                 stage3_trigger = STAGE3_TRIGGER_POINTS
 
-                if profit_points >= stage3_trigger:
+                # Peak-aware trigger: use max(current, recorded peak) so price spikes
+                # that happen between monitor cycles still arm the next stage instead of
+                # being lost when price retraces before the next sample.
+                try:
+                    peak_pips = float(getattr(trade, 'vsl_peak_profit_pips', 0) or 0)
+                except (TypeError, ValueError):
+                    peak_pips = 0.0
+                effective_profit_points = max(profit_points, int(peak_pips))
+
+                if effective_profit_points >= stage3_trigger:
                     # Stage 3: Percentage-based trailing
                     self.logger.info(f"🚀 [STAGE 3 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 3 trigger {stage3_trigger}pts - Percentage trailing")
                     # Use the per-trade dynamic config (SL/TP-proportional + ATR-adaptive)
@@ -2280,13 +2289,13 @@ class EnhancedTradeProcessor:
                     except Exception as e:
                         self.logger.error(f"❌ [STAGE 3 ERROR] Trade {trade.id}: {e}")
 
-                elif profit_points >= stage2_trigger:
+                elif effective_profit_points >= stage2_trigger:
                     # Stage 2: Profit lock
                     # ✅ CRITICAL FIX: Check if Stage 2 already executed
                     if getattr(trade, 'moved_to_stage2', False):
                         self.logger.debug(f"📊 [STAGE 2 SKIP] Trade {trade.id}: Stage 2 already executed, waiting for Stage 3")
                     else:
-                        self.logger.info(f"💰 [STAGE 2 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 2 trigger {stage2_trigger}pts - Profit lock")
+                        self.logger.info(f"💰 [STAGE 2 TRIGGER] Trade {trade.id}: effective_profit {effective_profit_points}pts (current {profit_points}, peak {peak_pips:.1f}) >= Stage 2 trigger {stage2_trigger}pts - Profit lock")
 
                         # Calculate Stage 2 profit lock level (entry + lock points)
                         lock_points = STAGE2_LOCK_POINTS  # 10 points
@@ -2348,13 +2357,13 @@ class EnhancedTradeProcessor:
                                 self.logger.error(f"❌ [DB COMMIT FAILED STAGE2-SKIP] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
                                 raise
 
-                elif profit_points >= stage1_trigger:
+                elif effective_profit_points >= stage1_trigger:
                     # Stage 1: Initial profit protection
                     # ✅ NEW: Check if Stage 1 already executed
                     if getattr(trade, 'moved_to_stage1', False):
                         self.logger.debug(f"📊 [STAGE 1 SKIP] Trade {trade.id}: Stage 1 already executed, waiting for Stage 2")
                     else:
-                        self.logger.info(f"💰 [STAGE 1 TRIGGER] Trade {trade.id}: Profit {profit_points}pts >= Stage 1 trigger {stage1_trigger}pts - Initial profit lock")
+                        self.logger.info(f"💰 [STAGE 1 TRIGGER] Trade {trade.id}: effective_profit {effective_profit_points}pts (current {profit_points}, peak {peak_pips:.1f}) >= Stage 1 trigger {stage1_trigger}pts - Initial profit lock")
 
                         # Calculate Stage 1 profit lock level (entry + lock points)
                         lock_points = STAGE1_LOCK_POINTS
