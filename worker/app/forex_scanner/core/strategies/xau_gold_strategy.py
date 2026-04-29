@@ -372,6 +372,11 @@ class XAUGoldStrategy(StrategyInterface):
             # falling back to SMC-style trailing-config defaults (8+2=10 / 12 pips).
             "risk_pips": float(sl_pips),
             "reward_pips": float(tp_pips),
+            # Order executor expects stop_distance / limit_distance in IG broker points.
+            # For gold, 1 IG-point = 1.0 price unit = 10 retail pips, so divide by 10.
+            # Without this, order_executor falls back to default_stop_distance (~5 pips).
+            "stop_distance": int(round(float(sl_pips) / 10.0)),
+            "limit_distance": int(round(float(tp_pips) / 10.0)),
             "confidence_score": float(confidence),
             "confidence": float(confidence),
             "signal_timestamp": datetime.now(timezone.utc).isoformat(),

@@ -73,7 +73,23 @@ def get_point_value(epic: str) -> float:
     return 1.0
 
 
-def convert_stop_distance_to_price(entry_price: float, stop_distance_points: int, 
+def get_ig_point_size(epic: str) -> float:
+    """
+    Resolve IG broker-point size (price units per `stopDistance` point on the IG REST API).
+
+    For most instruments this equals the pip size returned by ``get_point_value``,
+    but for gold an IG point equals 1.0 price unit (= 10 retail pips). Mixing the
+    two units when persisting a stop level produces a 10× error on gold orders.
+    """
+    if not epic:
+        return 1.0
+    epic_upper = epic.upper()
+    if "CFEGOLD" in epic_upper or "GOLD" in epic_upper or "XAU" in epic_upper:
+        return 1.0
+    return get_point_value(epic)
+
+
+def convert_stop_distance_to_price(entry_price: float, stop_distance_points: int,
                                  direction: str, epic: str) -> float:
     """
     Convert stop distance in points to actual stop price level.
@@ -93,7 +109,7 @@ def convert_stop_distance_to_price(entry_price: float, stop_distance_points: int
         >>> convert_stop_distance_to_price(1.1000, 15, "BUY", "EURUSD")
         1.0985
     """
-    point_value = get_point_value(epic)
+    point_value = get_ig_point_size(epic)
     stop_distance_price = stop_distance_points * point_value
     
     if direction.upper() == "BUY":
@@ -126,7 +142,7 @@ def convert_limit_distance_to_price(entry_price: float, limit_distance_points: i
         >>> convert_limit_distance_to_price(1.1000, 20, "BUY", "EURUSD")
         1.1020
     """
-    point_value = get_point_value(epic)
+    point_value = get_ig_point_size(epic)
     limit_distance_price = limit_distance_points * point_value
     
     if direction.upper() == "BUY":

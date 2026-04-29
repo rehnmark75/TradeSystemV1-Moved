@@ -394,8 +394,14 @@ class OrderExecutor:
                 smc_config = get_smc_simple_config()
                 is_scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
 
-                # PRIORITY 1: Check per-pair SL/TP override (skip for RANGING_MARKET - already handled above)
-                if smc_config.fixed_sl_tp_override_enabled and signal_strategy != 'RANGING_MARKET':
+                # SMC SL/TP override applies only to SMC_SIMPLE signals. Other strategies
+                # (XAU_GOLD, RANGING_MARKET, RANGE_STRUCTURE, MEAN_REVERSION, …) carry their
+                # own SL/TP and must not be rewritten with SMC scalp values calibrated for FX.
+                _signal_strategy_upper = (signal_strategy or '').upper()
+                _is_smc_signal = _signal_strategy_upper in ('SMC_SIMPLE', 'SMC')
+
+                # PRIORITY 1: Check per-pair SL/TP override (SMC signals only)
+                if _is_smc_signal and smc_config.fixed_sl_tp_override_enabled:
                     if is_scalp_mode:
                         # Scalp mode: use ATR-optimized scalp SL/TP (scalp_sl_pips/scalp_tp_pips columns)
                         pair_sl = smc_config.get_pair_scalp_sl(internal_epic)
@@ -424,8 +430,9 @@ class OrderExecutor:
                         )
 
                 # PRIORITY 2: Legacy scalp mode (only if per-pair override not enabled)
-                # NOTE: This is deprecated - kept for backward compatibility only
-                elif is_scalp_mode:
+                # NOTE: This is deprecated - kept for backward compatibility only.
+                # Also gated to SMC signals — non-SMC strategies must keep their own SL/TP.
+                elif _is_smc_signal and is_scalp_mode:
                     BROKER_SAFETY_SL_PIPS = 10  # Legacy safety net (VSL system deprecated)
                     scalp_tp = getattr(smc_config, 'scalp_tp_pips', 5.0)
                     original_sl = stop_distance
