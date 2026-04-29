@@ -25,9 +25,9 @@ NOT TO BE CONFUSED WITH:
    0.05 → 0.1 lots. Pip size stays the same; only your $/pip exposure changes.
 
 2. IG API "POINT" UNIT       →  IG's stopDistance / limitDistance API
-   parameters use IG points. For most FX, 1 IG point = 1 pip; for gold,
-   1 pip = 10 IG points (price-per-IG-point ≈ 0.01 for gold). The system
-   converts to IG points only at the API boundary; everywhere else uses pips.
+   parameters use IG points. For most FX, 1 IG point = 1 pip; for IG CFEGOLD,
+   1 IG point = 0.5 price units = 5 XAU pips. The system converts to IG
+   points only at the API boundary; everywhere else uses pips.
 
 If you add a new instrument:
     - Add its pattern to `get_point_value` below with the broker's pip size.
@@ -78,14 +78,14 @@ def get_ig_point_size(epic: str) -> float:
     Resolve IG broker-point size (price units per `stopDistance` point on the IG REST API).
 
     For most instruments this equals the pip size returned by ``get_point_value``,
-    but for gold an IG point equals 1.0 price unit (= 10 retail pips). Mixing the
-    two units when persisting a stop level produces a 10× error on gold orders.
+    but for IG CFEGOLD an IG point equals 0.5 price units (= 5 XAU pips). Mixing
+    the two units when persisting a stop level produces a 5× error on gold orders.
     """
     if not epic:
         return 1.0
     epic_upper = epic.upper()
     if "CFEGOLD" in epic_upper or "GOLD" in epic_upper or "XAU" in epic_upper:
-        return 1.0
+        return 0.5
     return get_point_value(epic)
 
 

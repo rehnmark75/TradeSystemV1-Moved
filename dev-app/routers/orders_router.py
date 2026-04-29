@@ -727,7 +727,7 @@ async def ig_place_order(
                     # Scalp trade detection (limit orders)
                     # VSL system disabled - scalp trades now use progressive trailing with scalp configs
                     # NOTE: sl_limit is in broker points. For FX, 1 point ≈ 1 pip, so <=8 catches scalps.
-                    # For non-FX (e.g. gold CFEGOLD where 1 point = $1 = 10 pips), the heuristic is
+                    # For non-FX (e.g. gold CFEGOLD where broker points are not FX pips), the heuristic is
                     # invalid — a normal 50-pip gold stop arrives as sl_limit=5 and would be misflagged.
                     # Restrict the auto-detect to FX symbols (epic prefix CS.D.<6-letter pair>).
                     _is_fx = isinstance(symbol, str) and symbol.startswith("CS.D.") and "GOLD" not in symbol.upper() and "SILVER" not in symbol.upper() and "OIL" not in symbol.upper()

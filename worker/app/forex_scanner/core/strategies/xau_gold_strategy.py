@@ -373,10 +373,10 @@ class XAUGoldStrategy(StrategyInterface):
             "risk_pips": float(sl_pips),
             "reward_pips": float(tp_pips),
             # Order executor expects stop_distance / limit_distance in IG broker points.
-            # For gold, 1 IG-point = 1.0 price unit = 10 retail pips, so divide by 10.
+            # For IG CFEGOLD, 1 broker point = 0.5 price units = 5 XAU pips.
             # Without this, order_executor falls back to default_stop_distance (~5 pips).
-            "stop_distance": int(round(float(sl_pips) / 10.0)),
-            "limit_distance": int(round(float(tp_pips) / 10.0)),
+            "stop_distance": int(round(float(sl_pips) / 5.0)),
+            "limit_distance": int(round(float(tp_pips) / 5.0)),
             "confidence_score": float(confidence),
             "confidence": float(confidence),
             "signal_timestamp": datetime.now(timezone.utc).isoformat(),
