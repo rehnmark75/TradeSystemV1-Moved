@@ -839,7 +839,7 @@ export default function Page() {
   };
 
   return (
-    <div className="page">
+    <div className="page watchlists-page">
       <div className="topbar">
         <Link href="/" className="brand">
           K.L.I.R.R
@@ -1025,7 +1025,8 @@ export default function Page() {
           <div className="footer-note">Loading watchlist...</div>
         ) : (
           <Virtuoso
-            style={{ height: 540 }}
+            className="watchlist-virtual-list"
+            style={{ height: "var(--watchlist-list-height, 540px)" }}
             data={sortedRows}
             itemContent={(index, row) => {
               const rsVal = row.rs_percentile ?? null;

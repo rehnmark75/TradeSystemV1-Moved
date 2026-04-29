@@ -383,7 +383,7 @@ export default function ForexAnalyticsPage() {
             {loadingOverview ? (
               <div className="chart-placeholder">Loading trades...</div>
             ) : (
-              <table className="forex-table">
+              <table className="forex-table mobile-card-table">
                 <thead>
                   <tr>
                     <th>Time</th>
@@ -406,12 +406,12 @@ export default function ForexAnalyticsPage() {
                     const pnlClass = pnl == null ? "" : pnl < 0 ? "bad" : "good";
                     return (
                       <tr key={trade.id}>
-                        <td>{formatDateTime(trade.timestamp)}</td>
-                        <td>{trade.symbol}</td>
-                        <td>{trade.direction}</td>
-                        <td>{trade.strategy ?? "-"}</td>
-                        <td>{trade.status}</td>
-                        <td className={pnlClass}>{pnlValue}</td>
+                        <td data-label="Time">{formatDateTime(trade.timestamp)}</td>
+                        <td data-label="Symbol">{trade.symbol}</td>
+                        <td data-label="Direction">{trade.direction}</td>
+                        <td data-label="Strategy">{trade.strategy ?? "-"}</td>
+                        <td data-label="Status">{trade.status}</td>
+                        <td data-label="P&L" className={pnlClass}>{pnlValue}</td>
                       </tr>
                     );
                   })}
@@ -490,7 +490,7 @@ export default function ForexAnalyticsPage() {
 
           <div className="panel table-panel">
             <div className="chart-title">Strategy Performance</div>
-            <table className="forex-table">
+            <table className="forex-table mobile-card-table">
               <thead>
                 <tr>
                   <th>Strategy</th>
@@ -504,14 +504,14 @@ export default function ForexAnalyticsPage() {
               <tbody>
                 {(analysis?.strategies ?? []).map((row) => (
                   <tr key={`${row.strategy}-table`}>
-                    <td>{row.strategy}</td>
-                    <td>{row.total_trades}</td>
-                    <td>{formatPercent(row.win_rate)}</td>
-                    <td className={row.total_pnl < 0 ? "bad" : "good"}>
+                    <td data-label="Strategy">{row.strategy}</td>
+                    <td data-label="Trades">{row.total_trades}</td>
+                    <td data-label="Win Rate">{formatPercent(row.win_rate)}</td>
+                    <td data-label="Total P&L" className={row.total_pnl < 0 ? "bad" : "good"}>
                       {formatNumber(row.total_pnl)}
                     </td>
-                    <td>{formatNumber(row.avg_pnl)}</td>
-                    <td>{row.pairs_traded}</td>
+                    <td data-label="Avg P&L">{formatNumber(row.avg_pnl)}</td>
+                    <td data-label="Pairs">{row.pairs_traded}</td>
                   </tr>
                 ))}
               </tbody>

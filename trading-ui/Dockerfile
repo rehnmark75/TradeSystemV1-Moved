@@ -12,6 +12,7 @@ COPY lib ./lib
 COPY components ./components
 COPY hooks ./hooks
 COPY types ./types
+COPY public ./public
 ENV NEXT_TELEMETRY_DISABLED=1
 RUN npm run build
 
@@ -23,5 +24,6 @@ ENV HOSTNAME=0.0.0.0
 ENV PORT=3000
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+COPY --from=builder /app/public ./public
 EXPOSE 3000
 CMD ["node", "server.js"]

@@ -5,9 +5,9 @@ import CandlestickChart from "../../../components/CandlestickChart";
 
 export default function ForexChartPage() {
   return (
-    <div style={{ display: "flex", flexDirection: "column", height: "100vh", background: "#0f172a" }}>
+    <div className="forex-chart-page">
       <ForexNav activeHref="/forex/chart" />
-      <div style={{ flex: 1, minHeight: 0 }}>
+      <div className="forex-chart-host">
         <CandlestickChart />
       </div>
     </div>
