@@ -27,7 +27,7 @@ EPIC_MAP = {
 # Gold reduced to 0.05 lots for Phase 7 conservative rollout of XAU_GOLD Candidate A
 # params (mc=0.63, rr=3.0, adx=26). Revisit after 30 days of demo live trading.
 EPIC_ORDER_SIZES = {
-    "CS.D.CFEGOLD.CEE.IP": 0.05,
+    "CS.D.CFEGOLD.CEE.IP": 0.5,
 }
 
 # Trading blacklist - prevent trading for specific epics (scan-only mode)
