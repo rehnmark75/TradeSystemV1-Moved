@@ -1,8 +1,20 @@
 import { useEffect, useState } from "react";
 import { apiUrl } from "../../lib/settings/api";
 
+export const TRAILING_STRATEGIES = [
+  "DEFAULT",
+  "SMC_SIMPLE",
+  "XAU_GOLD",
+  "RANGE_FADE",
+  "MEAN_REVERSION",
+  "RANGE_STRUCTURE",
+] as const;
+
+export type TrailingStrategy = (typeof TRAILING_STRATEGIES)[number];
+
 export interface TrailingConfigRow {
   id: number;
+  strategy: TrailingStrategy;
   config_set: string;
   epic: string;
   is_scalp: boolean;
@@ -26,7 +38,11 @@ export interface TrailingConfigRow {
   updated_at: string;
 }
 
-export function useTrailingConfig(configSet: string, isScalp: boolean) {
+export function useTrailingConfig(
+  configSet: string,
+  isScalp: boolean,
+  strategy: TrailingStrategy = "DEFAULT"
+) {
   const [rows, setRows] = useState<TrailingConfigRow[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -36,7 +52,8 @@ export function useTrailingConfig(configSet: string, isScalp: boolean) {
     setError(null);
     try {
       const url = apiUrl(
-        `/api/settings/trailing?config_set=${encodeURIComponent(configSet)}&is_scalp=${isScalp}`
+        `/api/settings/trailing?config_set=${encodeURIComponent(configSet)}` +
+          `&is_scalp=${isScalp}&strategy=${encodeURIComponent(strategy)}`
       );
       const response = await fetch(url);
       const payload = await response.json();
@@ -52,7 +69,7 @@ export function useTrailingConfig(configSet: string, isScalp: boolean) {
   useEffect(() => {
     reload();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [configSet, isScalp]);
+  }, [configSet, isScalp, strategy]);
 
   const saveRow = async (
     epic: string,
@@ -65,6 +82,7 @@ export function useTrailingConfig(configSet: string, isScalp: boolean) {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          strategy,
           updates,
           updated_by: meta.updatedBy,
           change_reason: meta.changeReason,
@@ -78,7 +96,11 @@ export function useTrailingConfig(configSet: string, isScalp: boolean) {
     if (!response.ok) {
       throw new Error(payload.error ?? payload.message ?? "Failed to save");
     }
-    setRows((prev) => prev.map((r) => (r.epic === epic && r.is_scalp === isScalp ? payload : r)));
+    setRows((prev) =>
+      prev.map((r) =>
+        r.epic === epic && r.is_scalp === isScalp && r.strategy === strategy ? payload : r
+      )
+    );
     return payload as TrailingConfigRow;
   };
 

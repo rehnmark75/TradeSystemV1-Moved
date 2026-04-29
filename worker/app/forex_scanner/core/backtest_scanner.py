@@ -1549,7 +1549,7 @@ class BacktestScanner(IntelligentForexScanner):
 
         return processed_signals
 
-    def _get_trailing_stop_simulator(self, epic: str):
+    def _get_trailing_stop_simulator(self, epic: str, strategy: str = 'DEFAULT'):
         """
         Get or create a per-epic trailing stop simulator with pair-specific config.
 
@@ -1562,9 +1562,11 @@ class BacktestScanner(IntelligentForexScanner):
         Returns:
             TrailingStopSimulator configured for the specific pair
         """
-        # Check cache first
-        if epic in self._trailing_stop_simulators:
-            return self._trailing_stop_simulators[epic]
+        # Cache key includes strategy so per-strategy DB overrides apply.
+        strategy = (strategy or 'DEFAULT').upper()
+        cache_key = (epic, strategy)
+        if cache_key in self._trailing_stop_simulators:
+            return self._trailing_stop_simulators[cache_key]
 
         # Create new simulator with pair-specific config
         if self._use_vsl_mode and epic in self._vsl_config:
@@ -1590,6 +1592,7 @@ class BacktestScanner(IntelligentForexScanner):
                 initial_stop_pips=self._scalping_stop_pips,
                 max_bars=self._scalping_max_bars,
                 use_fixed_sl_tp=True,
+                strategy=strategy,
                 logger=self.logger
             )
             self.logger.debug(f"📊 Created SCALPING simulator for {epic}: SL={self._scalping_stop_pips}, TP={self._scalping_target_pips}")
@@ -1600,13 +1603,14 @@ class BacktestScanner(IntelligentForexScanner):
             simulator = self._create_trailing_stop_simulator(
                 epic=epic,
                 use_atr_trailing=self._use_atr_trailing,
+                strategy=strategy,
                 logger=self.logger
             )
             mode_desc = "ATR-Adaptive" if self._use_atr_trailing else "Progressive 3-Stage"
-            self.logger.debug(f"📊 Created {mode_desc} simulator for {epic}")
+            self.logger.debug(f"📊 Created {mode_desc} simulator for {epic} (strategy={strategy})")
 
-        # Cache for reuse
-        self._trailing_stop_simulators[epic] = simulator
+        # Cache for reuse (keyed by epic+strategy)
+        self._trailing_stop_simulators[cache_key] = simulator
         return simulator
 
     def _add_trade_simulation(self, signal: Dict, signal_timestamp: datetime) -> Dict:
@@ -1654,8 +1658,13 @@ class BacktestScanner(IntelligentForexScanner):
 
                 self.logger.debug(f"📊 ATR Mode: SL={signal.get('risk_pips')} pips, TP={signal.get('reward_pips')} pips")
 
-            # Get per-epic trailing stop simulator with pair-specific config
-            trailing_simulator = self._get_trailing_stop_simulator(epic)
+            # Get per-epic trailing stop simulator with per-strategy + pair config
+            signal_strategy = (
+                signal.get('strategy')
+                or signal.get('strategy_name')
+                or 'DEFAULT'
+            )
+            trailing_simulator = self._get_trailing_stop_simulator(epic, strategy=signal_strategy)
 
             # Fetch future price data for simulation
             # VSL MODE: Use 1m candles for more accurate simulation (closer to tick-by-tick)

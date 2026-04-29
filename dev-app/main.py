@@ -1150,6 +1150,14 @@ except ImportError as e:
 # Register routers
 app.include_router(orders_router, prefix="/orders", tags=["orders"])
 
+# Per-strategy trailing config CRUD (used by trading-ui editor)
+try:
+    from routers.trailing_config_router import router as trailing_config_router
+    app.include_router(trailing_config_router, prefix="/api")
+    print("✅ Trailing-config router registered at /api/trailing-config")
+except Exception as _tcr_err:  # pragma: no cover
+    print(f"⚠️ Trailing-config router not available: {_tcr_err}")
+
 # Backtest router
 if BACKTEST_AVAILABLE and backtest_router:
     app.include_router(backtest_router, tags=["backtest"])

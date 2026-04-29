@@ -20,15 +20,31 @@ const CONFIG_FIELDS = [
   "partial_close_size",
 ] as const;
 
+const ALLOWED_STRATEGIES = new Set([
+  "DEFAULT",
+  "SMC_SIMPLE",
+  "XAU_GOLD",
+  "RANGE_FADE",
+  "MEAN_REVERSION",
+  "RANGE_STRUCTURE",
+]);
+
+function normalizeStrategy(s: string | null | undefined): string {
+  const u = (s ?? "DEFAULT").toUpperCase();
+  return ALLOWED_STRATEGIES.has(u) ? u : "DEFAULT";
+}
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const configSet = searchParams.get("config_set") ?? "demo";
   const isScalpParam = searchParams.get("is_scalp");
   const isScalp = isScalpParam === "true";
+  const strategyParam = searchParams.get("strategy");
 
   try {
     const cols = [
       "id",
+      "strategy",
       "config_set",
       "epic",
       "is_scalp",
@@ -45,17 +61,25 @@ export async function GET(request: Request) {
       whereClauses.push(`is_scalp = $${params.length + 1}`);
       params.push(isScalp);
     }
+    if (strategyParam) {
+      whereClauses.push(`strategy = $${params.length + 1}`);
+      params.push(normalizeStrategy(strategyParam));
+    }
 
     const result = await strategyConfigPool.query(
       `
         SELECT ${cols}
         FROM trailing_pair_config
         WHERE ${whereClauses.join(" AND ")}
-        ORDER BY epic = 'DEFAULT' DESC, is_scalp ASC, epic ASC
+        ORDER BY strategy = 'DEFAULT' DESC, strategy ASC,
+                 epic = 'DEFAULT' DESC, is_scalp ASC, epic ASC
       `,
       params
     );
-    return NextResponse.json({ rows: result.rows ?? [] });
+    return NextResponse.json({
+      rows: result.rows ?? [],
+      strategies: Array.from(ALLOWED_STRATEGIES).sort(),
+    });
   } catch (error) {
     console.error("Failed to load trailing configs", error);
     return NextResponse.json(
@@ -72,6 +96,7 @@ export async function POST(request: Request) {
   }
 
   const {
+    strategy,
     epic,
     is_scalp,
     updates,
@@ -79,6 +104,7 @@ export async function POST(request: Request) {
     change_reason,
     config_set,
   } = body as {
+    strategy?: string;
     epic?: string;
     is_scalp?: boolean;
     updates?: Record<string, unknown>;
@@ -88,6 +114,7 @@ export async function POST(request: Request) {
   };
 
   const configSet = config_set ?? "demo";
+  const strategyName = normalizeStrategy(strategy);
   if (!epic) {
     return NextResponse.json({ error: "epic is required" }, { status: 400 });
   }
@@ -111,8 +138,8 @@ export async function POST(request: Request) {
   try {
     await client.query("BEGIN");
 
-    const insertCols = ["config_set", "epic", "is_scalp", ...keys, "updated_by", "change_reason"];
-    const values: unknown[] = [configSet, epic, Boolean(is_scalp)];
+    const insertCols = ["strategy", "config_set", "epic", "is_scalp", ...keys, "updated_by", "change_reason"];
+    const values: unknown[] = [strategyName, configSet, epic, Boolean(is_scalp)];
     keys.forEach((k) => values.push((updates as Record<string, unknown>)[k]));
     values.push(updated_by, change_reason);
 
@@ -130,7 +157,7 @@ export async function POST(request: Request) {
       `
         INSERT INTO trailing_pair_config (${insertCols.join(", ")})
         VALUES (${placeholders})
-        ON CONFLICT (config_set, epic, is_scalp)
+        ON CONFLICT (strategy, config_set, epic, is_scalp)
         DO UPDATE SET ${setClause}
         RETURNING *
       `,

@@ -1033,7 +1033,11 @@ def compute_sltp_trailing_config(
     return result
 
 
-def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dict:
+def get_trailing_config_for_epic(
+    epic: str,
+    is_scalp_trade: bool = False,
+    strategy: str = 'DEFAULT',
+) -> dict:
     """
     Get trailing stop configuration for specific epic/pair.
 
@@ -1062,7 +1066,9 @@ def get_trailing_config_for_epic(epic: str, is_scalp_trade: bool = False) -> dic
     # callers that import this function before services are initialised
     # working during startup.
     from services.trailing_config_service import get_trailing_config_service
-    return get_trailing_config_service().get_config(epic, is_scalp=is_scalp_trade)
+    return get_trailing_config_service().get_config(
+        epic, is_scalp=is_scalp_trade, strategy=strategy,
+    )
 
 
 def get_scalp_trailing_config_for_epic(epic: str) -> dict:

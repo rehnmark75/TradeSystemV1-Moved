@@ -114,8 +114,11 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
             if is_scalp:
                 self.logger.debug(f"⚡ [SCALP CONFIG] Trade {trade.id}: Loading scalp-specific trailing config")
 
-            # Get pair-specific static config with scalp flag
-            pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
+            # Get pair-specific static config with scalp flag and per-strategy override
+            strategy_name = (getattr(trade, 'strategy', None) or 'DEFAULT').upper()
+            pair_config = get_trailing_config_for_epic(
+                trade.symbol, is_scalp_trade=is_scalp, strategy=strategy_name,
+            )
 
             # If we already resolved a SL/TP-proportional config for this trade earlier
             # (pre-BE), reuse it. After early BE moves sl_price past entry, sl_pips

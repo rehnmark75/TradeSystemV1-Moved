@@ -127,7 +127,7 @@ class TrailingConfig:
 
     @classmethod
     def from_epic(cls, epic: str, method: TrailingMethod = TrailingMethod.PROGRESSIVE_3_STAGE,
-                  is_scalp_trade: bool = False):
+                  is_scalp_trade: bool = False, strategy: str = 'DEFAULT'):
         """
         Create TrailingConfig with pair-specific settings from config.py
 
@@ -135,6 +135,7 @@ class TrailingConfig:
             epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
             method: Trailing method to use (default: PROGRESSIVE_3_STAGE)
             is_scalp_trade: Whether this is a scalp trade (uses SCALP_TRAILING_CONFIGS)
+            strategy: Strategy name for per-strategy DB override (default 'DEFAULT')
 
         Returns:
             TrailingConfig instance with pair-specific values
@@ -143,7 +144,9 @@ class TrailingConfig:
         """
         from config import get_trailing_config_for_epic
 
-        pair_config = get_trailing_config_for_epic(epic, is_scalp_trade=is_scalp_trade)
+        pair_config = get_trailing_config_for_epic(
+            epic, is_scalp_trade=is_scalp_trade, strategy=strategy,
+        )
 
         return cls(
             method=method,
@@ -794,10 +797,10 @@ class Progressive3StageTrailing(TrailingStrategy):
 
         return trail_level
 
-    def _get_pair_config(self, symbol: str, is_scalp: bool = False) -> dict:
+    def _get_pair_config(self, symbol: str, is_scalp: bool = False, strategy: str = 'DEFAULT') -> dict:
         """Get pair-specific trailing configuration from config.py"""
         from config import get_trailing_config_for_epic
-        return get_trailing_config_for_epic(symbol, is_scalp_trade=is_scalp)
+        return get_trailing_config_for_epic(symbol, is_scalp_trade=is_scalp, strategy=strategy)
 
     def _calculate_early_breakeven(self, trade: TradeLog, current_price: float, current_stop: float) -> Optional[float]:
         """
@@ -820,7 +823,10 @@ class Progressive3StageTrailing(TrailingStrategy):
         point_value = self._get_point_value(trade.symbol)
 
         # Get pair-specific buffer or use default (1 point)
-        pair_config = self._get_pair_config(trade.symbol)
+        pair_config = self._get_pair_config(
+            trade.symbol,
+            strategy=(getattr(trade, 'strategy', None) or 'DEFAULT'),
+        )
         buffer_points = pair_config.get('early_breakeven_buffer_points', 1)
 
         # Calculate breakeven level with small buffer (covers spread)
@@ -1560,6 +1566,7 @@ class EnhancedTradeProcessor:
             pair_cfg = get_trailing_config_for_epic(
                 trade.symbol,
                 is_scalp_trade=bool(getattr(trade, 'is_scalp_trade', False)),
+                strategy=(getattr(trade, 'strategy', None) or 'DEFAULT'),
             ) or {}
             trigger_pips = pair_cfg.get('early_breakeven_trigger_points') or GUARANTEED_PROFIT_LOCK_TRIGGER
             minimum_pips = pair_cfg.get('early_breakeven_buffer_points')
@@ -1660,6 +1667,7 @@ class EnhancedTradeProcessor:
             trailing_config = get_trailing_config_for_epic(
                 trade.symbol,
                 is_scalp_trade=getattr(trade, 'is_scalp_trade', False),
+                strategy=(getattr(trade, 'strategy', None) or 'DEFAULT'),
             )
 
             # v3.2.0: Use self.config for break-even trigger (ATR-adaptive)

@@ -1,19 +1,20 @@
 """
-Trailing Config Service — DB-backed, environment-scoped.
+Worker-side trailing config loader (DB-driven with file fallback).
 
-Replaces the hardcoded PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS dicts
-previously in dev-app/config.py. Configs are now stored in
-strategy_config.trailing_pair_config and scoped by TRADING_ENVIRONMENT
-('demo' or 'live') so that each container sees only its own values.
+Mirrors `dev-app/services/trailing_config_service.py` so backtests read the
+same `strategy_config.trailing_pair_config` rows that drive live trading.
+On DB miss/error, callers fall back to the legacy `PAIR_TRAILING_CONFIGS`
+dict in `config_trailing_stops.py`.
 
-Behaviour:
-- On first call, loads all rows for the current config_set into memory.
-- In-memory cache refreshes every 120s.
-- If DB load fails:
-    - live   → raise RuntimeError (fail-hard, same pattern as LPF / SMC config)
-    - demo   → warn and continue with empty cache (returns {})
-- Missing epic → falls back to the 'DEFAULT' row for the same config_set.
+Per-strategy lookup (Apr 2026):
+    Lookup chain for a given (strategy, epic, is_scalp):
+        1. (strategy, epic, is_scalp)
+        2. (strategy, 'DEFAULT', is_scalp)
+        3. ('DEFAULT', epic, is_scalp)
+        4. ('DEFAULT', 'DEFAULT', is_scalp)
 """
+
+from __future__ import annotations
 
 import logging
 import os
@@ -31,8 +32,6 @@ except ImportError:
 
 logger = logging.getLogger(__name__)
 
-# Columns that live in trailing_pair_config and are exposed to the caller
-# (i.e. what used to be the dict value in PAIR_TRAILING_CONFIGS).
 CONFIG_FIELDS = (
     'early_breakeven_trigger_points',
     'early_breakeven_buffer_points',
@@ -50,13 +49,13 @@ CONFIG_FIELDS = (
     'partial_close_size',
 )
 
+DEFAULT_STRATEGY = 'DEFAULT'
+
 
 class TrailingConfigService:
-    """Cached, environment-scoped loader for trailing_pair_config rows."""
-
     def __init__(self, config_set: Optional[str] = None, cache_ttl_seconds: int = 120):
+        # Worker BTs default to 'demo' since that mirrors the demo trading env.
         self.config_set = config_set or os.getenv('TRADING_ENVIRONMENT', 'demo')
-        self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
         self.cache_ttl = timedelta(seconds=cache_ttl_seconds)
         self._db_url = os.getenv(
             'STRATEGY_CONFIG_DATABASE_URL',
@@ -77,64 +76,43 @@ class TrailingConfigService:
                 conn.close()
 
     def _reload(self) -> None:
-        """Load all active rows for this config_set into memory."""
         if not PSYCOPG2_AVAILABLE:
-            msg = "psycopg2 not available — trailing config disabled"
-            if self._trading_env == 'live':
-                raise RuntimeError(f"TrailingConfigService: {msg}")
-            logger.warning(f"⚠️ TrailingConfigService: {msg} (demo mode)")
             self._cache = {}
             self._cache_loaded_at = datetime.now()
             return
-
         try:
             with self._connection() as conn:
                 with conn.cursor(cursor_factory=RealDictCursor) as cur:
                     cur.execute(
-                        """
-                        SELECT strategy, epic, is_scalp, """
-                        + ', '.join(CONFIG_FIELDS)
-                        + """
-                        FROM trailing_pair_config
-                        WHERE config_set = %s AND is_active = TRUE
-                        """,
+                        "SELECT strategy, epic, is_scalp, " + ', '.join(CONFIG_FIELDS)
+                        + " FROM trailing_pair_config "
+                        "WHERE config_set = %s AND is_active = TRUE",
                         (self.config_set,),
                     )
                     rows = cur.fetchall()
-
             new_cache: Dict[Tuple[str, str, bool], Dict] = {}
             for row in rows:
-                strategy = (row.get('strategy') or 'DEFAULT')
-                key = (strategy, row['epic'], bool(row['is_scalp']))
-                # Normalise Decimal → float so downstream math (e.g. atr * multiplier)
-                # works the same way it did with the old Python dict values.
                 cfg = {}
                 for f in CONFIG_FIELDS:
                     v = row.get(f)
-                    if v is not None and hasattr(v, '__class__') and v.__class__.__name__ == 'Decimal':
+                    if v is not None and v.__class__.__name__ == 'Decimal':
                         v = float(v)
                     cfg[f] = v
+                key = (row.get('strategy') or DEFAULT_STRATEGY, row['epic'], bool(row['is_scalp']))
                 new_cache[key] = cfg
-
             self._cache = new_cache
             self._cache_loaded_at = datetime.now()
             logger.info(
-                f"🔄 TrailingConfigService loaded {len(new_cache)} rows "
+                f"🔄 [Worker] TrailingConfigService loaded {len(new_cache)} rows "
                 f"(config_set={self.config_set})"
             )
-
         except Exception as e:
-            logger.error(
-                f"❌ TrailingConfigService: DB load failed "
-                f"(config_set={self.config_set}): {e}"
+            logger.warning(
+                f"⚠️ [Worker] TrailingConfigService DB load failed "
+                f"(config_set={self.config_set}): {e} — falling back to file"
             )
-            if self._trading_env == 'live':
-                raise RuntimeError(
-                    f"TrailingConfigService refusing to serve in live mode with no DB data: {e}"
-                ) from e
-            # Demo: keep serving whatever stale cache we have (or empty)
             if self._cache_loaded_at is None:
-                self._cache_loaded_at = datetime.now()  # avoid thrashing retries
+                self._cache_loaded_at = datetime.now()
 
     def _ensure_cache(self) -> None:
         with self._lock:
@@ -148,20 +126,22 @@ class TrailingConfigService:
         self,
         epic: str,
         is_scalp: bool = False,
-        strategy: str = 'DEFAULT',
+        strategy: str = DEFAULT_STRATEGY,
     ) -> Dict:
-        """Return the trailing config dict for (strategy, epic, is_scalp).
+        """Resolve trailing config for (strategy, epic, is_scalp).
 
-        Lookup chain:
+        Falls back through:
             (strategy, epic) → (strategy, DEFAULT) → (DEFAULT, epic) → (DEFAULT, DEFAULT)
-        Returns {} if nothing matches.
+        Returns the first non-empty match with None values stripped so the
+        caller's dict-merge falls back to file/defaults for missing fields.
         """
         self._ensure_cache()
-        strategy = (strategy or 'DEFAULT').upper()
-        # Layer priority lowest-first so strategy/pair values override DEFAULT.
+        strategy = (strategy or DEFAULT_STRATEGY).upper()
+        # Layer priority lowest-first so strategy/pair-specific values override.
+        # DEFAULT/DEFAULT → DEFAULT/epic → strategy/DEFAULT → strategy/epic.
         layers = [
-            ('DEFAULT', 'DEFAULT', is_scalp),
-            ('DEFAULT', epic, is_scalp),
+            (DEFAULT_STRATEGY, 'DEFAULT', is_scalp),
+            (DEFAULT_STRATEGY, epic, is_scalp),
             (strategy, 'DEFAULT', is_scalp),
             (strategy, epic, is_scalp),
         ]
@@ -176,19 +156,15 @@ class TrailingConfigService:
         return merged
 
     def invalidate(self) -> None:
-        """Force a reload on the next call (used after UI saves)."""
         with self._lock:
             self._cache_loaded_at = None
 
-
-# -------- Module-level singleton ----------------------------------------------
 
 _singleton: Optional[TrailingConfigService] = None
 _singleton_lock = RLock()
 
 
 def get_trailing_config_service() -> TrailingConfigService:
-    """Return the per-process TrailingConfigService singleton."""
     global _singleton
     with _singleton_lock:
         if _singleton is None:

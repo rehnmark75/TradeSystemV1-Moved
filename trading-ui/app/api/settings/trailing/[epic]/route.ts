@@ -20,6 +20,20 @@ const CONFIG_FIELDS = [
   "partial_close_size",
 ] as const;
 
+const ALLOWED_STRATEGIES = new Set([
+  "DEFAULT",
+  "SMC_SIMPLE",
+  "XAU_GOLD",
+  "RANGE_FADE",
+  "MEAN_REVERSION",
+  "RANGE_STRUCTURE",
+]);
+
+function normalizeStrategy(s: string | null | undefined): string {
+  const u = (s ?? "DEFAULT").toUpperCase();
+  return ALLOWED_STRATEGIES.has(u) ? u : "DEFAULT";
+}
+
 function normalizeTimestamp(value: unknown) {
   if (!value) return "";
   const date = value instanceof Date ? value : new Date(String(value));
@@ -34,13 +48,14 @@ export async function GET(
   const { searchParams } = new URL(request.url);
   const configSet = searchParams.get("config_set") ?? "demo";
   const isScalp = searchParams.get("is_scalp") === "true";
+  const strategyName = normalizeStrategy(searchParams.get("strategy"));
 
   try {
     const result = await strategyConfigPool.query(
       `SELECT * FROM trailing_pair_config
-        WHERE config_set = $1 AND epic = $2 AND is_scalp = $3
+        WHERE config_set = $1 AND epic = $2 AND is_scalp = $3 AND strategy = $4
         LIMIT 1`,
-      [configSet, params.epic, isScalp]
+      [configSet, params.epic, isScalp, strategyName]
     );
     if (!result.rows[0]) {
       return NextResponse.json({ error: "Row not found" }, { status: 404 });
@@ -71,6 +86,7 @@ export async function PUT(
     updated_at,
     config_set,
     is_scalp,
+    strategy,
   } = body as {
     updates?: Record<string, unknown>;
     updated_by?: string;
@@ -78,10 +94,12 @@ export async function PUT(
     updated_at?: string;
     config_set?: string;
     is_scalp?: boolean;
+    strategy?: string;
   };
 
   const configSet = config_set ?? "demo";
   const scalp = Boolean(is_scalp);
+  const strategyName = normalizeStrategy(strategy);
 
   if (!updates || typeof updates !== "object") {
     return NextResponse.json({ error: "Missing updates payload" }, { status: 400 });
@@ -113,10 +131,10 @@ export async function PUT(
     // this SELECT and the UPDATE below. This is the real concurrency guard.
     const currentResult = await client.query(
       `SELECT * FROM trailing_pair_config
-        WHERE config_set = $1 AND epic = $2 AND is_scalp = $3
+        WHERE config_set = $1 AND epic = $2 AND is_scalp = $3 AND strategy = $4
         LIMIT 1
         FOR UPDATE`,
-      [configSet, params.epic, scalp]
+      [configSet, params.epic, scalp, strategyName]
     );
     const current = currentResult.rows[0];
     if (!current) {
@@ -215,6 +233,7 @@ export async function DELETE(
   const change_reason = body?.change_reason;
   const configSet = body?.config_set ?? "demo";
   const scalp = Boolean(body?.is_scalp);
+  const strategyName = normalizeStrategy(body?.strategy);
 
   if (!updated_by || !change_reason) {
     return NextResponse.json(
@@ -228,9 +247,9 @@ export async function DELETE(
     await client.query("BEGIN");
     const currentResult = await client.query(
       `SELECT * FROM trailing_pair_config
-        WHERE config_set = $1 AND epic = $2 AND is_scalp = $3
+        WHERE config_set = $1 AND epic = $2 AND is_scalp = $3 AND strategy = $4
         LIMIT 1`,
-      [configSet, params.epic, scalp]
+      [configSet, params.epic, scalp, strategyName]
     );
     const current = currentResult.rows[0];
     if (!current) {

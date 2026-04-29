@@ -105,6 +105,7 @@ class TrailingStopSimulator:
                  breakeven_buffer_pips: float = 5.0,  # 🔧 NEW: Buffer above entry when moving to breakeven
                  atr_pips: float = None,  # 🆕 v3.2.0: ATR value for adaptive trailing
                  use_atr_trailing: bool = False,  # 🆕 v3.2.0: Enable ATR-adaptive trailing mode
+                 strategy: str = 'DEFAULT',  # 🆕 Apr 2026: per-strategy DB overlay
                  logger: Optional[logging.Logger] = None):
         """
         Initialize Progressive 3-Stage trailing stop simulator with MFE Protection
@@ -137,6 +138,8 @@ class TrailingStopSimulator:
         # Store ATR-adaptive mode settings
         self.atr_pips = atr_pips
         self.use_atr_trailing = use_atr_trailing or (atr_pips is not None and atr_pips > 0)
+        # Strategy name routes per-strategy DB trailing overrides.
+        self._strategy = (strategy or 'DEFAULT').upper()
 
         # Handle backward compatibility: prefer break_even_trigger, fallback to breakeven_trigger
         # 🔧 CRITICAL FIX: Changed default from 12.0 to 1.5R (1.5 * initial_stop_pips)
@@ -166,7 +169,35 @@ class TrailingStopSimulator:
                                   f"S2={pair_config.get('stage2_trigger_points')}→{pair_config.get('stage2_lock_points')}, "
                                   f"S3={pair_config.get('stage3_trigger_points')}")
                 else:
-                    pair_config = PAIR_TRAILING_CONFIGS.get(epic, {})
+                    pair_config = dict(PAIR_TRAILING_CONFIGS.get(epic, {}))
+
+                # 🆕 DB overlay (single source of truth = strategy_config.trailing_pair_config).
+                # File values stay as fallback for keys not present in DB (e.g. MFE protection).
+                try:
+                    from forex_scanner.services.trailing_config_service import (
+                        get_trailing_config_service,
+                    )
+                except ImportError:
+                    from services.trailing_config_service import (  # type: ignore
+                        get_trailing_config_service,
+                    )
+                try:
+                    svc = get_trailing_config_service()
+                    is_scalp = bool(getattr(self, '_is_scalp', False))
+                    db_cfg = svc.get_config(epic, is_scalp=is_scalp, strategy=self._strategy)
+                    if db_cfg:
+                        pair_config = {**pair_config, **db_cfg}
+                        if logger:
+                            logger.debug(
+                                f"🗄️ DB-overlay trailing config for {epic} "
+                                f"(strategy={self._strategy}, is_scalp={is_scalp}, set={svc.config_set}): "
+                                f"S1={db_cfg.get('stage1_trigger_points')}→"
+                                f"{db_cfg.get('stage1_lock_points')}, "
+                                f"BE={db_cfg.get('break_even_trigger_points')}"
+                            )
+                except Exception as _db_e:
+                    if logger:
+                        logger.debug(f"DB trailing overlay skipped for {epic}: {_db_e}")
 
                 if pair_config:
                     self.break_even_trigger = pair_config.get('break_even_trigger_points', be_trigger)
@@ -1186,6 +1217,7 @@ def create_trailing_stop_simulator(epic: str = None,
                                    config: Optional[Dict[str, Any]] = None,
                                    atr_pips: float = None,
                                    use_atr_trailing: bool = False,
+                                   strategy: str = 'DEFAULT',
                                    logger: Optional[logging.Logger] = None) -> TrailingStopSimulator:
     """
     Factory function to create TrailingStopSimulator with Progressive 3-Stage system
@@ -1217,6 +1249,7 @@ def create_trailing_stop_simulator(epic: str = None,
             use_atr=config.get('use_atr', False),
             atr_pips=config.get('atr_pips', atr_pips),
             use_atr_trailing=config.get('use_atr_trailing', use_atr_trailing),
+            strategy=strategy,
             logger=logger
         )
     else:
@@ -1225,5 +1258,6 @@ def create_trailing_stop_simulator(epic: str = None,
             epic=epic,
             atr_pips=atr_pips,
             use_atr_trailing=use_atr_trailing,
+            strategy=strategy,
             logger=logger
         )

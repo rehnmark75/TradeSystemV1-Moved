@@ -4,7 +4,9 @@ import { useMemo, useState } from "react";
 import { useEnvironment } from "../../../lib/environment";
 import {
   useTrailingConfig,
+  TRAILING_STRATEGIES,
   type TrailingConfigRow,
+  type TrailingStrategy,
 } from "../../../hooks/settings/useTrailingConfig";
 
 type NumericField =
@@ -108,7 +110,12 @@ const formatNumber = (value: number | null | undefined) =>
 export default function TrailingSettingsPage() {
   const { environment } = useEnvironment();
   const [isScalp, setIsScalp] = useState(false);
-  const { rows, loading, error, saveRow, reload } = useTrailingConfig(environment, isScalp);
+  const [strategy, setStrategy] = useState<TrailingStrategy>("DEFAULT");
+  const { rows, loading, error, saveRow, reload } = useTrailingConfig(
+    environment,
+    isScalp,
+    strategy
+  );
 
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   const [saveState, setSaveState] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
@@ -117,7 +124,7 @@ export default function TrailingSettingsPage() {
   const [stageFilter, setStageFilter] = useState<StageFilter>("all");
   const [showChangedOnly, setShowChangedOnly] = useState(false);
 
-  const rowKey = (r: TrailingConfigRow) => `${r.epic}::${r.is_scalp}`;
+  const rowKey = (r: TrailingConfigRow) => `${r.strategy}::${r.epic}::${r.is_scalp}`;
 
   const onEdit = (row: TrailingConfigRow, field: AnyField, raw: string | boolean) => {
     const key = rowKey(row);
@@ -258,6 +265,20 @@ export default function TrailingSettingsPage() {
             Scalp
           </button>
         </div>
+
+        <label className="trailing-search" style={{ minWidth: 200 }}>
+          <span>Strategy</span>
+          <select
+            value={strategy}
+            onChange={(event) => setStrategy(event.target.value as TrailingStrategy)}
+          >
+            {TRAILING_STRATEGIES.map((s) => (
+              <option key={s} value={s}>
+                {s}
+              </option>
+            ))}
+          </select>
+        </label>
 
         <label className="trailing-search">
           <span>Search epic</span>
