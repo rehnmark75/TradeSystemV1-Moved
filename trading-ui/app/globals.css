@@ -5480,7 +5480,7 @@ table {
 .trailing-hero-stats,
 .trailing-insight-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
   gap: 10px;
 }
 
@@ -5564,7 +5564,8 @@ table {
   flex: 1;
 }
 
-.trailing-search input {
+.trailing-search input,
+.trailing-search select {
   width: 100%;
   min-height: 46px;
   border: 1px solid var(--trailing-line);
@@ -5702,8 +5703,8 @@ table {
 }
 
 .trailing-action-head {
-  width: 98px;
-  min-width: 98px;
+  width: 150px;
+  min-width: 150px;
   padding: 0 8px;
 }
 
@@ -5723,6 +5724,16 @@ table {
 .trailing-config-table tbody tr.default-row,
 .trailing-config-table tbody tr.default-row .trailing-epic-cell {
   background: rgba(32, 44, 38, 0.98);
+}
+
+.trailing-config-table tbody tr.inherited-row,
+.trailing-config-table tbody tr.inherited-row .trailing-epic-cell {
+  background: rgba(12, 23, 39, 0.98);
+}
+
+.trailing-config-table tbody tr.override-row,
+.trailing-config-table tbody tr.override-row .trailing-epic-cell {
+  background: rgba(13, 32, 49, 0.98);
 }
 
 .trailing-config-table tbody tr.changed-row,
@@ -5757,9 +5768,13 @@ table {
   background: rgba(50, 35, 12, 0.88);
 }
 
-.trailing-bool-cell,
+.trailing-bool-cell {
+  text-align: center;
+}
+
 .trailing-save-cell {
   text-align: center;
+  min-width: 150px;
 }
 
 .trailing-mini-toggle {
@@ -5807,6 +5822,7 @@ table {
   border: 1px solid var(--trailing-line);
   background: rgba(126, 184, 239, 0.1);
   color: var(--ink);
+  margin: 2px;
 }
 
 .trailing-save-cell button:disabled {
@@ -5817,6 +5833,38 @@ table {
 .changed-row .trailing-save-cell button:not(:disabled) {
   border-color: rgba(240, 180, 95, 0.75);
   background: rgba(240, 180, 95, 0.16);
+}
+
+.trailing-save-cell .trailing-reset-button {
+  color: #cde9ff;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.trailing-state-badge {
+  display: inline-flex;
+  align-items: center;
+  min-height: 20px;
+  margin-top: 6px;
+  padding: 0 7px;
+  border: 1px solid var(--trailing-line);
+  border-radius: 999px;
+  color: var(--muted);
+  font-size: 0.62rem;
+  font-style: normal;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.trailing-state-badge.override {
+  border-color: rgba(126, 184, 239, 0.52);
+  color: #cde9ff;
+  background: rgba(126, 184, 239, 0.12);
+}
+
+.trailing-state-badge.inherited {
+  color: var(--muted-2);
+  background: rgba(255, 255, 255, 0.025);
 }
 
 .trailing-save-error {

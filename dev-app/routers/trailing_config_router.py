@@ -215,6 +215,13 @@ def upsert(payload: TrailingConfigUpsert):
     return {"id": row_id, "ok": True}
 
 
+@router.post("/invalidate-cache")
+def invalidate_cache():
+    """Invalidate this process' trailing config cache after an external write."""
+    _invalidate_cache()
+    return {"ok": True}
+
+
 @router.delete("/{row_id}")
 def delete(row_id: int):
     with _conn() as c, c.cursor() as cur:

@@ -29,6 +29,27 @@ const ALLOWED_STRATEGIES = new Set([
   "RANGE_STRUCTURE",
 ]);
 
+async function invalidateTrailingCache(configSet: string) {
+  const baseUrl =
+    configSet === "live"
+      ? process.env.FASTAPI_LIVE_URL || "http://fastapi-live:8000"
+      : process.env.FASTAPI_DEV_URL || "http://fastapi-dev:8000";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    await fetch(`${baseUrl}/api/trailing-config/invalidate-cache`, {
+      method: "POST",
+      headers: { "x-apim-gateway": "verified" },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    console.warn("Failed to invalidate trailing config cache", error);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizeStrategy(s: string | null | undefined): string {
   const u = (s ?? "DEFAULT").toUpperCase();
   return ALLOWED_STRATEGIES.has(u) ? u : "DEFAULT";
@@ -138,8 +159,27 @@ export async function PUT(
     );
     const current = currentResult.rows[0];
     if (!current) {
-      await client.query("ROLLBACK");
-      return NextResponse.json({ error: "Row not found" }, { status: 404 });
+      // No strategy-specific row yet — insert one (the editor was showing the
+      // DEFAULT row as an inherited template). Audit it as an UPSERT.
+      const insertCols = ["strategy", "config_set", "epic", "is_scalp", ...keys, "updated_by", "change_reason"];
+      const insertVals: unknown[] = [strategyName, configSet, params.epic, scalp];
+      keys.forEach((k) => insertVals.push(updates[k]));
+      insertVals.push(updated_by, change_reason);
+      const placeholders = insertCols.map((_, i) => `$${i + 1}`).join(", ");
+      const inserted = await client.query(
+        `INSERT INTO trailing_pair_config (${insertCols.join(", ")})
+         VALUES (${placeholders}) RETURNING *`,
+        insertVals
+      );
+      await client.query(
+        `INSERT INTO trailing_config_audit
+           (config_id, change_type, changed_by, change_reason, previous_values, new_values)
+         VALUES ($1, 'UPSERT', $2, $3, NULL, $4)`,
+        [inserted.rows[0].id, updated_by, change_reason, JSON.stringify(updates)]
+      );
+      await client.query("COMMIT");
+      await invalidateTrailingCache(configSet);
+      return NextResponse.json(inserted.rows[0]);
     }
 
     // Detect stale client state: compare normalized ISO strings at ms
@@ -211,6 +251,7 @@ export async function PUT(
     );
 
     await client.query("COMMIT");
+    await invalidateTrailingCache(configSet);
     return NextResponse.json(updateResult.rows[0]);
   } catch (error) {
     await client.query("ROLLBACK");
@@ -234,6 +275,13 @@ export async function DELETE(
   const configSet = body?.config_set ?? "demo";
   const scalp = Boolean(body?.is_scalp);
   const strategyName = normalizeStrategy(body?.strategy);
+
+  if (strategyName === "DEFAULT") {
+    return NextResponse.json(
+      { error: "DEFAULT trailing rows cannot be reset" },
+      { status: 400 }
+    );
+  }
 
   if (!updated_by || !change_reason) {
     return NextResponse.json(
@@ -266,6 +314,7 @@ export async function DELETE(
       [current.id, updated_by, change_reason, JSON.stringify(current)]
     );
     await client.query("COMMIT");
+    await invalidateTrailingCache(configSet);
     return NextResponse.json({ success: true });
   } catch (error) {
     await client.query("ROLLBACK");

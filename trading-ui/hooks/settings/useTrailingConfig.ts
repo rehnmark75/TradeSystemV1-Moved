@@ -13,12 +13,14 @@ export const TRAILING_STRATEGIES = [
 export type TrailingStrategy = (typeof TRAILING_STRATEGIES)[number];
 
 export interface TrailingConfigRow {
-  id: number;
+  id: number | null;
   strategy: TrailingStrategy;
   config_set: string;
   epic: string;
   is_scalp: boolean;
   is_active: boolean;
+  inherited?: boolean;
+  override_field_count?: number;
   early_breakeven_trigger_points: number | null;
   early_breakeven_buffer_points: number | null;
   stage1_trigger_points: number | null;
@@ -96,13 +98,35 @@ export function useTrailingConfig(
     if (!response.ok) {
       throw new Error(payload.error ?? payload.message ?? "Failed to save");
     }
-    setRows((prev) =>
-      prev.map((r) =>
-        r.epic === epic && r.is_scalp === isScalp && r.strategy === strategy ? payload : r
-      )
-    );
+    await reload();
     return payload as TrailingConfigRow;
   };
 
-  return { rows, loading, error, reload, saveRow };
+  const resetOverride = async (
+    epic: string,
+    meta: { updatedBy: string; changeReason: string }
+  ) => {
+    const response = await fetch(
+      apiUrl(`/api/settings/trailing/${encodeURIComponent(epic)}`),
+      {
+        method: "DELETE",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          strategy,
+          updated_by: meta.updatedBy,
+          change_reason: meta.changeReason,
+          config_set: configSet,
+          is_scalp: isScalp,
+        }),
+      }
+    );
+    const payload = await response.json();
+    if (!response.ok) {
+      throw new Error(payload.error ?? payload.message ?? "Failed to reset override");
+    }
+    await reload();
+    return payload;
+  };
+
+  return { rows, loading, error, reload, saveRow, resetOverride };
 }

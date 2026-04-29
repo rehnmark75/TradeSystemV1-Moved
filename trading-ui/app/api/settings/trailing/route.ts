@@ -29,9 +29,34 @@ const ALLOWED_STRATEGIES = new Set([
   "RANGE_STRUCTURE",
 ]);
 
+async function invalidateTrailingCache(configSet: string) {
+  const baseUrl =
+    configSet === "live"
+      ? process.env.FASTAPI_LIVE_URL || "http://fastapi-live:8000"
+      : process.env.FASTAPI_DEV_URL || "http://fastapi-dev:8000";
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 1500);
+  try {
+    await fetch(`${baseUrl}/api/trailing-config/invalidate-cache`, {
+      method: "POST",
+      headers: { "x-apim-gateway": "verified" },
+      signal: controller.signal,
+    });
+  } catch (error) {
+    console.warn("Failed to invalidate trailing config cache", error);
+  } finally {
+    clearTimeout(timeout);
+  }
+}
+
 function normalizeStrategy(s: string | null | undefined): string {
   const u = (s ?? "DEFAULT").toUpperCase();
   return ALLOWED_STRATEGIES.has(u) ? u : "DEFAULT";
+}
+
+function isOverrideValue(value: unknown) {
+  return value !== null && value !== undefined;
 }
 
 export async function GET(request: Request) {
@@ -55,15 +80,25 @@ export async function GET(request: Request) {
       "updated_at",
     ].join(", ");
 
-    const whereClauses: string[] = ["config_set = $1", "is_active = TRUE"];
-    const params: unknown[] = [configSet];
+    const requestedStrategy = strategyParam
+      ? normalizeStrategy(strategyParam)
+      : "DEFAULT";
+
+    // Fetch DEFAULT rows + the requested strategy's own rows; layer strategy
+    // over DEFAULT per (epic, is_scalp) so non-DEFAULT views render the same
+    // pairs as DEFAULT, with strategy-specific overrides applied. Rows that
+    // come purely from DEFAULT are marked `inherited: true` so the editor
+    // can present them as overridable templates.
+    const wantedStrategies = ["DEFAULT", requestedStrategy];
+    const whereClauses: string[] = [
+      "config_set = $1",
+      "is_active = TRUE",
+      "strategy = ANY($2::text[])",
+    ];
+    const params: unknown[] = [configSet, wantedStrategies];
     if (isScalpParam !== null) {
       whereClauses.push(`is_scalp = $${params.length + 1}`);
       params.push(isScalp);
-    }
-    if (strategyParam) {
-      whereClauses.push(`strategy = $${params.length + 1}`);
-      params.push(normalizeStrategy(strategyParam));
     }
 
     const result = await strategyConfigPool.query(
@@ -71,13 +106,69 @@ export async function GET(request: Request) {
         SELECT ${cols}
         FROM trailing_pair_config
         WHERE ${whereClauses.join(" AND ")}
-        ORDER BY strategy = 'DEFAULT' DESC, strategy ASC,
-                 epic = 'DEFAULT' DESC, is_scalp ASC, epic ASC
+        ORDER BY epic = 'DEFAULT' DESC, is_scalp ASC, epic ASC
       `,
       params
     );
+
+    type Row = Record<string, unknown> & {
+      strategy: string;
+      epic: string;
+      is_scalp: boolean;
+    };
+    const allRows = (result.rows ?? []) as Row[];
+    if (requestedStrategy === "DEFAULT") {
+      return NextResponse.json({
+        rows: allRows,
+        strategies: Array.from(ALLOWED_STRATEGIES).sort(),
+      });
+    }
+
+    // Group by (epic, is_scalp). For strategy rows, return the effective
+    // runtime view: DEFAULT fields layered under non-null strategy overrides.
+    const byKey = new Map<string, { def?: Row; spec?: Row }>();
+    for (const r of allRows) {
+      const key = `${r.epic}::${r.is_scalp}`;
+      const slot = byKey.get(key) ?? {};
+      if (r.strategy === requestedStrategy) slot.spec = r;
+      else if (r.strategy === "DEFAULT") slot.def = r;
+      byKey.set(key, slot);
+    }
+    const merged: Row[] = [];
+    for (const { def, spec } of byKey.values()) {
+      if (spec) {
+        const effective: Row = {
+          ...(def ?? {}),
+          ...spec,
+          inherited: false,
+          override_field_count: CONFIG_FIELDS.filter((field) =>
+            isOverrideValue(spec[field])
+          ).length,
+        };
+        for (const field of CONFIG_FIELDS) {
+          effective[field] = isOverrideValue(spec[field])
+            ? spec[field]
+            : def?.[field] ?? null;
+        }
+        merged.push(effective);
+      } else if (def) {
+        merged.push({
+          ...def,
+          id: null,
+          strategy: requestedStrategy,
+          inherited: true,
+          override_field_count: 0,
+        });
+      }
+    }
+    merged.sort((a, b) => {
+      if (a.epic === "DEFAULT" && b.epic !== "DEFAULT") return -1;
+      if (b.epic === "DEFAULT" && a.epic !== "DEFAULT") return 1;
+      if (a.is_scalp !== b.is_scalp) return a.is_scalp ? 1 : -1;
+      return a.epic.localeCompare(b.epic);
+    });
     return NextResponse.json({
-      rows: result.rows ?? [],
+      rows: merged,
       strategies: Array.from(ALLOWED_STRATEGIES).sort(),
     });
   } catch (error) {
@@ -180,6 +271,7 @@ export async function POST(request: Request) {
     );
 
     await client.query("COMMIT");
+    await invalidateTrailingCache(configSet);
     return NextResponse.json(result.rows[0]);
   } catch (error) {
     await client.query("ROLLBACK");

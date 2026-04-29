@@ -111,7 +111,7 @@ export default function TrailingSettingsPage() {
   const { environment } = useEnvironment();
   const [isScalp, setIsScalp] = useState(false);
   const [strategy, setStrategy] = useState<TrailingStrategy>("DEFAULT");
-  const { rows, loading, error, saveRow, reload } = useTrailingConfig(
+  const { rows, loading, error, saveRow, resetOverride, reload } = useTrailingConfig(
     environment,
     isScalp,
     strategy
@@ -119,6 +119,7 @@ export default function TrailingSettingsPage() {
 
   const [drafts, setDrafts] = useState<Record<string, Record<string, unknown>>>({});
   const [saveState, setSaveState] = useState<Record<string, "idle" | "saving" | "saved" | "error">>({});
+  const [resetState, setResetState] = useState<Record<string, "idle" | "resetting" | "reset" | "error">>({});
   const [saveError, setSaveError] = useState<Record<string, string>>({});
   const [query, setQuery] = useState("");
   const [stageFilter, setStageFilter] = useState<StageFilter>("all");
@@ -172,6 +173,36 @@ export default function TrailingSettingsPage() {
     }
   };
 
+  const onResetOverride = async (row: TrailingConfigRow) => {
+    if (strategy === "DEFAULT" || row.inherited || row.id === null) return;
+    const key = rowKey(row);
+    const ok = window.confirm(`Reset ${compactEpic(row.epic)} ${strategy} trailing override?`);
+    if (!ok) return;
+
+    setResetState((prev) => ({ ...prev, [key]: "resetting" }));
+    setSaveError((prev) => ({ ...prev, [key]: "" }));
+
+    try {
+      await resetOverride(row.epic, {
+        updatedBy: "admin",
+        changeReason: `Reset trailing override via UI (${environment})`,
+      });
+      setDrafts((prev) => {
+        const next = { ...prev };
+        delete next[key];
+        return next;
+      });
+      setResetState((prev) => ({ ...prev, [key]: "reset" }));
+      setTimeout(() => setResetState((p) => ({ ...p, [key]: "idle" })), 1500);
+    } catch (err) {
+      setResetState((prev) => ({ ...prev, [key]: "error" }));
+      setSaveError((prev) => ({
+        ...prev,
+        [key]: err instanceof Error ? err.message : "Reset failed",
+      }));
+    }
+  };
+
   const hasChanges = (row: TrailingConfigRow) => {
     const d = drafts[rowKey(row)];
     return Boolean(d && Object.keys(d).length > 0);
@@ -220,6 +251,8 @@ export default function TrailingSettingsPage() {
   const profileLabel = isScalp ? "Scalp" : "Standard";
   const defaultRow = rows.find((row) => row.epic === "DEFAULT");
   const partialsEnabled = rows.filter((row) => row.enable_partial_close).length;
+  const inheritedCount = rows.filter((row) => row.inherited).length;
+  const overrideCount = rows.filter((row) => !row.inherited && row.strategy !== "DEFAULT").length;
 
   return (
     <div className="settings-panel trailing-page">
@@ -229,7 +262,7 @@ export default function TrailingSettingsPage() {
           <h1>Trailing Stop Settings</h1>
           <p>
             Per-pair trailing stop stages. Demo and live are independent; this view is editing{" "}
-            <strong>{environment.toUpperCase()}</strong>.
+            <strong>{environment.toUpperCase()}</strong>. Strategy rows inherit DEFAULT values until overridden.
           </p>
         </div>
         <div className="trailing-hero-stats" aria-label="Trailing config summary">
@@ -238,8 +271,8 @@ export default function TrailingSettingsPage() {
             <strong>{profileLabel}</strong>
           </div>
           <div>
-            <span>Rows</span>
-            <strong>{rows.length}</strong>
+            <span>Overrides</span>
+            <strong>{strategy === "DEFAULT" ? "Base" : overrideCount}</strong>
           </div>
           <div>
             <span>Drafts</span>
@@ -338,6 +371,10 @@ export default function TrailingSettingsPage() {
             <span>Visible pairs</span>
             <strong>{filteredRows.length}</strong>
           </div>
+          <div>
+            <span>Inherited rows</span>
+            <strong>{strategy === "DEFAULT" ? "—" : inheritedCount}</strong>
+          </div>
         </div>
       ) : null}
 
@@ -377,15 +414,23 @@ export default function TrailingSettingsPage() {
               {filteredRows.map((row) => {
                 const key = rowKey(row);
                 const state = saveState[key] ?? "idle";
+                const reset = resetState[key] ?? "idle";
                 const rowHasChanges = hasChanges(row);
+                const isInherited = Boolean(row.inherited);
+                const canReset = strategy !== "DEFAULT" && !isInherited && row.id !== null;
                 return (
                   <tr
                     key={key}
-                    className={`${row.epic === "DEFAULT" ? "default-row" : ""} ${rowHasChanges ? "changed-row" : ""}`}
+                    className={`${row.epic === "DEFAULT" ? "default-row" : ""} ${isInherited ? "inherited-row" : ""} ${canReset ? "override-row" : ""} ${rowHasChanges ? "changed-row" : ""}`}
                   >
                     <td className="trailing-epic-cell">
                       <strong>{compactEpic(row.epic)}</strong>
                       <span>{row.epic}</span>
+                      {strategy !== "DEFAULT" ? (
+                        <em className={isInherited ? "trailing-state-badge inherited" : "trailing-state-badge override"}>
+                          {isInherited ? "Inherited" : `${row.override_field_count ?? 0} overrides`}
+                        </em>
+                      ) : null}
                     </td>
                     {numericVisibleFields.map((f) => {
                       const val = getCell(row, f);
@@ -426,7 +471,20 @@ export default function TrailingSettingsPage() {
                       >
                         {state === "saving" ? "Saving" : state === "saved" ? "Saved" : rowHasChanges ? "Save" : "Clean"}
                       </button>
+                      {strategy !== "DEFAULT" ? (
+                        <button
+                          className="trailing-reset-button"
+                          type="button"
+                          disabled={!canReset || reset === "resetting"}
+                          onClick={() => onResetOverride(row)}
+                        >
+                          {!canReset ? "Inherited" : reset === "resetting" ? "Resetting" : "Inherit"}
+                        </button>
+                      ) : null}
                       {state === "error" && saveError[key] ? (
+                        <div className="trailing-save-error">{saveError[key]}</div>
+                      ) : null}
+                      {reset === "error" && saveError[key] ? (
                         <div className="trailing-save-error">{saveError[key]}</div>
                       ) : null}
                     </td>
