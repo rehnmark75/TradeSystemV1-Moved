@@ -1023,6 +1023,9 @@ a {
   gap: 10px;
   min-width: 0;
   padding: 10px 12px;
+  padding-top: max(10px, env(safe-area-inset-top));
+  padding-left: max(12px, env(safe-area-inset-left));
+  padding-right: max(12px, env(safe-area-inset-right));
   border-bottom: 1px solid var(--line);
   background:
     linear-gradient(180deg, rgba(12, 24, 41, 0.98), rgba(7, 17, 31, 0.98)),
