@@ -704,7 +704,12 @@ async def ig_place_order(
 
                     # Scalp trade detection (limit orders)
                     # VSL system disabled - scalp trades now use progressive trailing with scalp configs
-                    is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)
+                    # NOTE: sl_limit is in broker points. For FX, 1 point ≈ 1 pip, so <=8 catches scalps.
+                    # For non-FX (e.g. gold CFEGOLD where 1 point = $1 = 10 pips), the heuristic is
+                    # invalid — a normal 50-pip gold stop arrives as sl_limit=5 and would be misflagged.
+                    # Restrict the auto-detect to FX symbols (epic prefix CS.D.<6-letter pair>).
+                    _is_fx = isinstance(symbol, str) and symbol.startswith("CS.D.") and "GOLD" not in symbol.upper() and "SILVER" not in symbol.upper() and "OIL" not in symbol.upper()
+                    is_scalp = body.is_scalp_trade or (_is_fx and sl_limit and sl_limit <= 8)
 
                     # VSL DISABLED (Jan 2026): No longer calculating VSL fields
                     # Scalp trades now use regular trailing system with SCALP_TRAILING_CONFIGS
@@ -1026,7 +1031,9 @@ async def ig_place_order(
         try:
             # Check if this is a scalp trade (explicitly set or detected from tight SL)
             # VSL system disabled - scalp trades now use progressive trailing with scalp-specific configs
-            is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)  # <=8 pips = scalp trade
+            # See note above: heuristic is FX-only — gold/silver/oil use different point-to-pip ratios.
+            _is_fx = isinstance(symbol, str) and symbol.startswith("CS.D.") and "GOLD" not in symbol.upper() and "SILVER" not in symbol.upper() and "OIL" not in symbol.upper()
+            is_scalp = body.is_scalp_trade or (_is_fx and sl_limit and sl_limit <= 8)  # <=8 pts = scalp (FX only)
 
             # VSL DISABLED (Jan 2026): No longer calculating VSL fields
             # Scalp trades now use regular trailing system with SCALP_TRAILING_CONFIGS
