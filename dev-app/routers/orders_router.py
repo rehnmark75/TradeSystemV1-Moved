@@ -82,6 +82,22 @@ class TradeRequest(BaseModel):
     is_scalp_trade: Optional[bool] = False  # True if this is a scalp trade requiring VSL
     virtual_sl_pips: Optional[float] = None  # Custom VSL distance (defaults to config if not set)
 
+
+def resolve_order_size(symbol: str, requested_size: Optional[float]) -> float:
+    """
+    Resolve final order size with instrument-level caps.
+
+    The scanner sends a generic default size for all instruments. For configured
+    instruments like gold, EPIC_ORDER_SIZES is the execution cap and must not be
+    bypassed by that generic scanner default.
+    """
+    configured_size = EPIC_ORDER_SIZES.get(symbol)
+    if configured_size is None:
+        return requested_size or 1.0
+    if requested_size is None:
+        return configured_size
+    return min(float(requested_size), float(configured_size))
+
 # Simple in-memory cache for positions
 _cached_positions = {"data": None, "timestamp": 0}
 
@@ -665,6 +681,12 @@ async def ig_place_order(
                 ig_order_type = body.api_order_type or "STOP"
                 logger.info(f"   IG Order Type: {ig_order_type} (STOP=momentum, LIMIT=better price)")
 
+                order_size = resolve_order_size(symbol, body.size)
+                if body.size and order_size < body.size:
+                    logger.info(
+                        f"📏 [SIZE CAP] {symbol}: requested size {body.size} capped to {order_size}"
+                    )
+
                 result = await place_working_order(
                     auth_headers=trading_headers,
                     epic=symbol,
@@ -674,7 +696,7 @@ async def ig_place_order(
                     limit_distance=limit_distance,
                     expiry_minutes=body.limit_expiry_minutes,
                     currency_code=currency_code,
-                    size=body.size or 1.0,
+                    size=order_size,
                     order_type=ig_order_type
                 )
                 # For limit orders, we return early with a different response
@@ -845,7 +867,11 @@ async def ig_place_order(
         # =================================================================
         # MARKET ORDER: Original logic (unchanged)
         # =================================================================
-        order_size = body.size or EPIC_ORDER_SIZES.get(symbol, 1.0)
+        order_size = resolve_order_size(symbol, body.size)
+        if body.size and order_size < body.size:
+            logger.info(
+                f"📏 [SIZE CAP] {symbol}: requested size {body.size} capped to {order_size}"
+            )
         logger.info(f"📤 Placing MARKET order: {symbol} {direction} size={order_size} SL: {sl_limit}, TP: {limit_distance}")
 
         # FIXED: Catch broker duplicate position rejection and convert to HTTP 409
