@@ -3,8 +3,8 @@
 RANGE_FADE Config Service — DB-backed configuration with per-profile cache.
 
 Source of truth: `strategy_config` database
-    - eurusd_range_fade_global_config
-    - eurusd_range_fade_pair_overrides
+    - range_fade_global_config
+    - range_fade_pair_overrides
 
 Falls back to code defaults if the tables are not present yet, so backtests and
 tests keep working before the migration is applied.
@@ -46,7 +46,7 @@ def _normalize_strategy_name(name: Any) -> Any:
 
 
 @dataclass
-class EURUSDRangeFadeConfig:
+class RangeFadeConfig:
     strategy_name: str = "RANGE_FADE"
     profile_name: str = "5m"
     version: str = "0.3.0"
@@ -109,14 +109,20 @@ class EURUSDRangeFadeConfig:
     def get_pair_signal_cooldown_minutes(self, epic: str) -> int:
         return int(self._override(epic, "signal_cooldown_minutes", self.signal_cooldown_minutes))
 
+    def get_pair_fixed_stop_loss_pips(self, epic: str) -> float:
+        return float(self._override(epic, "fixed_stop_loss_pips", self.fixed_stop_loss_pips))
+
+    def get_pair_fixed_take_profit_pips(self, epic: str) -> float:
+        return float(self._override(epic, "fixed_take_profit_pips", self.fixed_take_profit_pips))
+
     def is_session_allowed(self, hour_utc: int) -> bool:
         return self.london_start_hour_utc <= hour_utc <= self.new_york_end_hour_utc
 
 
-def build_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
+def build_range_fade_config(profile: Optional[str] = None) -> RangeFadeConfig:
     normalized = str(profile or "5m").strip().lower()
     if normalized in {"5m", "fast", "default", "base"}:
-        return EURUSDRangeFadeConfig()
+        return RangeFadeConfig()
     raise ValueError(f"Unsupported range-fade profile: {profile} (only 5m is supported)")
 
 
@@ -136,8 +142,8 @@ def _coerce_value(current: Any, value: Any) -> Any:
     return value
 
 
-class EURUSDRangeFadeConfigService:
-    _instance: Optional["EURUSDRangeFadeConfigService"] = None
+class RangeFadeConfigService:
+    _instance: Optional["RangeFadeConfigService"] = None
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -151,7 +157,7 @@ class EURUSDRangeFadeConfigService:
         self._initialized = True
         self._lock = RLock()
         self._cache_ttl = timedelta(seconds=cache_ttl_seconds)
-        self._cached: Dict[str, EURUSDRangeFadeConfig] = {}
+        self._cached: Dict[str, RangeFadeConfig] = {}
         self._cache_ts: Dict[str, datetime] = {}
         self._db_url = os.getenv(
             "STRATEGY_CONFIG_DATABASE_URL",
@@ -160,13 +166,13 @@ class EURUSDRangeFadeConfigService:
         self._config_set = os.getenv("TRADING_CONFIG_SET", "demo")
 
     @classmethod
-    def get_instance(cls) -> "EURUSDRangeFadeConfigService":
+    def get_instance(cls) -> "RangeFadeConfigService":
         return cls()
 
     def _cache_key(self, profile: str) -> str:
         return f"{self._config_set}:{profile}"
 
-    def get_config(self, profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
+    def get_config(self, profile: Optional[str] = None) -> RangeFadeConfig:
         normalized = str(profile or "5m").strip().lower()
         key = self._cache_key(normalized)
         now = datetime.now()
@@ -179,7 +185,7 @@ class EURUSDRangeFadeConfigService:
             self._cache_ts[key] = now
             return copy.deepcopy(cfg)
 
-    def refresh(self, profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
+    def refresh(self, profile: Optional[str] = None) -> RangeFadeConfig:
         normalized = str(profile or "5m").strip().lower()
         key = self._cache_key(normalized)
         with self._lock:
@@ -187,7 +193,7 @@ class EURUSDRangeFadeConfigService:
             self._cache_ts.pop(key, None)
         return self.get_config(normalized)
 
-    def _load_from_database(self, profile: str) -> EURUSDRangeFadeConfig:
+    def _load_from_database(self, profile: str) -> RangeFadeConfig:
         config = build_range_fade_config(profile)
         try:
             conn = psycopg2.connect(self._db_url)
@@ -195,7 +201,7 @@ class EURUSDRangeFadeConfigService:
                 cur = conn.cursor(cursor_factory=psycopg2.extras.DictCursor)
                 cur.execute(
                     """
-                    SELECT * FROM eurusd_range_fade_global_config
+                    SELECT * FROM range_fade_global_config
                     WHERE is_active = TRUE AND profile_name = %s AND config_set = %s
                     ORDER BY id DESC
                     LIMIT 1
@@ -215,7 +221,7 @@ class EURUSDRangeFadeConfigService:
 
                 cur.execute(
                     """
-                    SELECT * FROM eurusd_range_fade_pair_overrides
+                    SELECT * FROM range_fade_pair_overrides
                     WHERE profile_name = %s AND config_set = %s
                     """,
                     (config.profile_name, self._config_set),
@@ -236,13 +242,18 @@ class EURUSDRangeFadeConfigService:
             return config
 
 
-def get_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
-    return EURUSDRangeFadeConfigService.get_instance().get_config(profile)
+def get_range_fade_config(profile: Optional[str] = None) -> RangeFadeConfig:
+    return RangeFadeConfigService.get_instance().get_config(profile)
 
 
-def build_eurusd_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
+def build_eurusd_range_fade_config(profile: Optional[str] = None) -> RangeFadeConfig:
     return build_range_fade_config(profile)
 
 
-def get_eurusd_range_fade_config(profile: Optional[str] = None) -> EURUSDRangeFadeConfig:
+def get_eurusd_range_fade_config(profile: Optional[str] = None) -> RangeFadeConfig:
     return get_range_fade_config(profile)
+
+
+# Back-compat aliases (deprecated — to be removed in a future release)
+EURUSDRangeFadeConfig = RangeFadeConfig
+EURUSDRangeFadeConfigService = RangeFadeConfigService

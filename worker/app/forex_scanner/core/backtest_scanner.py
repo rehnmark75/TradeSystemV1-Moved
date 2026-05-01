@@ -874,7 +874,7 @@ class BacktestScanner(IntelligentForexScanner):
                 'ICHIMOKU_CLOUD': 'detect_ichimoku_signals',
                 'MEAN_REVERSION': 'detect_mean_reversion_signals',
                 'MEANREV': 'detect_mean_reversion_signals',  # Fixed: Accept short form
-                'RANGE_FADE': 'detect_eurusd_range_fade_signals',
+                'RANGE_FADE': 'detect_range_fade_signals',
                 'RANGING_MARKET': 'detect_ranging_market_signals',
                 'RANGING': 'detect_ranging_market_signals',
                 'SCALPING': 'detect_scalping_signals',  # ADDED: Scalping strategy support
@@ -916,7 +916,7 @@ class BacktestScanner(IntelligentForexScanner):
                             strategy_timeframe = self.timeframe
 
                         # Strategies that support backtest timestamp for cooldown/session handling
-                        if method_name in ['detect_volume_profile_signals', 'detect_ranging_market_signals', 'detect_mean_reversion_signals', 'detect_eurusd_range_fade_signals']:
+                        if method_name in ['detect_volume_profile_signals', 'detect_ranging_market_signals', 'detect_mean_reversion_signals', 'detect_range_fade_signals']:
                             signals = method(epic, pair_name, self.spread_pips, strategy_timeframe, current_timestamp=timestamp)
                         else:
                             signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)

@@ -598,7 +598,7 @@ REASON: Analysis error - neutral assessment"""
         if strategy == 'MEAN_REVERSION':
             return self._build_mean_reversion_prompt(signal, has_chart)
         if strategy == 'RANGE_FADE':
-            return self._build_eurusd_range_fade_prompt(signal, has_chart)
+            return self._build_range_fade_prompt(signal, has_chart)
         return self._build_smc_prompt(signal, has_chart)
 
 
@@ -1484,7 +1484,7 @@ Be concise but thorough. Remember: you are evaluating an *exhaustion fade*, not 
             self.logger.error(f"Error building MEAN_REVERSION prompt: {e}")
             return self._build_fallback_prompt(signal, {})
 
-    def _build_eurusd_range_fade_prompt(self, signal: Dict, has_chart: bool = True) -> str:
+    def _build_range_fade_prompt(self, signal: Dict, has_chart: bool = True) -> str:
         """Vision prompt for EURUSD range-fade setups."""
         try:
             epic = signal.get('epic', 'Unknown')

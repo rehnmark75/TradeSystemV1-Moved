@@ -14,9 +14,10 @@ Adding a new strategy:
 from .base_strategy import BaseStrategy
 from .smc_simple_strategy import SMCSimpleStrategy, create_smc_simple_strategy
 from .range_fade_strategy import (
-    EURUSDRangeFadeStrategy,
+    RangeFadeStrategy,
+    EURUSDRangeFadeStrategy,  # back-compat alias
     create_range_fade_strategy,
-    create_eurusd_range_fade_strategy,
+    create_eurusd_range_fade_strategy,  # back-compat alias
 )
 from .range_structure_strategy import (
     RangeStructureStrategy,
@@ -36,9 +37,10 @@ __all__ = [
     # Active strategies
     'SMCSimpleStrategy',
     'create_smc_simple_strategy',
-    'EURUSDRangeFadeStrategy',
+    'RangeFadeStrategy',
+    'EURUSDRangeFadeStrategy',  # back-compat alias
     'create_range_fade_strategy',
-    'create_eurusd_range_fade_strategy',
+    'create_eurusd_range_fade_strategy',  # back-compat alias
     'RangeStructureStrategy',
     'create_range_structure_strategy',
 

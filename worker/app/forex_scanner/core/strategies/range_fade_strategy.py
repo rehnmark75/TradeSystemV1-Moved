@@ -27,14 +27,14 @@ import pandas as pd
 try:
     from ...services.range_fade_config_service import (
         EURUSD_EPIC,
-        EURUSDRangeFadeConfig,
+        RangeFadeConfig,
         build_range_fade_config,
         get_range_fade_config,
     )
 except ImportError:
     from forex_scanner.services.range_fade_config_service import (
         EURUSD_EPIC,
-        EURUSDRangeFadeConfig,
+        RangeFadeConfig,
         build_range_fade_config,
         get_range_fade_config,
     )
@@ -46,8 +46,8 @@ logger = logging.getLogger(__name__)
 
 
 def apply_config_overrides(
-    cfg: EURUSDRangeFadeConfig, overrides: Optional[Dict[str, Any]]
-) -> EURUSDRangeFadeConfig:
+    cfg: RangeFadeConfig, overrides: Optional[Dict[str, Any]]
+) -> RangeFadeConfig:
     """Apply backtest override values to the strategy config in place."""
     if not overrides:
         return cfg
@@ -73,7 +73,7 @@ def apply_config_overrides(
 
 
 @register_strategy("RANGE_FADE")
-class EURUSDRangeFadeStrategy(StrategyInterface):
+class RangeFadeStrategy(StrategyInterface):
     def __init__(self, config=None, logger=None, db_manager=None, config_override: dict = None):
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
@@ -230,19 +230,17 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
         confidence = round(cfg.min_confidence + score * (cfg.max_confidence - cfg.min_confidence), 3)
 
         pip_size = 0.01 if "JPY" in pair.upper() else 0.0001
-        sl_distance = cfg.fixed_stop_loss_pips * pip_size
-        tp_distance = cfg.fixed_take_profit_pips * pip_size
+        sl_pips = cfg.get_pair_fixed_stop_loss_pips(epic)
+        tp_pips = cfg.get_pair_fixed_take_profit_pips(epic)
+        sl_distance = sl_pips * pip_size
+        tp_distance = tp_pips * pip_size
         if direction == "SELL":
             stop_loss_price = latest_close + sl_distance
             take_profit_price = latest_close - tp_distance
         else:
             stop_loss_price = latest_close - sl_distance
             take_profit_price = latest_close + tp_distance
-        rr_ratio = (
-            cfg.fixed_take_profit_pips / cfg.fixed_stop_loss_pips
-            if cfg.fixed_stop_loss_pips
-            else 0.0
-        )
+        rr_ratio = (tp_pips / sl_pips) if sl_pips else 0.0
 
         signal = {
             "signal": direction,
@@ -253,10 +251,10 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
             "entry_price": latest_close,
             "stop_loss": round(stop_loss_price, 5),
             "take_profit": round(take_profit_price, 5),
-            "stop_loss_pips": cfg.fixed_stop_loss_pips,
-            "take_profit_pips": cfg.fixed_take_profit_pips,
-            "risk_pips": cfg.fixed_stop_loss_pips,
-            "reward_pips": cfg.fixed_take_profit_pips,
+            "stop_loss_pips": sl_pips,
+            "take_profit_pips": tp_pips,
+            "risk_pips": sl_pips,
+            "reward_pips": tp_pips,
             "risk_reward_ratio": round(rr_ratio, 4),
             "confidence": confidence,
             "confidence_score": confidence,
@@ -421,7 +419,7 @@ class EURUSDRangeFadeStrategy(StrategyInterface):
 
 
 def create_range_fade_strategy(config=None, logger=None, db_manager=None, config_override=None):
-    return EURUSDRangeFadeStrategy(
+    return RangeFadeStrategy(
         config=config,
         logger=logger,
         db_manager=db_manager,
@@ -436,3 +434,7 @@ def create_eurusd_range_fade_strategy(config=None, logger=None, db_manager=None,
         db_manager=db_manager,
         config_override=config_override,
     )
+
+
+# Back-compat alias (deprecated — to be removed in a future release)
+EURUSDRangeFadeStrategy = RangeFadeStrategy

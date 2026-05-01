@@ -309,7 +309,7 @@ _auto_register_xau_gold()
 
 
 # RANGE_FADE self-registers via @register_strategy decorator on
-# EURUSDRangeFadeStrategy. core/strategies/__init__.py imports the module,
+# RangeFadeStrategy. core/strategies/__init__.py imports the module,
 # which fires the decorator — no explicit auto-register call needed (and adding
 # one causes a circular import since it runs while range_fade_strategy is still
 # being loaded).

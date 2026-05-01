@@ -97,8 +97,8 @@ class SignalDetector:
         self.ranging_market_strategy = None
         self.volume_profile_strategy = None
         self.mean_reversion_strategy = None
-        self.eurusd_range_fade_strategy = None
-        self._eurusd_range_fade_profile = None
+        self.range_fade_strategy = None
+        self._range_fade_profile = None
         self.range_structure_strategy = None
 
         # FVG Retest strategy (v4.0.0) - dual-mode BOS + FVG entry
@@ -114,8 +114,8 @@ class SignalDetector:
         # RANGE_STRUCTURE runs concurrently (like MEAN_REVERSION) in monitor-only mode until its 30-day validation gate passes.
         self.range_structure_enabled = True
 
-        # RANGE_FADE runs concurrently (monitor-only) on EURUSD for now.
-        self.eurusd_range_fade_enabled = True
+        # RANGE_FADE runs concurrently (monitor-only by default).
+        self.range_fade_enabled = True
 
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
@@ -171,7 +171,7 @@ class SignalDetector:
             'RANGING': self._force_init_ranging_market,
             'MEAN_REVERSION': self._force_init_mean_reversion,
             'MR': self._force_init_mean_reversion,
-            'RANGE_FADE': self._force_init_eurusd_range_fade,
+            'RANGE_FADE': self._force_init_range_fade,
             'RANGE_STRUCTURE': self._force_init_range_structure,
             'RS': self._force_init_range_structure,
             'VOLUME_PROFILE': self._force_init_volume_profile,
@@ -218,11 +218,11 @@ class SignalDetector:
         except Exception as e:
             return False, f"Failed to force-init Mean Reversion: {e}"
 
-    def _force_init_eurusd_range_fade(self) -> Tuple[bool, str]:
+    def _force_init_range_fade(self) -> Tuple[bool, str]:
         """Force-initialize range-fade strategy for backtest (5m only)."""
         try:
-            self._eurusd_range_fade_profile = "5m"
-            self.eurusd_range_fade_strategy = None  # lazy-loaded on first use
+            self._range_fade_profile = "5m"
+            self.range_fade_strategy = None  # lazy-loaded on first use
             self.logger.info("🔧 Force-initialized Range Fade strategy (lazy-load, 5m)")
             return True, "Range Fade strategy force-initialized"
         except Exception as e:
@@ -833,7 +833,7 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
                     individual_results['range_structure'] = None
 
-            if self.eurusd_range_fade_enabled and epic in (
+            if self.range_fade_enabled and epic in (
                 'CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP',
                 'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
                 'CS.D.AUDUSD.MINI.IP', 'CS.D.USDCHF.MINI.IP',
@@ -842,12 +842,12 @@ class SignalDetector:
             ):
                 try:
                     self.logger.debug(f"🔍 [RANGE_FADE] Starting detection for {epic}")
-                    erf_signal = self.detect_eurusd_range_fade_signals(
+                    erf_signal = self.detect_range_fade_signals(
                         epic, pair, spread_pips, timeframe,
                         current_timestamp=None,
                         routing_context=routing_result,
                     )
-                    individual_results['eurusd_range_fade'] = erf_signal
+                    individual_results['range_fade'] = erf_signal
                     if erf_signal:
                         all_signals.append(erf_signal)
                         self.logger.info(
@@ -858,7 +858,7 @@ class SignalDetector:
                         self.logger.debug(f"📊 [RANGE_FADE] No signal for {epic}")
                 except Exception as e:
                     self.logger.error(f"❌ [RANGE_FADE] Error for {epic}: {e}")
-                    individual_results['eurusd_range_fade'] = None
+                    individual_results['range_fade'] = None
 
             # FVG_RETEST runs concurrently with other strategies (not routed)
             if self.fvg_retest_enabled:
@@ -1765,7 +1765,7 @@ class SignalDetector:
             self.logger.error(f"❌ Error detecting mean reversion signals for {epic}: {e}")
             return None
 
-    def detect_eurusd_range_fade_signals(
+    def detect_range_fade_signals(
         self,
         epic: str,
         pair: str,
@@ -1776,21 +1776,21 @@ class SignalDetector:
     ) -> Optional[Dict]:
         """Detect signals using the range-fade strategy family (5m only)."""
         try:
-            if self.eurusd_range_fade_strategy is None:
+            if self.range_fade_strategy is None:
                 try:
                     try:
-                        from .strategies.range_fade_strategy import EURUSDRangeFadeStrategy
+                        from .strategies.range_fade_strategy import RangeFadeStrategy
                     except ImportError:
-                        from forex_scanner.core.strategies.range_fade_strategy import EURUSDRangeFadeStrategy
+                        from forex_scanner.core.strategies.range_fade_strategy import RangeFadeStrategy
                     strategy_override = dict(self._config_override or {})
                     strategy_override.setdefault("erf_profile", "5m")
-                    self.eurusd_range_fade_strategy = EURUSDRangeFadeStrategy(
+                    self.range_fade_strategy = RangeFadeStrategy(
                         config=None,
                         logger=self.logger,
                         db_manager=self.db_manager,
                         config_override=strategy_override,
                     )
-                    self.eurusd_range_fade_strategy.data_fetcher = self.data_fetcher
+                    self.range_fade_strategy.data_fetcher = self.data_fetcher
                     self.logger.info("✅ Range Fade strategy lazy-loaded (5m)")
                 except ImportError as e:
                     self.logger.warning(f"⚠️ Could not import Range Fade strategy: {e}")
@@ -1816,7 +1816,7 @@ class SignalDetector:
                 lookback_hours=336,
             )
 
-            signal = self.eurusd_range_fade_strategy.detect_signal(
+            signal = self.range_fade_strategy.detect_signal(
                 df_trigger=df_trigger,
                 df_4h=df_1h,
                 epic=epic,
