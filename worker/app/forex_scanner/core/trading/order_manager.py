@@ -435,7 +435,8 @@ class OrderManager:
                     'signal': signal
                 }
 
-            if SMC_CONFIG_AVAILABLE:
+            strategy_name = str(signal.get('strategy', '')).upper()
+            if SMC_CONFIG_AVAILABLE and strategy_name == 'SMC_SIMPLE':
                 try:
                     smc_config = get_smc_simple_config()
                     pair_overrides = smc_config._pair_overrides.get(epic, {})
@@ -460,6 +461,11 @@ class OrderManager:
                     # Fail-safe: if we can't check, allow execution to proceed
                     self.logger.warning(f"⚠️ Could not check monitor_only status for {epic}: {e}")
                     self.logger.warning(f"   ℹ️ Proceeding with execution (fail-safe behavior)")
+            elif SMC_CONFIG_AVAILABLE:
+                self.logger.debug(
+                    f"ℹ️ Skipping SMC_SIMPLE monitor_only check for {epic} "
+                    f"({strategy_name or 'UNKNOWN'} strategy)"
+                )
             else:
                 self.logger.debug(f"ℹ️ SMC config not available, skipping monitor_only check for {epic}")
 
