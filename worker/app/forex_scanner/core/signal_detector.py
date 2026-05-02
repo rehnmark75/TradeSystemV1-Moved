@@ -38,15 +38,6 @@ except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 
-# FVG Retest strategy config (optional - strategy may not be deployed yet)
-try:
-    from services.fvg_retest_config_service import get_fvg_retest_config
-except ImportError:
-    try:
-        from forex_scanner.services.fvg_retest_config_service import get_fvg_retest_config
-    except ImportError:
-        get_fvg_retest_config = None
-
 
 class SignalDetector:
     """
@@ -94,18 +85,12 @@ class SignalDetector:
 
         # Multi-strategy support (v3.0.0)
         # These strategies are lazy-loaded on first use
-        self.ranging_market_strategy = None
-        self.volume_profile_strategy = None
         self.mean_reversion_strategy = None
         self.range_fade_strategy = None
         self._range_fade_profile = None
         self.range_structure_strategy = None
 
-        # FVG Retest strategy (v4.0.0) - dual-mode BOS + FVG entry
-        self.fvg_retest_strategy = None
-        self.fvg_retest_enabled = True
-
-        # MEAN_REVERSION runs concurrently (like FVG_RETEST) so it can
+        # MEAN_REVERSION runs concurrently (not through the router) so it can
         # fire alongside whichever strategy the router picks. Per-pair
         # enable flags + hard ADX gates inside the strategy do the actual
         # filtering. Enable flag is driven from scanner_global_config.
@@ -167,24 +152,18 @@ class SignalDetector:
             'SMC_SIMPLE': self._force_init_smc_simple,
             'SMC_EMA': self._force_init_smc_simple,
             'SMC': self._force_init_smc_simple,  # Default SMC to SMC_SIMPLE
-            'RANGING_MARKET': self._force_init_ranging_market,
-            'RANGING': self._force_init_ranging_market,
             'MEAN_REVERSION': self._force_init_mean_reversion,
             'MR': self._force_init_mean_reversion,
             'RANGE_FADE': self._force_init_range_fade,
             'RANGE_STRUCTURE': self._force_init_range_structure,
             'RS': self._force_init_range_structure,
-            'VOLUME_PROFILE': self._force_init_volume_profile,
-            'VP': self._force_init_volume_profile,
-            'FVG_RETEST': self._force_init_fvg_retest,
-            'FVG': self._force_init_fvg_retest,
             'XAU_GOLD': self._force_init_xau_gold,
             'XAU': self._force_init_xau_gold,
             'GOLD': self._force_init_xau_gold,
         }
 
         if strategy_name not in init_map:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, RANGING_MARKET, MEAN_REVERSION, RANGE_FADE, VOLUME_PROFILE, FVG_RETEST, XAU_GOLD, RANGE_STRUCTURE."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, RANGE_STRUCTURE."
 
         return init_map[strategy_name]()
 
@@ -198,16 +177,6 @@ class SignalDetector:
             return True, "SMC Simple strategy force-initialized"
         except Exception as e:
             return False, f"Failed to force-init SMC Simple: {e}"
-
-    def _force_init_ranging_market(self) -> Tuple[bool, str]:
-        """Force-initialize Ranging Market strategy for backtest"""
-        try:
-            # Ranging Market uses lazy loading
-            self.ranging_market_strategy = None  # Will be lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Ranging Market strategy (lazy-load)")
-            return True, "Ranging Market strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init Ranging Market: {e}"
 
     def _force_init_mean_reversion(self) -> Tuple[bool, str]:
         """Force-initialize Mean Reversion strategy for backtest."""
@@ -237,16 +206,6 @@ class SignalDetector:
         except Exception as e:
             return False, f"Failed to force-init Range Structure: {e}"
 
-    def _force_init_volume_profile(self) -> Tuple[bool, str]:
-        """Force-initialize Volume Profile strategy for backtest"""
-        try:
-            # Volume Profile uses lazy loading
-            self.volume_profile_strategy = None  # Will be lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Volume Profile strategy (lazy-load)")
-            return True, "Volume Profile strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init Volume Profile: {e}"
-
     def _force_init_xau_gold(self) -> Tuple[bool, str]:
         """Force-initialize XAU_GOLD strategy for backtest."""
         try:
@@ -255,16 +214,6 @@ class SignalDetector:
             return True, "XAU_GOLD strategy force-initialized"
         except Exception as e:
             return False, f"Failed to force-init XAU_GOLD: {e}"
-
-    def _force_init_fvg_retest(self) -> Tuple[bool, str]:
-        """Force-initialize FVG Retest strategy for backtest"""
-        try:
-            self.fvg_retest_enabled = True
-            self.fvg_retest_strategy = None  # Will be lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized FVG Retest strategy (lazy-load)")
-            return True, "FVG Retest strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init FVG Retest: {e}"
 
     def _get_default_timeframe(self, timeframe: str = None) -> str:
         """Get default timeframe from database config if not specified"""
@@ -685,21 +634,7 @@ class SignalDetector:
             routing_result = self._get_routed_strategy(epic, pair)
             routed_strategy = routing_result['strategy']
 
-            if routed_strategy == 'RANGING_MARKET' and self._strategy_router:
-                try:
-                    self.logger.debug(f"🔍 [RANGING_MARKET] Starting detection for {epic}")
-                    signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe, routing_context=routing_result)
-                    individual_results['ranging_market'] = signal
-                    if signal:
-                        all_signals.append(signal)
-                        self.logger.info(f"✅ [RANGING_MARKET] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.5f}")
-                    else:
-                        self.logger.debug(f"📊 [RANGING_MARKET] No signal for {epic}")
-                except Exception as e:
-                    self.logger.error(f"❌ [RANGING_MARKET] Error for {epic}: {e}")
-                    individual_results['ranging_market'] = None
-
-            elif routed_strategy == 'MEAN_REVERSION' and self._strategy_router:
+            if routed_strategy == 'MEAN_REVERSION' and self._strategy_router:
                 try:
                     self.logger.debug(f"🔍 [MEAN_REVERSION] Starting detection for {epic}")
                     signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe, routing_context=routing_result)
@@ -726,20 +661,6 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
                     individual_results['range_structure'] = None
-
-            elif routed_strategy == 'VOLUME_PROFILE' and self._strategy_router:
-                try:
-                    self.logger.debug(f"🔍 [VOLUME_PROFILE] Starting detection for {epic}")
-                    signal = self.detect_volume_profile_signals(epic, pair, spread_pips, timeframe)
-                    individual_results['volume_profile'] = signal
-                    if signal:
-                        all_signals.append(signal)
-                        self.logger.info(f"✅ [VOLUME_PROFILE] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.5f}")
-                    else:
-                        self.logger.debug(f"📊 [VOLUME_PROFILE] No signal for {epic}")
-                except Exception as e:
-                    self.logger.error(f"❌ [VOLUME_PROFILE] Error for {epic}: {e}")
-                    individual_results['volume_profile'] = None
 
             elif self._is_gold_epic(epic):
                 try:
@@ -860,23 +781,7 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGE_FADE] Error for {epic}: {e}")
                     individual_results['range_fade'] = None
 
-            # FVG_RETEST runs concurrently with other strategies (not routed)
-            if self.fvg_retest_enabled:
-                try:
-                    self.logger.debug(f"🔍 [FVG_RETEST] Starting detection for {epic}")
-                    fvg_signal = self.detect_fvg_retest_signals(epic, pair, spread_pips, timeframe)
-                    individual_results['fvg_retest'] = fvg_signal
-                    if fvg_signal:
-                        all_signals.append(fvg_signal)
-                        self.logger.info(f"✅ [FVG_RETEST] Signal detected for {epic}: {fvg_signal.get('signal')} ({fvg_signal.get('entry_type')}) @ {fvg_signal.get('entry_price', 0):.5f}")
-                    else:
-                        self.logger.debug(f"📊 [FVG_RETEST] No signal for {epic}")
-                except Exception as e:
-                    self.logger.error(f"❌ [FVG_RETEST] Error for {epic}: {e}")
-                    individual_results['fvg_retest'] = None
-
-            # Propagate regime info from routing to signals that don't have it
-            # (RANGING_MARKET and VOLUME_PROFILE strategies don't set these fields)
+            # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
                     if not sig.get('market_regime_detected'):
@@ -922,12 +827,9 @@ class SignalDetector:
         'SMC_EMA': 'SMC_SIMPLE',
         'MR': 'MEAN_REVERSION',
         'MEANREV': 'MEAN_REVERSION',
-        'RANGING': 'RANGING_MARKET',
-        'VP': 'VOLUME_PROFILE',
         'RS': 'RANGE_STRUCTURE',
         'XAU': 'XAU_GOLD',
         'GOLD': 'XAU_GOLD',
-        'FVG': 'FVG_RETEST',
     }
 
     def _detect_single_strategy(
@@ -951,18 +853,12 @@ class SignalDetector:
                 signal = self.detect_smc_simple_signals(epic, pair, spread_pips, timeframe)
             elif name == 'XAU_GOLD':
                 signal = self.detect_xau_gold_signals(epic, pair, spread_pips, timeframe)
-            elif name == 'FVG_RETEST':
-                signal = self.detect_fvg_retest_signals(epic, pair, spread_pips, timeframe)
             elif name == 'RANGE_FADE':
                 signal = self.detect_range_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'RANGE_STRUCTURE':
                 signal = self.detect_range_structure_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'MEAN_REVERSION':
                 signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
-            elif name == 'RANGING_MARKET':
-                signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
-            elif name == 'VOLUME_PROFILE':
-                signal = self.detect_volume_profile_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
@@ -1294,11 +1190,10 @@ class SignalDetector:
         Determine which strategy to use based on ADX-derived market regime.
 
         Uses the same regime detection logic as backtest_scanner._calculate_regime_from_data():
-        - ADX < 20: ranging → RANGING_MARKET
-        - ADX 20-25: low_volatility → RANGING_MARKET
+        - ADX < 20: ranging → MEAN_REVERSION / SMC_SIMPLE fallback
+        - ADX 20-25: low_volatility → MEAN_REVERSION / SMC_SIMPLE fallback
         - ADX 25-50: trending → SMC_SIMPLE
         - ADX > 50: breakout → SMC_SIMPLE
-        - High ATR ratio: high_volatility → VOLUME_PROFILE
 
         Falls back to SMC_SIMPLE if router is disabled or any error occurs.
 
@@ -1570,180 +1465,8 @@ class SignalDetector:
             return default
 
     # =========================================================================
-    # FVG RETEST STRATEGY DETECTION (v4.0.0)
-    # =========================================================================
-
-    def detect_fvg_retest_signals(
-        self,
-        epic: str,
-        pair: str,
-        spread_pips: float = 1.5,
-        timeframe: str = None
-    ) -> Optional[Dict]:
-        """
-        Detect signals using FVG Retest strategy (dual-mode).
-
-        Fetches 1H data (240h lookback for 200 EMA warmup) and 5m data (12h lookback).
-        """
-        try:
-            if not self.fvg_retest_enabled:
-                return None
-
-            # Lazy-load strategy
-            if self.fvg_retest_strategy is None:
-                try:
-                    from forex_scanner.core.strategies.fvg_retest_strategy import FVGRetestStrategy
-                except ImportError:
-                    from .strategies.fvg_retest_strategy import FVGRetestStrategy
-                self.fvg_retest_strategy = FVGRetestStrategy(config_override=self._config_override)
-                # Pass data_fetcher reference for backtest time
-                self.fvg_retest_strategy._data_fetcher = self.data_fetcher
-                if self._is_backtest_mode:
-                    self.fvg_retest_strategy.reset_cooldowns()
-                self.logger.info("🔷 FVG Retest strategy lazy-loaded")
-
-            is_backtest = self._is_backtest_mode
-
-            # Fetch 1H data (need 200+ bars for EMA warmup)
-            htf_lookback = 300 if is_backtest else 240  # ~240 hours = 10 days
-            df_1h = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='1h',
-                lookback_hours=htf_lookback
-            )
-            df_1h = self._filter_incomplete_candles(df_1h, '1h')
-
-            if df_1h is None or len(df_1h) < 210:
-                self.logger.debug(f"⚠️ [FVG_RETEST] Insufficient 1H data for {epic} ({len(df_1h) if df_1h is not None else 0} bars, need 210)")
-                return None
-
-            # Fetch 5m data (~12h lookback = ~144 bars)
-            trigger_lookback = 24 if is_backtest else 12
-            df_5m = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='5m',
-                lookback_hours=trigger_lookback
-            )
-            df_5m = self._filter_incomplete_candles(df_5m, '5m')
-
-            if df_5m is None or len(df_5m) < 30:
-                self.logger.debug(f"⚠️ [FVG_RETEST] Insufficient 5m data for {epic} ({len(df_5m) if df_5m is not None else 0} bars)")
-                return None
-
-            self.logger.debug(f"🔍 [FVG_RETEST] {pair}: 1H({len(df_1h)} bars), 5m({len(df_5m)} bars)")
-
-            # Detect signal
-            signal = self.fvg_retest_strategy.detect_signal(
-                df_trigger=df_5m,
-                df_4h=df_1h,
-                epic=epic,
-                pair=pair
-            )
-
-            if signal:
-                self.logger.info(f"✅ [FVG_RETEST] Signal detected for {epic}: {signal['signal']} ({signal.get('entry_type')}) @ {signal['entry_price']:.5f}")
-                signal = self._add_market_context(signal, df_5m)
-
-            return signal
-
-        except Exception as e:
-            self.logger.error(f"❌ [FVG_RETEST] Error detecting signals for {epic}: {e}")
-            import traceback
-            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
-            return None
-
-    # =========================================================================
     # MULTI-STRATEGY DETECTION METHODS (v3.0.0)
     # =========================================================================
-
-    def detect_ranging_market_signals(
-        self,
-        epic: str,
-        pair: str,
-        spread_pips: float = 1.5,
-        timeframe: str = '15m',
-        current_timestamp: datetime = None,
-        routing_context: Dict = None
-    ) -> Optional[Dict]:
-        """
-        Detect signals using the Ranging Market strategy
-
-        Uses multi-oscillator approach (Squeeze Momentum, RSI, Stochastic)
-        for mean reversion signals in ranging conditions (ADX < 20)
-
-        Args:
-            epic: The trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
-            pair: The pair name (e.g., 'EURUSD')
-            spread_pips: Current spread in pips
-            timeframe: Signal timeframe
-            current_timestamp: For backtest mode - uses this for cooldown handling
-
-        Returns:
-            Signal dict if conditions met, None otherwise
-        """
-        try:
-            # Lazy-load the ranging market strategy
-            if self.ranging_market_strategy is None:
-                try:
-                    from .strategies.ranging_market_strategy import RangingMarketStrategy
-                    # Strategy loads config from database internally
-                    self.ranging_market_strategy = RangingMarketStrategy(
-                        config=None,  # Uses database config
-                        logger=self.logger,
-                        db_manager=self.db_manager
-                    )
-                    # Store data_fetcher reference for signal detection
-                    self.ranging_market_strategy.data_fetcher = self.data_fetcher
-                    self.logger.info("✅ Ranging Market strategy lazy-loaded")
-                except ImportError as e:
-                    self.logger.warning(f"⚠️ Could not import Ranging Market strategy: {e}")
-                    return None
-                except Exception as e:
-                    self.logger.error(f"❌ Error initializing Ranging Market strategy: {e}")
-                    return None
-
-            # Fetch required data
-            # Primary timeframe (15m)
-            df_trigger = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe=timeframe,
-                lookback_hours=48
-            )
-            if df_trigger is None or df_trigger.empty:
-                self.logger.debug(f"[RANGING_MARKET] No {timeframe} data for {epic}")
-                return None
-
-            # Higher timeframe (1H) for bias
-            df_4h = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='1h',
-                lookback_hours=72
-            )
-
-            # Generate signal using the strategy
-            signal = self.ranging_market_strategy.detect_signal(
-                df_trigger=df_trigger,
-                df_4h=df_4h,
-                epic=epic,
-                pair=pair,
-                spread_pips=spread_pips,
-                current_timestamp=current_timestamp,
-                routing_context=routing_context
-            )
-
-            # Enhance signal with technical indicators if found
-            if signal:
-                signal = self._add_complete_technical_indicators(signal, df_trigger)
-
-            return signal
-
-        except Exception as e:
-            self.logger.error(f"❌ Error detecting ranging market signals for {epic}: {e}")
-            return None
 
     def detect_mean_reversion_signals(
         self,
@@ -1756,11 +1479,10 @@ class SignalDetector:
     ) -> Optional[Dict]:
         """Detect signals using the Mean Reversion strategy.
 
-        BB + RSI extremes + hard ADX gates (15m primary + 1h HTF). Mirrors the
-        detect_ranging_market_signals wiring — lazy-loads on first use, fetches
-        primary + confirmation timeframes via DataFetcher, delegates to the
-        strategy's detect_signal() and enhances the result with technical
-        indicators before returning.
+        BB + RSI extremes + hard ADX gates (15m primary + 1h HTF). Lazy-loads
+        on first use, fetches primary + confirmation timeframes via DataFetcher,
+        delegates to the strategy's detect_signal() and enhances the result with
+        technical indicators before returning.
         """
         try:
             if self.mean_reversion_strategy is None:
@@ -1975,87 +1697,3 @@ class SignalDetector:
             self.logger.error(f"❌ Error detecting range structure signals for {epic}: {e}")
             return None
 
-    def detect_volume_profile_signals(
-        self,
-        epic: str,
-        pair: str,
-        spread_pips: float = 1.5,
-        timeframe: str = '15m',
-        current_timestamp: datetime = None
-    ) -> Optional[Dict]:
-        """
-        Detect signals using the Volume Profile strategy
-
-        Uses HVN bounce, POC reversion, and Value Area breakout patterns
-        with session-based confidence boosting (Asian session edge)
-
-        Args:
-            epic: The trading pair epic (e.g., 'CS.D.EURUSD.MINI.IP')
-            pair: The pair name (e.g., 'EURUSD')
-            spread_pips: Current spread in pips
-            timeframe: Signal timeframe
-            current_timestamp: For backtest mode - uses this for cooldown/session detection
-
-        Returns:
-            Signal dict if conditions met, None otherwise
-        """
-        try:
-            # Lazy-load the volume profile strategy
-            if self.volume_profile_strategy is None:
-                try:
-                    from .strategies.volume_profile_strategy import VolumeProfileStrategy
-                    # Strategy loads config from database internally
-                    self.volume_profile_strategy = VolumeProfileStrategy(
-                        config=None,  # Uses database config
-                        logger=self.logger,
-                        db_manager=self.db_manager
-                    )
-                    # Store data_fetcher reference for signal detection
-                    self.volume_profile_strategy.data_fetcher = self.data_fetcher
-                    self.logger.info("✅ Volume Profile strategy lazy-loaded")
-                except ImportError as e:
-                    self.logger.warning(f"⚠️ Could not import Volume Profile strategy: {e}")
-                    return None
-                except Exception as e:
-                    self.logger.error(f"❌ Error initializing Volume Profile strategy: {e}")
-                    return None
-
-            # Fetch required data
-            # Primary timeframe (15m) for Volume Profile analysis
-            df_trigger = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe=timeframe,
-                lookback_hours=48
-            )
-            if df_trigger is None or df_trigger.empty:
-                self.logger.debug(f"[VOLUME_PROFILE] No {timeframe} data for {epic}")
-                return None
-
-            # Higher timeframe (1H) for profile context
-            df_4h = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='1h',
-                lookback_hours=72
-            )
-
-            # Generate signal using the strategy
-            signal = self.volume_profile_strategy.detect_signal(
-                df_trigger=df_trigger,
-                df_4h=df_4h,
-                epic=epic,
-                pair=pair,
-                spread_pips=spread_pips,
-                current_timestamp=current_timestamp
-            )
-
-            # Enhance signal with technical indicators if found
-            if signal:
-                signal = self._add_complete_technical_indicators(signal, df_trigger)
-
-            return signal
-
-        except Exception as e:
-            self.logger.error(f"❌ Error detecting volume profile signals for {epic}: {e}")
-            return None
