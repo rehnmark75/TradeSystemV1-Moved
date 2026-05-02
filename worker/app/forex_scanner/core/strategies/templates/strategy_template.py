@@ -399,7 +399,7 @@ class TemplateStrategy(StrategyInterface):
         now = datetime.now(timezone.utc)
 
         signal = {
-            # Core signal data
+            # Core signal data (required by SignalResult contract)
             'signal': direction,  # 'BUY' or 'SELL'
             'signal_type': direction.lower(),
             'strategy': self.strategy_name,
@@ -408,8 +408,11 @@ class TemplateStrategy(StrategyInterface):
 
             # Prices
             'entry_price': entry_price,
-            'stop_loss_pips': sl_pips,
-            'take_profit_pips': tp_pips,
+            'risk_pips': sl_pips,    # BacktestScanner key (stop-loss distance)
+            'reward_pips': tp_pips,  # BacktestScanner key (take-profit distance)
+
+            # Entry classification (load-bearing for LPF direction gates)
+            'entry_type': kwargs.get('entry_type', 'MOMENTUM'),
 
             # Confidence
             'confidence_score': confidence,

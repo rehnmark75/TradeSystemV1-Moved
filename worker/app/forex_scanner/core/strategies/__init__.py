@@ -23,6 +23,7 @@ from .range_structure_strategy import (
     RangeStructureStrategy,
     create_range_structure_strategy,
 )
+from .signal_result import SignalResult
 from .strategy_registry import (
     StrategyRegistry,
     StrategyInterface,
@@ -33,6 +34,7 @@ __all__ = [
     # Base classes
     'BaseStrategy',
     'StrategyInterface',
+    'SignalResult',
 
     # Active strategies
     'SMCSimpleStrategy',

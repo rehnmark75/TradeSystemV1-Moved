@@ -23,8 +23,13 @@ Adding a new strategy:
 
 import logging
 from abc import ABC, abstractmethod
-from typing import Dict, List, Optional, Type, Any
+from typing import Dict, List, Optional, Type, Any, cast
 from functools import wraps
+
+try:
+    from .signal_result import SignalResult
+except ImportError:
+    from forex_scanner.core.strategies.signal_result import SignalResult
 
 logger = logging.getLogger(__name__)
 
@@ -43,12 +48,14 @@ class StrategyInterface(ABC):
         pass
 
     @abstractmethod
-    def detect_signal(self, **kwargs) -> Optional[Dict]:
+    def detect_signal(self, **kwargs) -> Optional[SignalResult]:
         """
         Detect trading signal.
 
         Returns:
-            Signal dict if detected, None otherwise
+            SignalResult (typed dict) if detected, None otherwise.
+            Must populate all required fields: signal_type, strategy, epic,
+            entry_price, risk_pips, reward_pips, confidence_score.
         """
         pass
 
@@ -271,8 +278,8 @@ def _auto_register_smc_simple():
             def strategy_name(self) -> str:
                 return 'SMC_SIMPLE'
 
-            def detect_signal(self, **kwargs) -> Optional[Dict]:
-                return self._strategy.detect_signal(**kwargs)
+            def detect_signal(self, **kwargs) -> Optional[SignalResult]:
+                return cast(Optional[SignalResult], self._strategy.detect_signal(**kwargs))
 
             def get_required_timeframes(self) -> List[str]:
                 return ['4h', '15m', '5m']
