@@ -167,30 +167,18 @@ class StrategyRegistry:
 
         try:
             strategy_class = self._strategies[name]
-
-            # Try to instantiate with various signatures
-            try:
-                # Try with all dependencies
-                instance = strategy_class(
-                    config=config,
-                    db_manager=db_manager,
-                    logger=self.logger
-                )
-            except TypeError:
-                try:
-                    # Try with just config
-                    instance = strategy_class(config=config)
-                except TypeError:
-                    # Try with no args
-                    instance = strategy_class()
-
+            instance = strategy_class(
+                config=config,
+                db_manager=db_manager,
+                logger=self.logger,
+            )
             self._instances[name] = instance
             self.logger.info(f"✅ Strategy instantiated: {name}")
             return instance
 
         except Exception as e:
             self.logger.error(f"❌ Failed to instantiate strategy {name}: {e}")
-            return None
+            raise
 
     def get_enabled_strategies(self) -> List[str]:
         """
@@ -272,6 +260,11 @@ def _auto_register_smc_simple():
                 return self._strategy.detect_signal(**kwargs)
 
             def get_required_timeframes(self) -> List[str]:
+                if hasattr(self._strategy, 'get_required_timeframes'):
+                    return self._strategy.get_required_timeframes()
+                # Scalp mode uses 1h/5m/1m; non-scalp uses 4h/15m/5m
+                if getattr(self._strategy, 'scalp_mode_enabled', False):
+                    return ['1h', '5m', '1m']
                 return ['4h', '15m', '5m']
 
             def reset_cooldowns(self) -> None:
