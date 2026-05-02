@@ -74,6 +74,16 @@ class StrategyInterface(ABC):
         """Flush any pending rejections to database (optional)"""
         pass
 
+    def get_lpf_extra_context(self, signal: Dict) -> Optional[Dict]:
+        """Return strategy-specific data for the LPF (opt-in).
+
+        Override to attach richer context — e.g. pair win-rate, setup
+        strength, pattern confidence. Returned dict is stored in
+        signal['_lpf_strategy_context'] before TradeValidator calls LPF.
+        Default returns None (no extra context).
+        """
+        return None
+
 
 class StrategyRegistry:
     """

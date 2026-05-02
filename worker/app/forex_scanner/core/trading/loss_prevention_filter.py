@@ -13,7 +13,7 @@ import logging
 import os
 import json
 from datetime import datetime, timezone
-from typing import Dict, List, Optional
+from typing import Any, Dict, List, Optional, TypedDict
 from contextlib import contextmanager
 
 try:
@@ -24,6 +24,96 @@ except ImportError:
     PSYCOPG2_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
+
+
+class LPFContext(TypedDict, total=False):
+    """Typed inputs for LossPreventionFilter.evaluate().
+
+    All fields are optional (total=False) because not every strategy populates
+    every field. Rule checkers treat absent/None fields as non-matching, which
+    is the existing behaviour from raw dict access.
+
+    Strategies may attach extra data via `strategy_context` (opt-in):
+        signal['_lpf_strategy_context'] = {'pair_win_rate_30d': 0.62, ...}
+    build_lpf_context() picks this up and stores it here.
+    """
+    # Identity
+    epic: str
+    strategy: str
+    signal_type: str          # BUY / SELL (or BULL / BEAR — normalised internally)
+
+    # Confidence
+    confidence_score: float
+    confidence: float         # alias some strategies use instead of confidence_score
+
+    # Market regime
+    market_regime_detected: str
+    market_regime: str        # alias
+    all_timeframes_aligned: bool
+
+    # Technical indicators
+    rsi: float
+    stoch_k: float
+    ema_distance_pips: float
+    efficiency_ratio: float
+    volume_trend: str         # 'increasing' | 'decreasing' | 'stable'
+    atr_percentile: float
+
+    # Session / time (used when signal_timestamp is unavailable)
+    market_session: str
+    session: str              # alias
+    hour_utc: int
+
+    # Direction context
+    market_bias: str
+    htf_bias: str             # alias
+
+    # Optional strategy-specific payload (set by strategy via _lpf_strategy_context)
+    strategy_context: Dict[str, Any]
+
+
+def build_lpf_context(signal: Dict) -> Dict[str, Any]:
+    """Build a typed LPFContext from a raw signal dict.
+
+    Resolves field aliases so rule checkers always see canonical names.
+    Strategies that want to inject extra context should set
+    ``signal['_lpf_strategy_context']`` to a dict before the signal reaches
+    TradeValidator; build_lpf_context lifts it into ``strategy_context``.
+    """
+    ctx: Dict[str, Any] = {}
+
+    def _set(key: str, *sources: str) -> None:
+        for src in sources:
+            v = signal.get(src)
+            if v is not None:
+                ctx[key] = v  # type: ignore[literal-required]
+                return
+
+    _set('epic', 'epic')
+    _set('strategy', 'strategy')
+    _set('signal_type', 'signal_type')
+    _set('confidence_score', 'confidence_score', 'confidence')
+    _set('confidence', 'confidence', 'confidence_score')
+    _set('market_regime_detected', 'market_regime_detected', 'market_regime')
+    _set('market_regime', 'market_regime', 'market_regime_detected')
+    _set('all_timeframes_aligned', 'all_timeframes_aligned')
+    _set('rsi', 'rsi')
+    _set('stoch_k', 'stoch_k')
+    _set('ema_distance_pips', 'ema_distance_pips')
+    _set('efficiency_ratio', 'efficiency_ratio')
+    _set('volume_trend', 'volume_trend')
+    _set('atr_percentile', 'atr_percentile')
+    _set('market_session', 'market_session', 'session')
+    _set('session', 'session', 'market_session')
+    _set('hour_utc', 'hour_utc')
+    _set('market_bias', 'market_bias', 'htf_bias')
+    _set('htf_bias', 'htf_bias', 'market_bias')
+
+    extra = signal.get('_lpf_strategy_context')
+    if isinstance(extra, dict):
+        ctx['strategy_context'] = extra
+
+    return ctx
 
 
 class LossPreventionFilter:
@@ -181,19 +271,27 @@ class LossPreventionFilter:
         return self.block_mode
 
     def evaluate(self, signal: Dict, signal_timestamp: Optional[datetime] = None) -> Dict:
-        """
-        Evaluate a signal against all rules.
+        """Evaluate a signal against all LPF rules.
+
+        Accepts a raw signal dict or a pre-built LPFContext (both are dicts
+        at runtime). Always normalises through build_lpf_context so rule
+        checkers see resolved aliases regardless of how the caller populated
+        the dict. Backward-compatible with existing callers.
 
         Returns dict with:
             - allowed: bool
             - total_penalty: float
             - triggered_rules: list of {rule_name, category, penalty}
             - decision: 'allowed' | 'would_block' | 'blocked'
+            - category_penalties: dict
         """
         if not self.is_enabled:
             return {'allowed': True, 'total_penalty': 0.0, 'triggered_rules': [], 'decision': 'allowed'}
 
-        epic = signal.get('epic', '')
+        # Normalise so rule checkers always see canonical aliases
+        ctx: Dict[str, Any] = build_lpf_context(signal)
+
+        epic = ctx.get('epic', '')
 
         # Check per-pair LPF disable
         if not self._get_pair_enabled(epic):
@@ -205,7 +303,7 @@ class LossPreventionFilter:
         penalty_overrides = pair_config.get('rule_penalty_overrides') or {}
 
         # Signal's strategy (for per-strategy rule scoping)
-        sig_strategy = str(signal.get('strategy', '') or '').upper()
+        sig_strategy = str(ctx.get('strategy', '') or '').upper()
 
         triggered = []
         for rule in self._rules:
@@ -225,7 +323,7 @@ class LossPreventionFilter:
                 if sig_strategy and sig_strategy not in scope_upper:
                     continue
 
-            if self._check_rule(rule, signal, signal_timestamp):
+            if self._check_rule(rule, ctx, signal_timestamp):
                 # Apply per-pair penalty override if exists
                 penalty = float(penalty_overrides.get(rule['rule_name'], rule['penalty']))
                 triggered.append({
@@ -273,7 +371,7 @@ class LossPreventionFilter:
         }
 
         # Log decision
-        signal_type = signal.get('signal_type', '?')
+        signal_type = ctx.get('signal_type', '?')
         rule_names = [t['rule_name'] for t in triggered]
         threshold_info = f"threshold={pair_threshold:.2f}" if epic in self._pair_configs else f"threshold={self.penalty_threshold:.2f}"
 
@@ -284,9 +382,9 @@ class LossPreventionFilter:
         elif triggered:
             logger.info(f"🛡️✅ LPF ALLOWED: {epic} {signal_type} | penalty={total_penalty:.2f} | {threshold_info} | rules={rule_names}")
 
-        # Log decision to database
+        # Log decision to database (pass original signal so audit log has full context)
         if self._config and self._config.get('log_decisions', True):
-            self._log_decision(signal, result, signal_timestamp)
+            self._log_decision(ctx, result, signal_timestamp)
 
         return result
 
