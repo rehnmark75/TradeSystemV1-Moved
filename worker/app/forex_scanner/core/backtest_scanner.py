@@ -1330,46 +1330,29 @@ class BacktestScanner(IntelligentForexScanner):
                 self.logger.warning("Signal missing epic, skipping trade simulation")
                 return signal
 
-            # 🎯 VSL MODE: Override signal's SL/TP with VSL config values
-            # This ensures the simulator uses VSL (3-4 pips) instead of strategy SL (5 pips)
-            if self._use_vsl_mode and epic in self._vsl_config:
-                vsl_cfg = self._vsl_config[epic]
-                signal['risk_pips'] = vsl_cfg['vsl_pips']  # Override SL with VSL
-                signal['reward_pips'] = vsl_cfg['tp_pips']  # Override TP with scalp TP
-                # Keep limit expiry at 7 minutes to match live trading behavior
-                # This is critical for realistic fill rate simulation
-                if signal.get('order_type') == 'limit':
-                    signal['limit_expiry_minutes'] = 7  # Match live trading
-                self.logger.debug(f"🎯 VSL Override: SL={vsl_cfg['vsl_pips']} pips, TP={vsl_cfg['tp_pips']} pips, "
-                                 f"OrderType={signal.get('order_type')}, Offset={signal.get('limit_offset_pips')} pips")
-            else:
-                # 📊 ATR-ADAPTIVE MODE: Use strategy SL/TP or fallback to scalp trailing config
-                # v3.2.0: VSL deprecated, now use ATR-based trailing with proper SL/TP
-                trailing_cfg: dict = {}
+            trailing_cfg: dict = {}
+            try:
                 try:
-                    try:
-                        from forex_scanner.services.trailing_config_service import get_trailing_config_service
-                    except ImportError:
-                        from services.trailing_config_service import get_trailing_config_service  # type: ignore
-                    trailing_cfg = get_trailing_config_service().get_config(epic, is_scalp=True) or {}
-                except Exception:
-                    pass
-                if not trailing_cfg:
-                    try:
-                        from config_trailing_stops import get_scalp_trailing_config
-                    except ImportError:
-                        from forex_scanner.config_trailing_stops import get_scalp_trailing_config
-                    trailing_cfg = get_scalp_trailing_config(epic)
+                    from forex_scanner.services.trailing_config_service import get_trailing_config_service
+                except ImportError:
+                    from services.trailing_config_service import get_trailing_config_service  # type: ignore
+                trailing_cfg = get_trailing_config_service().get_config(epic, is_scalp=True) or {}
+            except Exception:
+                pass
+            if not trailing_cfg:
+                try:
+                    from config_trailing_stops import get_scalp_trailing_config
+                except ImportError:
+                    from forex_scanner.config_trailing_stops import get_scalp_trailing_config
+                trailing_cfg = get_scalp_trailing_config(epic)
 
-                # Use signal's SL/TP if already set, otherwise use trailing config defaults
-                if not signal.get('risk_pips') or signal.get('risk_pips') == 0:
-                    # Default SL based on early_breakeven_trigger + buffer
-                    signal['risk_pips'] = trailing_cfg.get('early_breakeven_trigger_points', 8) + 2
-                if not signal.get('reward_pips') or signal.get('reward_pips') == 0:
-                    # Default TP based on stage1 trigger (first profit target)
-                    signal['reward_pips'] = trailing_cfg.get('stage1_trigger_points', 12)
+            # Use signal's SL/TP if already set, otherwise use trailing config defaults
+            if not signal.get('risk_pips') or signal.get('risk_pips') == 0:
+                signal['risk_pips'] = trailing_cfg.get('early_breakeven_trigger_points', 8) + 2
+            if not signal.get('reward_pips') or signal.get('reward_pips') == 0:
+                signal['reward_pips'] = trailing_cfg.get('stage1_trigger_points', 12)
 
-                self.logger.debug(f"📊 ATR Mode: SL={signal.get('risk_pips')} pips, TP={signal.get('reward_pips')} pips")
+            self.logger.debug(f"📊 ATR Mode: SL={signal.get('risk_pips')} pips, TP={signal.get('reward_pips')} pips")
 
             # Get per-epic trailing stop simulator with per-strategy + pair config
             signal_strategy = (
@@ -1380,22 +1363,7 @@ class BacktestScanner(IntelligentForexScanner):
             trailing_simulator = self._get_trailing_stop_simulator(epic, strategy=signal_strategy)
 
             # Fetch future price data for simulation
-            # VSL MODE: Use 1m candles for more accurate simulation (closer to tick-by-tick)
-            # Standard mode: Use the backtest timeframe (5m/15m)
-            if self._use_vsl_mode:
-                simulation_timeframe = '1m'
-                # For 1m candles, we need more bars to cover the same time period
-                # 4 hours = 240 1-minute bars (vs 48 5-minute bars)
-                max_bars_1m = 240
-                future_df = self._fetch_future_price_data(
-                    epic, signal_timestamp,
-                    max_bars=max_bars_1m,
-                    timeframe_override='1m'
-                )
-                timeframe_minutes = 1
-            else:
-                future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=trailing_simulator.max_bars)
-                timeframe_minutes = 5  # Default assumption
+            future_df = self._fetch_future_price_data(epic, signal_timestamp, max_bars=trailing_simulator.max_bars)
 
             if future_df is None or len(future_df) == 0:
                 self.logger.debug(f"No future data available for {epic} at {signal_timestamp}, skipping simulation")
@@ -1407,25 +1375,12 @@ class BacktestScanner(IntelligentForexScanner):
                 return signal
 
             # Simulate trade with pair-specific trailing stop
-            # VSL mode uses 1m candles for 5x better resolution in SL/TP detection
-            if self._use_vsl_mode:
-                self.logger.debug(f"🎯 VSL Simulation: {epic} with {len(future_df)} 1m bars "
-                                 f"(5x resolution vs 5m, {len(future_df)} min coverage)")
-                # VSL simulator accepts timeframe_minutes
-                enhanced_signal = trailing_simulator.simulate_trade(
-                    signal=signal,
-                    df=future_df,
-                    signal_idx=0,
-                    timeframe_minutes=timeframe_minutes
-                )
-            else:
-                self.logger.debug(f"📊 ATR Trailing Simulation: {epic} with {len(future_df)} {self.timeframe} bars")
-                # Standard Progressive 3-Stage simulator (no timeframe_minutes param)
-                enhanced_signal = trailing_simulator.simulate_trade(
-                    signal=signal,
-                    df=future_df,
-                    signal_idx=0
-                )
+            self.logger.debug(f"📊 Simulation: {epic} with {len(future_df)} {self.timeframe} bars")
+            enhanced_signal = trailing_simulator.simulate_trade(
+                signal=signal,
+                df=future_df,
+                signal_idx=0
+            )
 
             self.logger.debug(f"Simulation complete: profit={enhanced_signal.get('max_profit_pips', 0):.1f}, "
                             f"loss={enhanced_signal.get('max_loss_pips', 0):.1f}, "

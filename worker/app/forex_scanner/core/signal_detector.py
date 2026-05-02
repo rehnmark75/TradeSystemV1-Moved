@@ -34,9 +34,13 @@ except ImportError:
 try:
     from services.scanner_config_service import get_scanner_config
     from services.smc_simple_config_service import get_smc_simple_config
+    from services.xau_gold_config_service import XAUGoldConfigService
+    from services.range_fade_config_service import RangeFadeConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    from forex_scanner.services.xau_gold_config_service import XAUGoldConfigService
+    from forex_scanner.services.range_fade_config_service import RangeFadeConfigService
 
 
 class SignalDetector:
@@ -514,12 +518,22 @@ class SignalDetector:
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
 
-    @staticmethod
-    def _is_gold_epic(epic: str) -> bool:
+    def _is_gold_epic(self, epic: str) -> bool:
+        """Return True if epic should be routed to XAU_GOLD strategy.
+
+        String match is a necessary pre-filter (prevents EURUSD routing to
+        XAU_GOLD when DB is unavailable).  The DB check lets ops disable gold
+        without a code change.
+        """
         if not epic:
             return False
         e = epic.upper()
-        return 'GOLD' in e or 'XAU' in e
+        if 'GOLD' not in e and 'XAU' not in e:
+            return False
+        try:
+            return XAUGoldConfigService.get_instance().is_pair_enabled(epic)
+        except Exception:
+            return True
 
     def detect_xau_gold_signals(
         self,
@@ -754,13 +768,7 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
                     individual_results['range_structure'] = None
 
-            if self.range_fade_enabled and epic in (
-                'CS.D.EURUSD.CEEM.IP', 'CS.D.EURJPY.MINI.IP',
-                'CS.D.GBPUSD.MINI.IP', 'CS.D.USDJPY.MINI.IP',
-                'CS.D.AUDUSD.MINI.IP', 'CS.D.USDCHF.MINI.IP',
-                'CS.D.USDCAD.MINI.IP', 'CS.D.NZDUSD.MINI.IP',
-                'CS.D.AUDJPY.MINI.IP',
-            ):
+            if self.range_fade_enabled and RangeFadeConfigService.get_instance().is_pair_enabled(epic):
                 try:
                     self.logger.debug(f"🔍 [RANGE_FADE] Starting detection for {epic}")
                     erf_signal = self.detect_range_fade_signals(
