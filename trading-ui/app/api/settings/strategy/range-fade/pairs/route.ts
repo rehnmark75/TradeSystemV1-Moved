@@ -16,7 +16,7 @@ export async function GET(request: Request) {
     const result = await strategyConfigPool.query(
       `
         SELECT *
-        FROM eurusd_range_fade_pair_overrides
+        FROM range_fade_pair_overrides
         WHERE profile_name = $1 AND config_set = $2
         ORDER BY epic ASC
       `,
@@ -63,7 +63,7 @@ export async function POST(request: Request) {
     `
       SELECT column_name
       FROM information_schema.columns
-      WHERE table_name = 'eurusd_range_fade_pair_overrides'
+      WHERE table_name = 'range_fade_pair_overrides'
     `,
   );
   const allowed = new Set(
@@ -89,7 +89,7 @@ export async function POST(request: Request) {
   try {
     const result = await strategyConfigPool.query(
       `
-        INSERT INTO eurusd_range_fade_pair_overrides (${columns.join(", ")})
+        INSERT INTO range_fade_pair_overrides (${columns.join(", ")})
         VALUES (${placeholders.join(", ")})
         ON CONFLICT (epic, profile_name, config_set)
         DO UPDATE SET

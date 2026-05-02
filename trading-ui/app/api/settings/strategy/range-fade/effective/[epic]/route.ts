@@ -10,7 +10,7 @@ async function loadGlobal(profileName: string, configSet: string) {
   const result = await strategyConfigPool.query(
     `
       SELECT *
-      FROM eurusd_range_fade_global_config
+      FROM range_fade_global_config
       WHERE is_active = TRUE AND profile_name = $1 AND config_set = $2
       ORDER BY updated_at DESC
       LIMIT 1
@@ -37,7 +37,7 @@ export async function GET(request: Request, { params }: { params: { epic: string
     const overridesResult = await strategyConfigPool.query(
       `
         SELECT *
-        FROM eurusd_range_fade_pair_overrides
+        FROM range_fade_pair_overrides
         WHERE profile_name = $1 AND config_set = $2 AND epic = $3
         LIMIT 1
       `,

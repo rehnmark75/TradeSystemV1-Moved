@@ -83,7 +83,7 @@ export async function GET() {
       `
         SELECT column_name, data_type
         FROM information_schema.columns
-        WHERE table_name = 'eurusd_range_fade_global_config'
+        WHERE table_name = 'range_fade_global_config'
         ORDER BY ordinal_position
       `,
     );

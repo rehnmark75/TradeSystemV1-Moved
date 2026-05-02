@@ -19,7 +19,7 @@ async function getOverrideColumns(client?: any): Promise<string[]> {
     `
       SELECT column_name
       FROM information_schema.columns
-      WHERE table_name = 'eurusd_range_fade_pair_overrides'
+      WHERE table_name = 'range_fade_pair_overrides'
     `,
   );
   return result.rows.map((row: { column_name: string }) => row.column_name);
@@ -34,7 +34,7 @@ export async function GET(request: Request, { params }: { params: { epic: string
     const result = await strategyConfigPool.query(
       `
         SELECT *
-        FROM eurusd_range_fade_pair_overrides
+        FROM range_fade_pair_overrides
         WHERE profile_name = $1 AND config_set = $2 AND epic = $3
         LIMIT 1
       `,
@@ -79,7 +79,7 @@ export async function PUT(request: Request, { params }: { params: { epic: string
     const currentResult = await client.query(
       `
         SELECT *
-        FROM eurusd_range_fade_pair_overrides
+        FROM range_fade_pair_overrides
         WHERE profile_name = $1 AND config_set = $2 AND epic = $3
         LIMIT 1
         FOR UPDATE
@@ -121,7 +121,7 @@ export async function PUT(request: Request, { params }: { params: { epic: string
 
     const result = await client.query(
       `
-        UPDATE eurusd_range_fade_pair_overrides
+        UPDATE range_fade_pair_overrides
         SET ${setClauses.join(", ")},
             updated_at = NOW()
         WHERE id = $${keys.length + 1}
@@ -149,7 +149,7 @@ export async function DELETE(request: Request, { params }: { params: { epic: str
   try {
     await strategyConfigPool.query(
       `
-        DELETE FROM eurusd_range_fade_pair_overrides
+        DELETE FROM range_fade_pair_overrides
         WHERE profile_name = $1 AND config_set = $2 AND epic = $3
       `,
       [profile, configSet, params.epic],

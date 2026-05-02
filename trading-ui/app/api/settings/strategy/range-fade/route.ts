@@ -18,7 +18,7 @@ async function loadActiveConfig(profileName: string, configSet: string, client?:
   const result = await executor.query(
     `
       SELECT *
-      FROM eurusd_range_fade_global_config
+      FROM range_fade_global_config
       WHERE is_active = TRUE AND profile_name = $1 AND config_set = $2
       ORDER BY updated_at DESC
       LIMIT 1
@@ -32,7 +32,7 @@ async function loadActiveConfigForUpdate(profileName: string, configSet: string,
   const result = await client.query(
     `
       SELECT *
-      FROM eurusd_range_fade_global_config
+      FROM range_fade_global_config
       WHERE is_active = TRUE AND profile_name = $1 AND config_set = $2
       ORDER BY updated_at DESC
       LIMIT 1
@@ -49,7 +49,7 @@ async function getGlobalColumns(client?: any): Promise<Set<string>> {
     `
       SELECT column_name
       FROM information_schema.columns
-      WHERE table_name = 'eurusd_range_fade_global_config'
+      WHERE table_name = 'range_fade_global_config'
     `,
   );
   return new Set(
@@ -139,7 +139,7 @@ export async function PATCH(request: Request) {
 
     const result = await client.query(
       `
-        UPDATE eurusd_range_fade_global_config
+        UPDATE range_fade_global_config
         SET ${setClauses.join(", ")},
             updated_at = NOW()
         WHERE id = $${keys.length + 1}

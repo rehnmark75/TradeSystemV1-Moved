@@ -9,7 +9,7 @@ export async function GET() {
       `
         SELECT column_name
         FROM information_schema.columns
-        WHERE table_name = 'eurusd_range_fade_pair_overrides'
+        WHERE table_name = 'range_fade_pair_overrides'
       `,
     );
 
