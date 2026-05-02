@@ -314,6 +314,7 @@ services:
       - ./worker/app:/app
       - ./logs/worker:/app/logs
     environment:
+      - PYTHONPATH=/app
       - TRADING_ENVIRONMENT=demo
       - TRADING_CONFIG_SET=demo
       - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
