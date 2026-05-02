@@ -82,6 +82,8 @@ class TradeRequest(BaseModel):
     is_scalp_trade: Optional[bool] = False  # True if this is a scalp trade requiring VSL
     virtual_sl_pips: Optional[float] = None  # Custom VSL distance (defaults to config if not set)
 
+    trigger_source: Optional[str] = "scanner"  # 'scanner' | 'manual_trigger'
+
 
 def resolve_order_size(symbol: str, requested_size: Optional[float]) -> float:
     """
@@ -358,6 +360,7 @@ async def ig_place_order(
 
     # Log alert_id if provided
     alert_id = body.alert_id
+    trigger_source = body.trigger_source or "scanner"
 
     if direction not in {"BUY", "SELL"}:
         raise HTTPException(status_code=400, detail="Direction must be BUY or SELL")
@@ -766,6 +769,7 @@ async def ig_place_order(
                         endpoint="dev-limit",  # Identify as limit order
                         status="pending_limit",  # New status for limit orders
                         alert_id=alert_id,
+                        trigger_source=trigger_source,
                         monitor_until=expiry_time,  # Use monitor_until for expiry tracking
                         # Scalp flag preserved for trailing system
                         is_scalp_trade=is_scalp,
@@ -1082,6 +1086,7 @@ async def ig_place_order(
                 endpoint="dev",
                 status="pending",
                 alert_id=alert_id,
+                trigger_source=trigger_source,
                 # Scalp flag preserved for trailing system to use scalp configs
                 is_scalp_trade=is_scalp,
                 # VSL fields deprecated (system disabled)

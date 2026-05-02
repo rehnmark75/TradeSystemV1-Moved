@@ -48,8 +48,8 @@ const STRATEGIES = {
   },
   "range-fade": {
     label: "RANGE_FADE",
-    globalTable: "eurusd_range_fade_global_config",
-    overrideTable: "eurusd_range_fade_pair_overrides",
+    globalTable: "range_fade_global_config",
+    overrideTable: "range_fade_pair_overrides",
     configSetColumn: "config_set",
     overrideConfigJoin: false,
     profileColumn: "profile_name",

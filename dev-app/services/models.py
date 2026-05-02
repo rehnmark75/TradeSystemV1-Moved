@@ -109,6 +109,8 @@ class TradeLog(Base):
     pnl_calculation_method = Column(String(20))
     pnl_calculated_at = Column(DateTime)
 
+    trigger_source = Column(String(20), default='scanner')  # 'scanner' | 'manual_trigger'
+
     # Virtual Stop Loss fields (for scalping mode)
     is_scalp_trade = Column(Boolean, default=False)  # True if scalp trade with VSL monitoring
     virtual_sl_pips = Column(Float, nullable=True)  # VSL distance in pips (e.g., 4.0)

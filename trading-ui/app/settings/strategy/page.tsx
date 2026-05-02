@@ -17,6 +17,7 @@ import { logTelemetry } from "../../../lib/settings/telemetry";
 import { useEnvironment } from "../../../lib/environment";
 import { epicToDisplayName } from "../../../lib/settings/epicDisplay";
 import type { SmcParameterMetadata } from "../../../types/settings";
+import ManualTriggerPanel from "../../../components/manual-trigger/ManualTriggerPanel";
 
 type EffectivePayload = {
   epic: string;
@@ -282,6 +283,7 @@ export default function UnifiedStrategySettings() {
   const [changeReason, setChangeReason] = useState("");
   const [pairSaveLoading, setPairSaveLoading] = useState(false);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [showTrigger, setShowTrigger] = useState(false);
 
   // Refs for section scrolling
   const sectionRefs = useRef<Map<string, HTMLElement>>(new Map());
@@ -830,7 +832,22 @@ export default function UnifiedStrategySettings() {
               ? "Pair fully disabled"
               : "Pair actively traded"}
           </span>
+          <button
+            className={`pair-status-btn${showTrigger ? " selected" : ""}`}
+            style={{ marginLeft: "auto" }}
+            onClick={() => setShowTrigger((prev: boolean) => !prev)}
+            title="Manual Signal Trigger (demo only)"
+          >
+            ⚡ Trigger
+          </button>
         </div>
+      ) : null}
+
+      {mode === "pair" && selectedEpic && showTrigger ? (
+        <ManualTriggerPanel
+          epic={selectedEpic}
+          strategy={strategyDef.label}
+        />
       ) : null}
 
       <div className="strategy-layout">

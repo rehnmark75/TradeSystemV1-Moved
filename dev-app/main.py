@@ -1158,6 +1158,14 @@ try:
 except Exception as _tcr_err:  # pragma: no cover
     print(f"⚠️ Trailing-config router not available: {_tcr_err}")
 
+# Manual trigger router (demo-only strategy evaluation)
+try:
+    from routers.manual_trigger_router import router as manual_trigger_router
+    app.include_router(manual_trigger_router)
+    print("✅ Manual trigger router registered at /api/manual-trigger/evaluate")
+except Exception as _mtr_err:  # pragma: no cover
+    print(f"⚠️ Manual trigger router not available: {_mtr_err}")
+
 # Backtest router
 if BACKTEST_AVAILABLE and backtest_router:
     app.include_router(backtest_router, tags=["backtest"])

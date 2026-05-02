@@ -9389,3 +9389,237 @@ table {
   font-size: 0.8rem;
   font-variant-numeric: tabular-nums;
 }
+
+/* ── Manual Trigger Panel ────────────────────────────────────────────────── */
+
+.manual-trigger-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  padding: 20px;
+  border-radius: 10px;
+  background: var(--surface);
+  border: 1px solid var(--line-strong);
+  margin-bottom: 16px;
+}
+
+.manual-trigger-header {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.manual-trigger-title {
+  font-size: 0.95rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.manual-trigger-meta {
+  font-size: 0.8rem;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.manual-trigger-env-warning {
+  font-size: 0.78rem;
+  color: var(--warn, #f59e0b);
+  background: rgba(245, 158, 11, 0.1);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  border-radius: 5px;
+  padding: 3px 8px;
+  margin-left: auto;
+}
+
+.manual-trigger-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.manual-trigger-section-title {
+  font-size: 0.82rem;
+  font-weight: 600;
+  color: var(--ink);
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
+.manual-trigger-hint {
+  font-size: 0.75rem;
+  color: var(--muted);
+  font-weight: 400;
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.manual-trigger-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.trigger-evaluate-btn {
+  min-width: 160px;
+}
+
+.trigger-add-btn {
+  align-self: flex-start;
+  font-size: 0.8rem;
+  padding: 5px 12px;
+}
+
+.trigger-remove-btn {
+  background: transparent;
+  border: 1px solid var(--line-strong);
+  color: var(--muted);
+  border-radius: 5px;
+  padding: 4px 8px;
+  font-size: 0.8rem;
+  cursor: pointer;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.trigger-remove-btn:hover {
+  color: var(--ink);
+  border-color: var(--ink);
+}
+
+.manual-trigger-error {
+  padding: 10px 14px;
+  border-radius: 7px;
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+  font-size: 0.85rem;
+}
+
+/* ── Result cards ────────────────────────────────────────────────────────── */
+
+.manual-trigger-result {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 16px;
+  border-radius: 8px;
+  border: 1px solid;
+}
+
+.manual-trigger-result-no-signal {
+  background: rgba(107, 114, 128, 0.08);
+  border-color: rgba(107, 114, 128, 0.25);
+  flex-direction: row;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.manual-trigger-result-signal {
+  background: rgba(16, 185, 129, 0.07);
+  border-color: rgba(16, 185, 129, 0.3);
+}
+
+.trigger-result-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.trigger-result-icon {
+  font-size: 1.1rem;
+  flex-shrink: 0;
+}
+
+.manual-trigger-result-no-signal .trigger-result-icon {
+  color: var(--muted);
+}
+
+.manual-trigger-result-signal .trigger-result-icon {
+  color: #10b981;
+}
+
+.trigger-result-title {
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--ink);
+}
+
+.trigger-result-reason {
+  font-size: 0.82rem;
+  color: var(--muted);
+  margin-top: 2px;
+}
+
+/* ── Signal grid ─────────────────────────────────────────────────────────── */
+
+.trigger-signal-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.trigger-signal-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 5px 8px;
+  border-radius: 5px;
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 0.83rem;
+}
+
+.trigger-signal-label {
+  color: var(--muted);
+}
+
+.trigger-signal-value {
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 500;
+}
+
+/* ── Place trade controls ────────────────────────────────────────────────── */
+
+.trigger-place-btn {
+  align-self: flex-start;
+}
+
+.trigger-confirm {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 14px;
+  border-radius: 7px;
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.25);
+  font-size: 0.85rem;
+  color: var(--ink);
+  flex-wrap: wrap;
+}
+
+.trigger-confirm-actions {
+  display: flex;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.trigger-place-result {
+  font-size: 0.85rem;
+  padding: 8px 12px;
+  border-radius: 6px;
+}
+
+.trigger-place-result-ok {
+  background: rgba(16, 185, 129, 0.1);
+  border: 1px solid rgba(16, 185, 129, 0.3);
+  color: #10b981;
+}
+
+.trigger-place-result-err {
+  background: rgba(239, 68, 68, 0.1);
+  border: 1px solid rgba(239, 68, 68, 0.3);
+  color: #ef4444;
+}
