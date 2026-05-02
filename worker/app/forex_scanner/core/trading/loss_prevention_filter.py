@@ -335,6 +335,8 @@ class LossPreventionFilter:
                 return self._check_regime_and_efficiency(cond, signal)
             elif rule_type == 'day_and_hour':
                 return self._check_day_of_week(cond, signal, signal_timestamp) and self._check_hours(cond, signal, signal_timestamp)
+            elif rule_type == 'date_block':
+                return self._check_date_block(cond, signal, signal_timestamp, rule)
             else:
                 logger.debug(f"🛡️ LPF: Unknown rule type '{rule_type}' in {rule['rule_name']}")
                 return False
@@ -514,6 +516,56 @@ class LossPreventionFilter:
 
         return triggers >= min_triggers
 
+    def _check_date_block(
+        self,
+        cond: Dict,
+        signal: Dict,
+        signal_timestamp: Optional[datetime],
+        rule: Dict,
+    ) -> bool:
+        """
+        Block trading on specified calendar dates (e.g. EU/US bank holidays).
+
+        Condition fields:
+            dates       : list of "YYYY-MM-DD" strings (one-off / movable holidays)
+            month_days  : list of "MM-DD" strings (recurring fixed-date holidays)
+            epic_contains : optional substring filter; if absent, applies to all pairs
+
+        Emits a dedicated WARNING log line so blocked holiday signals are
+        unambiguous in the scanner log (separate from the generic rule list).
+        """
+        dt = self._get_signal_datetime(signal, signal_timestamp)
+        if dt is None:
+            return False
+
+        epic = signal.get('epic', '') or ''
+        epic_filter = cond.get('epic_contains', '')
+        if epic_filter and epic_filter not in epic:
+            return False
+
+        ymd = dt.strftime('%Y-%m-%d')
+        md = dt.strftime('%m-%d')
+
+        explicit_dates = cond.get('dates') or []
+        month_days = cond.get('month_days') or []
+
+        matched_label: Optional[str] = None
+        if ymd in explicit_dates:
+            matched_label = ymd
+        elif md in month_days:
+            matched_label = md
+
+        if matched_label is None:
+            return False
+
+        label = cond.get('label', rule.get('rule_name', 'holiday'))
+        signal_type = signal.get('signal_type', '?')
+        logger.warning(
+            f"🛡️📅 LPF HOLIDAY BLOCK: {epic} {signal_type} on {ymd} "
+            f"({label}) — rule={rule.get('rule_name')}"
+        )
+        return True
+
     def _check_regime_and_efficiency(self, cond: Dict, signal: Dict) -> bool:
         """Block signals when regime is 'trending' but efficiency ratio indicates no real trend."""
         regime = self._get_regime(signal)
@@ -564,6 +616,18 @@ class LossPreventionFilter:
         # Fall back to current time (live mode)
         if not self.backtest_mode:
             return datetime.now(timezone.utc).hour
+        return None
+
+    def _get_signal_datetime(self, signal: Dict, signal_timestamp: Optional[datetime] = None) -> Optional[datetime]:
+        """Resolve the signal's wall-clock datetime (UTC) for date-based checks."""
+        if self.backtest_mode and signal_timestamp:
+            return signal_timestamp
+        for field in ['signal_timestamp', 'market_timestamp', 'timestamp']:
+            ts = signal.get(field)
+            if ts and isinstance(ts, datetime):
+                return ts
+        if not self.backtest_mode:
+            return datetime.now(timezone.utc)
         return None
 
     def _get_day_of_week(self, signal: Dict, signal_timestamp: Optional[datetime] = None) -> Optional[int]:
