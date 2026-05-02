@@ -652,17 +652,11 @@ Signal Display Format:
         Returns:
             Dict of scalp mode config overrides
         """
-        try:
-            from forex_scanner.config_virtual_stop_backtest import (
-                get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
-            )
-        except ImportError:
-            from config_virtual_stop_backtest import (
-                get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
-            )
+        # Default scalp TP (previously read from config_virtual_stop_backtest, VSL deprecated Jan 2026)
+        _DEFAULT_SCALP_TP_PIPS = 10.0
 
         # Get scalp TP from overrides or use default
-        scalp_tp = DEFAULT_SCALP_TP_PIPS
+        scalp_tp = _DEFAULT_SCALP_TP_PIPS
         if existing_overrides and 'scalp_tp_pips' in existing_overrides:
             scalp_tp = existing_overrides['scalp_tp_pips']
 

@@ -172,39 +172,7 @@ class BacktestScanner(IntelligentForexScanner):
             self._use_atr_trailing = True
             self.logger.info(f"📊 ATR-Adaptive Trailing: ENABLED (distances scale with ATR)")
 
-        # 🎯 VSL MODE: Virtual Stop Loss emulation for scalping backtests
-        # When enabled via --scalp flag, uses per-pair VSL values from config
-        self._use_vsl_mode = False
-        self._vsl_config = {}
-        if self._config_override and self._config_override.get('use_vsl_mode'):
-            self._use_vsl_mode = True
-            self._use_scalping_mode = False  # VSL mode takes precedence
-            try:
-                from forex_scanner.config_virtual_stop_backtest import (
-                    get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
-                )
-            except ImportError:
-                from config_virtual_stop_backtest import (
-                    get_vsl_pips, DEFAULT_SCALP_TP_PIPS, PAIR_VSL_CONFIGS
-                )
-
-            # Get TP from config override or use default
-            scalp_tp = self._config_override.get('scalp_tp_pips', DEFAULT_SCALP_TP_PIPS)
-
-            # Pre-load VSL configs for all epics
-            for epic in self.epic_list:
-                self._vsl_config[epic] = {
-                    'vsl_pips': get_vsl_pips(epic),
-                    'tp_pips': scalp_tp
-                }
-
-            self.logger.info(f"🎯 VSL Mode: ENABLED (Virtual Stop Loss Emulation)")
-            self.logger.info(f"   Take Profit: {scalp_tp} pips")
-            for epic, cfg in self._vsl_config.items():
-                pair = epic.replace('CS.D.', '').replace('.MINI.IP', '')
-                self.logger.info(f"   {pair}: VSL={cfg['vsl_pips']} pips, TP={cfg['tp_pips']} pips")
-
-        elif self._use_scalping_mode:
+        if self._use_scalping_mode:
             try:
                 from configdata.strategies.config_scalping_strategy import SCALPING_MODE, SCALPING_STRATEGY_CONFIG
                 scalping_config = SCALPING_STRATEGY_CONFIG.get(SCALPING_MODE, {})
@@ -1319,22 +1287,7 @@ class BacktestScanner(IntelligentForexScanner):
             return self._trailing_stop_simulators[cache_key]
 
         # Create new simulator with pair-specific config
-        if self._use_vsl_mode and epic in self._vsl_config:
-            # 🎯 VSL Mode: Dynamic VSL trailing with stages (BE, Stage1, Stage2)
-            # Uses VSLTrailingSimulator for proper stage progression
-            try:
-                from forex_scanner.core.trading.vsl_trailing_simulator import VSLTrailingSimulator
-            except ImportError:
-                from core.trading.vsl_trailing_simulator import VSLTrailingSimulator
-
-            simulator = VSLTrailingSimulator(
-                epic=epic,
-                logger=self.logger
-            )
-            self.logger.debug(f"🎯 Created DYNAMIC VSL simulator for {epic}: "
-                             f"BE={simulator.config['breakeven_trigger_pips']} pips, "
-                             f"TP={simulator.config['target_pips']} pips")
-        elif self._use_scalping_mode:
+        if self._use_scalping_mode:
             # Scalping uses fixed SL/TP, no trailing
             simulator = TrailingStopSimulator(
                 epic=epic,

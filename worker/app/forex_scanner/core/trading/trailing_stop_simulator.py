@@ -16,12 +16,6 @@ import logging
 from typing import Dict, Any, Optional, Tuple
 import pandas as pd
 
-# Import VSL trailing simulator for scalp mode
-try:
-    from core.trading.vsl_trailing_simulator import VSLTrailingSimulator, create_vsl_trailing_simulator
-    VSL_SIMULATOR_AVAILABLE = True
-except ImportError:
-    VSL_SIMULATOR_AVAILABLE = False
 
 # PAIR_INFO is the source of truth for pip_multiplier per epic.
 # Gold (CS.D.CFEGOLD.CEE.IP) has pip_multiplier=10; FX majors 10000; JPY pairs 100.
@@ -381,14 +375,6 @@ class TrailingStopSimulator:
         Returns:
             Enhanced signal dictionary with trade outcome metrics
         """
-        # Check if this is a scalp trade that should use VSL trailing
-        is_scalp_trade = signal.get('is_scalp_trade', False)
-        use_vsl_trailing = signal.get('use_vsl_trailing', False) or is_scalp_trade
-
-        if use_vsl_trailing and VSL_SIMULATOR_AVAILABLE:
-            # Delegate to VSL trailing simulator for scalp trades
-            return self._simulate_with_vsl_trailing(signal, df, signal_idx)
-
         try:
             enhanced_signal = signal.copy()
 
