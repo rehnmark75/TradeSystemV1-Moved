@@ -334,162 +334,6 @@ class BacktestScanner(IntelligentForexScanner):
             # Replace the data_fetcher in the existing signal_detector
             self.signal_detector.data_fetcher = backtest_data_fetcher
 
-            # Also need to replace the data_fetcher in the EMA strategy AND enable backtest mode
-            if hasattr(self.signal_detector, 'ema_strategy') and self.signal_detector.ema_strategy:
-                self.signal_detector.ema_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.ema_strategy.backtest_mode = True
-                # CRITICAL FIX: Enable optimal parameters for consistent signal detection and validation
-                self.signal_detector.ema_strategy.use_optimal_parameters = True
-                self.logger.info("✅ EMA strategy configured for backtest mode - will use optimal parameters and process all alert timestamps")
-
-            # CRITICAL FIX: Also configure MACD strategy for backtest mode
-            if hasattr(self.signal_detector, 'macd_strategy') and self.signal_detector.macd_strategy:
-                self.signal_detector.macd_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.macd_strategy.backtest_mode = True
-                self.signal_detector.macd_strategy.use_optimized_parameters = True
-                self.logger.info("✅ MACD strategy configured for backtest mode - will use optimal parameters and backtest filtering")
-
-            # CRITICAL FIX: Configure EMA strategy for pipeline mode
-            if hasattr(self.signal_detector, 'ema_strategy') and self.signal_detector.ema_strategy:
-                self.signal_detector.ema_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.ema_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.ema_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'EMA_ENHANCED_VALIDATION', True)
-                # Disable breakout validator in basic mode for performance
-                if not self.pipeline_mode:
-                    self.signal_detector.ema_strategy.breakout_validator = None
-                if self.signal_detector.ema_strategy.enhanced_validation:
-                    self.logger.info("✅ EMA strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ EMA strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # CRITICAL FIX: Configure SMC strategy for pipeline mode
-            if hasattr(self.signal_detector, 'smc_strategy') and self.signal_detector.smc_strategy:
-                self.signal_detector.smc_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.smc_strategy.backtest_mode = True
-                # CRITICAL: Reinitialize MTF analyzer with backtest data_fetcher
-                if hasattr(self.signal_detector.smc_strategy, 'reinitialize_mtf_analyzer'):
-                    self.signal_detector.smc_strategy.reinitialize_mtf_analyzer(backtest_data_fetcher)
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.smc_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'SMC_ENHANCED_VALIDATION', True)
-                if self.signal_detector.smc_strategy.enhanced_validation:
-                    self.logger.info("✅ SMC strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ SMC strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # CRITICAL FIX: Configure Ichimoku strategy for pipeline mode
-            if hasattr(self.signal_detector, 'ichimoku_strategy') and self.signal_detector.ichimoku_strategy:
-                self.signal_detector.ichimoku_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.ichimoku_strategy.backtest_mode = True
-                # CRITICAL: Disable MTF analysis in backtest mode for performance and reliability
-                self.signal_detector.ichimoku_strategy.enable_mtf_analysis = False
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.ichimoku_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'ICHIMOKU_ENHANCED_VALIDATION', True)
-                # Disable expensive RAG features in basic mode
-                if not self.pipeline_mode:
-                    self.signal_detector.ichimoku_strategy.rag_enabled = False
-                    self.signal_detector.ichimoku_strategy.market_intelligence_adapter = None
-                if self.signal_detector.ichimoku_strategy.enhanced_validation:
-                    self.logger.info("✅ Ichimoku strategy configured for PIPELINE mode - enhanced validation and RAG enabled, MTF disabled")
-                else:
-                    self.logger.info("✅ Ichimoku strategy configured for BASIC mode - enhanced validation, RAG, and MTF disabled for fast testing")
-
-            # CRITICAL FIX: Configure Mean Reversion strategy for pipeline mode
-            if hasattr(self.signal_detector, 'mean_reversion_strategy') and self.signal_detector.mean_reversion_strategy:
-                self.signal_detector.mean_reversion_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.mean_reversion_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.mean_reversion_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'MEAN_REVERSION_ENHANCED_VALIDATION', True)
-                if self.signal_detector.mean_reversion_strategy.enhanced_validation:
-                    self.logger.info("✅ Mean Reversion strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ Mean Reversion strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # CRITICAL FIX: Configure Ranging Market strategy for pipeline mode
-            if hasattr(self.signal_detector, 'ranging_market_strategy') and self.signal_detector.ranging_market_strategy:
-                self.signal_detector.ranging_market_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.ranging_market_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.ranging_market_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'RANGING_MARKET_ENHANCED_VALIDATION', True)
-                if self.signal_detector.ranging_market_strategy.enhanced_validation:
-                    self.logger.info("✅ Ranging Market strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ Ranging Market strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # CRITICAL FIX: Configure Zero Lag strategy for pipeline mode
-            if hasattr(self.signal_detector, 'zero_lag_strategy') and self.signal_detector.zero_lag_strategy:
-                self.signal_detector.zero_lag_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.zero_lag_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.zero_lag_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'ZERO_LAG_ENHANCED_VALIDATION', True)
-                if self.signal_detector.zero_lag_strategy.enhanced_validation:
-                    self.logger.info("✅ Zero Lag strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ Zero Lag strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # CRITICAL FIX: Configure Momentum strategy for pipeline mode
-            if hasattr(self.signal_detector, 'momentum_strategy') and self.signal_detector.momentum_strategy:
-                self.signal_detector.momentum_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.momentum_strategy.backtest_mode = True
-                # NOTE: pipeline_mode only controls TradeValidator, not strategy behavior
-                self.logger.info("✅ Momentum strategy configured for backtest mode")
-
-            # ADDED: Configure BB+Supertrend strategy for pipeline mode
-            if hasattr(self.signal_detector, 'bb_supertrend_strategy') and self.signal_detector.bb_supertrend_strategy:
-                self.signal_detector.bb_supertrend_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.bb_supertrend_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.bb_supertrend_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'BB_SUPERTREND_ENHANCED_VALIDATION', True)
-                if self.signal_detector.bb_supertrend_strategy.enhanced_validation:
-                    self.logger.info("✅ BB+Supertrend strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ BB+Supertrend strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # ADDED: Configure KAMA strategy for pipeline mode
-            if hasattr(self.signal_detector, 'kama_strategy') and self.signal_detector.kama_strategy:
-                self.signal_detector.kama_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.kama_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.kama_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'KAMA_ENHANCED_VALIDATION', True)
-                if self.signal_detector.kama_strategy.enhanced_validation:
-                    self.logger.info("✅ KAMA strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ KAMA strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # ADDED: Configure Scalping strategy for pipeline mode
-            if hasattr(self.signal_detector, 'scalping_strategy') and self.signal_detector.scalping_strategy:
-                self.signal_detector.scalping_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.scalping_strategy.backtest_mode = True
-                # Set enhanced validation based on pipeline mode
-                self.signal_detector.scalping_strategy.enhanced_validation = self.pipeline_mode and getattr(config, 'SCALPING_ENHANCED_VALIDATION', True)
-                if self.signal_detector.scalping_strategy.enhanced_validation:
-                    self.logger.info("✅ Scalping strategy configured for PIPELINE mode - enhanced validation enabled")
-                else:
-                    self.logger.info("✅ Scalping strategy configured for BASIC mode - enhanced validation disabled for fast testing")
-
-            # CRITICAL FIX: Also configure any existing MACD strategies in cache for backtest mode
-            if hasattr(self.signal_detector, 'macd_strategies_cache') and self.signal_detector.macd_strategies_cache:
-                for epic, strategy in self.signal_detector.macd_strategies_cache.items():
-                    if strategy:
-                        strategy.data_fetcher = backtest_data_fetcher
-                        strategy.backtest_mode = True
-                        strategy.use_optimized_parameters = True
-                self.logger.info(f"✅ {len(self.signal_detector.macd_strategies_cache)} cached MACD strategies configured for backtest mode")
-
-            # ADDED: Configure EMA Double Confirmation strategy for backtest mode
-            if hasattr(self.signal_detector, 'ema_double_confirmation_strategy') and self.signal_detector.ema_double_confirmation_strategy:
-                self.signal_detector.ema_double_confirmation_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.ema_double_confirmation_strategy.backtest_mode = True
-                self.logger.info("✅ EMA Double Confirmation strategy configured for backtest mode")
-
-            # ADDED: Configure Silver Bullet strategy for backtest mode
-            if hasattr(self.signal_detector, 'silver_bullet_strategy') and self.signal_detector.silver_bullet_strategy:
-                self.signal_detector.silver_bullet_strategy.data_fetcher = backtest_data_fetcher
-                self.signal_detector.silver_bullet_strategy.backtest_mode = True
-                # Reset cooldowns for fresh backtest
-                self.signal_detector.silver_bullet_strategy.reset_cooldowns()
-                self.logger.info("✅ Silver Bullet strategy configured for backtest mode")
-
             # CRITICAL FIX: Configure SMC Simple strategy for backtest mode
             # This is the only active strategy after January 2026 cleanup
             # Set the backtest flag on signal_detector so lazy-loaded strategies use in-memory cooldowns
@@ -850,139 +694,45 @@ class BacktestScanner(IntelligentForexScanner):
                     self.logger.debug(f"⏭️ No suitable strategy found for {epic} at {timestamp}")
                     return None
 
-            # Strategy method mapping
-            strategy_methods = {
-                'EMA_CROSSOVER': 'detect_signals_mid_prices',
-                'EMA': 'detect_signals_mid_prices',
-                'MACD': 'detect_macd_ema_signals',
-                'MACD_EMA': 'detect_macd_ema_signals',
-                'KAMA': 'detect_kama_signals',
-                'BOLLINGER_SUPERTREND': 'detect_bb_supertrend_signals',
-                'BB_SUPERTREND': 'detect_bb_supertrend_signals',
-                'BB': 'detect_bb_supertrend_signals',
-                'ZERO_LAG': 'detect_zero_lag_signals',
-                'ZEROLAG': 'detect_zero_lag_signals',  # Fixed: Accept both forms
-                'ZL': 'detect_zero_lag_signals',
-                'MOMENTUM': 'detect_momentum_signals',
-                'SMC_FAST': 'detect_smc_signals',
-                'SMC': 'detect_smc_signals',
-                'SMC_STRUCTURE': 'detect_smc_structure_signals',
-                'SMC_PURE': 'detect_smc_structure_signals',
-                'SMC_SIMPLE': 'detect_smc_simple_signals',
-                'SMC_EMA': 'detect_smc_simple_signals',  # Alternative name
-                'ICHIMOKU': 'detect_ichimoku_signals',
-                'ICHIMOKU_CLOUD': 'detect_ichimoku_signals',
-                'MEAN_REVERSION': 'detect_mean_reversion_signals',
-                'MEANREV': 'detect_mean_reversion_signals',  # Fixed: Accept short form
-                'RANGE_FADE': 'detect_range_fade_signals',
-                'RANGING_MARKET': 'detect_ranging_market_signals',
-                'RANGING': 'detect_ranging_market_signals',
-                'SCALPING': 'detect_scalping_signals',  # ADDED: Scalping strategy support
-                'SCALP': 'detect_scalping_signals',  # ADDED: Short form
-                'VOLUME_PROFILE': 'detect_volume_profile_signals',  # ADDED: Volume Profile strategy
-                'VP': 'detect_volume_profile_signals',  # ADDED: Short form
-                'EMA_DOUBLE_CONFIRMATION': 'detect_ema_double_confirmation_signals',  # EMA Double Confirmation
-                'EMA_DOUBLE': 'detect_ema_double_confirmation_signals',  # Short form
-                'EDC': 'detect_ema_double_confirmation_signals',  # Abbreviation
-                'SILVER_BULLET': 'detect_silver_bullet_signals',  # ICT Silver Bullet strategy
-                'SB': 'detect_silver_bullet_signals',  # Short form
-                'ICT_SILVER_BULLET': 'detect_silver_bullet_signals',  # Full name
-                'FVG_RETEST': 'detect_fvg_retest_signals',  # FVG Retest dual-mode strategy
-                'FVG': 'detect_fvg_retest_signals',  # Short form
-                'XAU_GOLD': 'detect_xau_gold_signals',  # Gold-optimized 3-tier SMC
-                'XAU': 'detect_xau_gold_signals',
-                'GOLD': 'detect_xau_gold_signals',
-                'RANGE_STRUCTURE': 'detect_range_structure_signals',
-                'RS': 'detect_range_structure_signals',
-            }
-
-            # Use specific strategy if requested, otherwise use all strategies
-            if strategy_name in strategy_methods:
-                method_name = strategy_methods[strategy_name]
-                if hasattr(self.signal_detector, method_name):
-                    self.logger.debug(f"🎯 Running {strategy_name} strategy only for {epic}")
-                    method = getattr(self.signal_detector, method_name)
-
-                    # Different strategies have different signatures
-                    # EMA strategies don't take spread_pips, others do
-                    if method_name in ['detect_signals_mid_prices']:
-                        signals = method(epic, pair_name, self.timeframe)
-                    else:
-                        # 🔒 HARD-CODED: Strategy-specific timeframes
-                        # MACD and SMC strategies always use 1H timeframe
-                        if strategy_name in ['MACD', 'MACD_EMA', 'SMC_STRUCTURE', 'SMC_PURE', 'SMC_SIMPLE', 'SMC_EMA']:
-                            strategy_timeframe = '1h'
-                        else:
-                            strategy_timeframe = self.timeframe
-
-                        # Strategies that support backtest timestamp for cooldown/session handling
-                        if method_name in ['detect_volume_profile_signals', 'detect_ranging_market_signals', 'detect_mean_reversion_signals', 'detect_range_fade_signals']:
-                            signals = method(epic, pair_name, self.spread_pips, strategy_timeframe, current_timestamp=timestamp)
-                        else:
-                            signals = method(epic, pair_name, self.spread_pips, strategy_timeframe)
-
-                    # Some methods return a single signal dict, others return lists
-                    if signals and not isinstance(signals, list):
-                        signals = [signals]
-
-                    signal = signals[0] if signals else None
-
-                    # Pipeline mode: Run through full validation and processing
-                    if signal and self.pipeline_mode:
-                        self.logger.debug(f"🔄 PIPELINE MODE ACTIVE: Processing {strategy_name} signal for {epic} through full validation pipeline")
-                        signal = self._apply_full_pipeline(signal, epic, timestamp)
-                    elif signal:
-                        # Basic mode: Mark as validated by default (no validator used)
-                        signal['validation_passed'] = True
-                        signal['validation_message'] = 'Basic mode - no validation applied'
-                        self.logger.debug(f"🚀 BASIC MODE: Skipping trade validator for {strategy_name} signal on {epic}")
-
-                    # Add multi-strategy routing metadata if applicable
-                    if signal and routed_strategy:
-                        signal['routed_strategy'] = routed_strategy
-                        signal['routing_confidence_modifier'] = confidence_modifier
-                        if routing_context:
-                            signal['routing_regime'] = routing_context.get('regime')
-                            signal['routing_session'] = routing_context.get('session')
-
-                    # FIXED: Return result even if None - don't fallback to all strategies
-                    return signal
-                else:
-                    # FIXED: Strategy was requested but method doesn't exist
-                    # This should not happen if force_initialize_strategy was called
-                    self.logger.error(f"❌ Strategy '{strategy_name}' method '{method_name}' not available - strategy not initialized?")
-                    return None  # Don't fallback to all strategies
-
-            # Only run all strategies if explicitly requested or no strategy specified
+            # Run all strategies if none specified
             if strategy_name in ['ALL', 'ALL_STRATEGIES', ''] or not strategy_name:
-                if hasattr(self.signal_detector, 'detect_signals_all_strategies'):
-                    self.logger.debug(f"🔄 Running all strategies for {epic}")
-                    signals = self.signal_detector.detect_signals_all_strategies(
-                        epic, pair_name, self.spread_pips, self.timeframe
-                    )
-                else:
-                    # Fallback to single strategy
-                    signals = self.signal_detector.detect_signals_mid_prices(
-                        epic, pair_name, self.timeframe
-                    )
-
-                # Pipeline mode: Run through full validation and processing for fallback signals
+                self.logger.debug(f"🔄 Running all strategies for {epic}")
+                signals = self.signal_detector.detect_signals_all_strategies(
+                    epic, pair_name, self.spread_pips, self.timeframe
+                )
                 if signals and self.pipeline_mode:
-                    self.logger.info(f"🔄 PIPELINE MODE ACTIVE: Processing all-strategies signals for {epic} through full validation pipeline")
-                    # For multiple signals, process each one
+                    self.logger.info(f"🔄 PIPELINE MODE: Processing all-strategies signals for {epic}")
                     if isinstance(signals, list):
-                        signals = [self._apply_full_pipeline(signal, epic, timestamp) for signal in signals if signal]
-                        signals = [s for s in signals if s]  # Remove None results
+                        signals = [self._apply_full_pipeline(s, epic, timestamp) for s in signals if s]
+                        signals = [s for s in signals if s]
                     else:
                         signals = self._apply_full_pipeline(signals, epic, timestamp)
-                elif signals:
-                    self.logger.info(f"🚀 BASIC MODE: Skipping trade validator and market intelligence for all-strategies signals on {epic}")
-
                 return signals
 
-            # Unknown strategy name that's not in the mapping
-            self.logger.error(f"❌ Unknown strategy: '{strategy_name}' - not found in strategy_methods mapping")
-            return None
+            # Single strategy: SMC_SIMPLE always uses 1h timeframe
+            strategy_timeframe = '1h' if strategy_name in ['SMC_SIMPLE', 'SMC_EMA'] else self.timeframe
+
+            self.logger.debug(f"🎯 Running {strategy_name} strategy only for {epic}")
+            signal = self.signal_detector._detect_single_strategy(
+                strategy_name, epic, pair_name, self.spread_pips, strategy_timeframe,
+                current_timestamp=timestamp,
+            )
+
+            if signal and self.pipeline_mode:
+                self.logger.debug(f"🔄 PIPELINE MODE: Processing {strategy_name} signal for {epic}")
+                signal = self._apply_full_pipeline(signal, epic, timestamp)
+            elif signal:
+                signal['validation_passed'] = True
+                signal['validation_message'] = 'Basic mode - no validation applied'
+
+            if signal and routed_strategy:
+                signal['routed_strategy'] = routed_strategy
+                signal['routing_confidence_modifier'] = confidence_modifier
+                if routing_context:
+                    signal['routing_regime'] = routing_context.get('regime')
+                    signal['routing_session'] = routing_context.get('session')
+
+            return signal
 
         except Exception as e:
             self.logger.error(f"Error detecting signals for {epic} at {timestamp}: {e}")

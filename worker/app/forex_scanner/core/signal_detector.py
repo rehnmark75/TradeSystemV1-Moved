@@ -918,6 +918,62 @@ class SignalDetector:
             self.logger.error(f"❌ Error in detect_signals_all_strategies for {epic}: {e}")
             return all_signals
 
+    _STRATEGY_ALIASES: Dict[str, str] = {
+        'SMC_EMA': 'SMC_SIMPLE',
+        'MR': 'MEAN_REVERSION',
+        'MEANREV': 'MEAN_REVERSION',
+        'RANGING': 'RANGING_MARKET',
+        'VP': 'VOLUME_PROFILE',
+        'RS': 'RANGE_STRUCTURE',
+        'XAU': 'XAU_GOLD',
+        'GOLD': 'XAU_GOLD',
+        'FVG': 'FVG_RETEST',
+    }
+
+    def _detect_single_strategy(
+        self,
+        strategy_name: str,
+        epic: str,
+        pair: str,
+        spread_pips: float,
+        timeframe: str,
+        current_timestamp=None,
+    ) -> Optional[Dict]:
+        """Run one named strategy and return its signal (or None).
+
+        Canonical dispatch used by BacktestScanner to avoid duplicating the
+        strategy→method mapping in two places.  Unknown names are logged and
+        return None.
+        """
+        name = self._STRATEGY_ALIASES.get(strategy_name, strategy_name)
+        try:
+            if name == 'SMC_SIMPLE':
+                signal = self.detect_smc_simple_signals(epic, pair, spread_pips, timeframe)
+            elif name == 'XAU_GOLD':
+                signal = self.detect_xau_gold_signals(epic, pair, spread_pips, timeframe)
+            elif name == 'FVG_RETEST':
+                signal = self.detect_fvg_retest_signals(epic, pair, spread_pips, timeframe)
+            elif name == 'RANGE_FADE':
+                signal = self.detect_range_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'RANGE_STRUCTURE':
+                signal = self.detect_range_structure_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'MEAN_REVERSION':
+                signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'RANGING_MARKET':
+                signal = self.detect_ranging_market_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'VOLUME_PROFILE':
+                signal = self.detect_volume_profile_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            else:
+                self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
+                return None
+
+            if signal and isinstance(signal, list):
+                signal = signal[0]
+            return signal
+        except Exception as e:
+            self.logger.error(f"❌ [{name}] Error for {epic}: {e}")
+            return None
+
     def detect_signals(self, epic: str, pair: str, spread_pips: float = 1.5, timeframe: str = None) -> List[Dict]:
         """
         Main signal detection entry point.
