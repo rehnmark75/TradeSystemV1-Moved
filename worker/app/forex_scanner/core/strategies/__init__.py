@@ -13,6 +13,11 @@ Adding a new strategy:
 
 from .base_strategy import BaseStrategy
 from .smc_simple_strategy import SMCSimpleStrategy, create_smc_simple_strategy
+from .xau_gold_strategy import XAUGoldStrategy, create_xau_gold_strategy
+from .fvg_retest_strategy import FVGRetestStrategy
+from .mean_reversion_strategy import MeanReversionStrategy
+from .ranging_market_strategy import RangingMarketStrategy, create_ranging_market_strategy
+from .volume_profile_strategy import VolumeProfileStrategy, create_volume_profile_strategy
 from .range_fade_strategy import (
     RangeFadeStrategy,
     EURUSDRangeFadeStrategy,  # back-compat alias
@@ -39,6 +44,14 @@ __all__ = [
     # Active strategies
     'SMCSimpleStrategy',
     'create_smc_simple_strategy',
+    'XAUGoldStrategy',
+    'create_xau_gold_strategy',
+    'FVGRetestStrategy',
+    'MeanReversionStrategy',
+    'RangingMarketStrategy',
+    'create_ranging_market_strategy',
+    'VolumeProfileStrategy',
+    'create_volume_profile_strategy',
     'RangeFadeStrategy',
     'EURUSDRangeFadeStrategy',  # back-compat alias
     'create_range_fade_strategy',

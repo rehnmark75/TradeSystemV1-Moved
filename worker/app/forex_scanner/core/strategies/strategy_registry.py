@@ -211,19 +211,12 @@ class StrategyRegistry:
             except Exception as e:
                 self.logger.debug(f"Could not get enabled strategies from DB: {e}")
 
-        # Fallback to config file
-        try:
-            import config as system_config
-
-            enabled = []
-            if getattr(system_config, 'SMC_SIMPLE_STRATEGY', False):
-                enabled.append('SMC_SIMPLE')
-
-            return enabled
-
-        except ImportError:
-            self.logger.warning("⚠️ Could not load config, returning empty strategy list")
-            return []
+        # Fallback: all registered strategies are considered enabled
+        registered = list(self._strategies.keys())
+        if registered:
+            return registered
+        self.logger.warning("⚠️ No strategies registered, returning empty list")
+        return []
 
     def get_registered_strategies(self) -> List[str]:
         """Get list of all registered strategy names"""
@@ -300,20 +293,8 @@ def _auto_register_smc_simple():
 _auto_register_smc_simple()
 
 
-def _auto_register_xau_gold():
-    """Auto-register XAU_GOLD strategy if available"""
-    try:
-        from .xau_gold_strategy import XAUGoldStrategy  # noqa: F401
-        logger.debug("✅ Auto-registered XAU_GOLD strategy")
-    except ImportError as e:
-        logger.warning(f"⚠️ Could not auto-register XAU_GOLD: {e}")
-
-
-_auto_register_xau_gold()
-
-
-# RANGE_FADE self-registers via @register_strategy decorator on
-# RangeFadeStrategy. core/strategies/__init__.py imports the module,
-# which fires the decorator — no explicit auto-register call needed (and adding
-# one causes a circular import since it runs while range_fade_strategy is still
-# being loaded).
+# All strategies self-register via @register_strategy decorator when their
+# modules are imported. core/strategies/__init__.py imports every active
+# strategy module, which fires the decorators — no explicit auto-register
+# calls are needed here (and adding them causes circular imports since they
+# run while the strategy module is still being loaded).
