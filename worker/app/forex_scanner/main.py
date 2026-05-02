@@ -22,25 +22,13 @@ except ImportError:
 try:
     from commands.debug_commands import DebugCommands
     from commands.backtest_commands import BacktestCommands
-    from commands.scalping_commands import ScalpingCommands
     from commands.claude_commands import ClaudeCommands
     from commands.analysis_commands import AnalysisCommands
 except ImportError:
     from forex_scanner.commands.debug_commands import DebugCommands
     from forex_scanner.commands.backtest_commands import BacktestCommands
-    from forex_scanner.commands.scalping_commands import ScalpingCommands
     from forex_scanner.commands.claude_commands import ClaudeCommands
     from forex_scanner.commands.analysis_commands import AnalysisCommands
-
-# Check if KAMA commands are available
-try:
-    try:
-        from commands.kama_commands import KAMACommands
-    except ImportError:
-        from forex_scanner.commands.kama_commands import KAMACommands
-    KAMA_COMMANDS_AVAILABLE = True
-except ImportError:
-    KAMA_COMMANDS_AVAILABLE = False
 
 # Check if dynamic config commands are available
 try:
@@ -51,16 +39,6 @@ try:
     DYNAMIC_CONFIG_AVAILABLE = True
 except ImportError:
     DYNAMIC_CONFIG_AVAILABLE = False
-
-# NEW: Check if smart money commands are available
-try:
-    try:
-        from commands.smart_money_commands import SmartMoneyCommands
-    except ImportError:
-        from forex_scanner.commands.smart_money_commands import SmartMoneyCommands
-    SMART_MONEY_COMMANDS_AVAILABLE = True
-except ImportError:
-    SMART_MONEY_COMMANDS_AVAILABLE = False
 
 
 class ForexScannerCLI:
@@ -73,26 +51,14 @@ class ForexScannerCLI:
         self.scanner_commands = ScannerCommands()
         self.debug_commands = DebugCommands()
         self.backtest_commands = BacktestCommands()
-        self.scalping_commands = ScalpingCommands()
         self.claude_commands = ClaudeCommands()
         self.analysis_commands = AnalysisCommands()
-        
+
         # Initialize optional command modules
-        if KAMA_COMMANDS_AVAILABLE:
-            self.kama_commands = KAMACommands()
-        else:
-            self.kama_commands = None
-            
         if DYNAMIC_CONFIG_AVAILABLE:
             self.dynamic_config_commands = DynamicConfigCommands()
         else:
             self.dynamic_config_commands = None
-            
-        # NEW: Initialize smart money command modules
-        if SMART_MONEY_COMMANDS_AVAILABLE:
-            self.smart_money_commands = SmartMoneyCommands()
-        else:
-            self.smart_money_commands = None
     
     def create_parser(self) -> argparse.ArgumentParser:
         """Create argument parser with all commands"""
@@ -206,38 +172,21 @@ Examples:
             
             # BB+Supertrend commands
             'debug-bb-supertrend', 'test-bb-supertrend', 'backtest-bb-supertrend',
-            
-            # Scalping commands
-            'scalp', 'debug-scalping',
-            
+
             # Claude commands
             'test-claude', 'claude-timestamp', 'claude-batch',
-            
+
             # Analysis commands
             'test-bb', 'compare-bb', 'list-ema-configs'
         ]
-        
-        # Add KAMA commands if available
-        if KAMA_COMMANDS_AVAILABLE:
-            base_commands.extend([
-                'test-kama', 'debug-kama', 'backtest-kama', 'kama-signals',
-                'kama-compare', 'kama-optimization'
-            ])
-        
+
         # Add dynamic config commands if available
         if DYNAMIC_CONFIG_AVAILABLE:
             base_commands.extend([
                 'show-configs', 'config-performance', 'optimize-configs',
                 'market-analysis', 'test-config-selection', 'config-settings'
             ])
-        
-        # NEW: Add smart money commands if available
-        if SMART_MONEY_COMMANDS_AVAILABLE:
-            base_commands.extend([
-                'debug-smart-money', 'compare-strategies', 'test-smart-validation',
-                'smart-money-status', 'smart-backtest', 'smart-ema-test', 'smart-macd-test'
-            ])
-        
+
         return base_commands
     
     def execute_command(self, args) -> bool:
@@ -266,20 +215,9 @@ Examples:
                     ema_configs=args.ema_configs
                 )
             elif args.command == 'compare-strategies':
-                # Check if this should go to smart money commands or regular backtest commands
-                if SMART_MONEY_COMMANDS_AVAILABLE and self.smart_money_commands and (
-                    hasattr(args, 'strategies') and args.strategies and 
-                    any('smart_money' in s for s in args.strategies)
-                ):
-                    # Route to smart money comparison
-                    return self.smart_money_commands.compare_strategies(
-                        epic=args.epic, days=args.days or 7
-                    )
-                else:
-                    # Route to regular strategy comparison
-                    return self.backtest_commands.compare_strategies(
-                        epic=args.epic, days=args.days, timeframe=args.timeframe
-                    )
+                return self.backtest_commands.compare_strategies(
+                    epic=args.epic, days=args.days, timeframe=args.timeframe
+                )
             
             # Debug commands
             elif args.command == 'debug':
@@ -316,19 +254,6 @@ Examples:
             elif args.command == 'backtest-bb-supertrend':
                 return self._backtest_bb_supertrend_strategy(args)
             
-            # Scalping commands
-            elif args.command == 'scalp':
-                return self.scalping_commands.run_scalping_scan(
-                    epic=args.epic, mode=args.scalping_mode or 'aggressive'
-                )
-            elif args.command == 'debug-scalping':
-                if not args.epic:
-                    self.logger.error("❌ --epic is required for debug-scalping command")
-                    return False
-                return self.scalping_commands.debug_scalping_signal(
-                    epic=args.epic, mode=args.scalping_mode or 'aggressive'
-                )
-            
             # Claude commands
             elif args.command == 'test-claude':
                 return self.claude_commands.test_claude_integration()
@@ -351,34 +276,6 @@ Examples:
                 return self.analysis_commands.compare_bb_filters(epic=args.epic, days=args.days)
             elif args.command == 'list-ema-configs':
                 return self.analysis_commands.list_ema_configs()
-            
-            # KAMA commands
-            elif KAMA_COMMANDS_AVAILABLE and self.kama_commands:
-                if args.command == 'test-kama':
-                    if not args.epic:
-                        self.logger.error("❌ --epic is required for test-kama command")
-                        return False
-                    return self.kama_commands.test_kama_strategy(epic=args.epic)
-                elif args.command == 'debug-kama':
-                    if not args.epic:
-                        self.logger.error("❌ --epic is required for debug-kama command")
-                        return False
-                    return self.kama_commands.debug_kama_signal(epic=args.epic)
-                elif args.command == 'backtest-kama':
-                    # Use the main.py backtest method for KAMA (like BB+Supertrend)
-                    return self._backtest_kama_strategy(args)
-                elif args.command == 'kama-signals':
-                    return self.kama_commands.analyze_kama_signals(
-                        epic=args.epic, days=args.days
-                    )
-                elif args.command == 'kama-compare':
-                    return self.kama_commands.compare_kama_configs(
-                        epic=args.epic, days=args.days
-                    )
-                elif args.command == 'kama-optimization':
-                    return self.kama_commands.optimize_kama_parameters(
-                        epic=args.epic, days=args.days
-                    )
             
             # Dynamic config commands
             elif DYNAMIC_CONFIG_AVAILABLE and self.dynamic_config_commands:
@@ -407,38 +304,7 @@ Examples:
                     )
                 elif args.command == 'config-settings':
                     return self.dynamic_config_commands.settings(show_current=True)
-            
-            # NEW: Smart Money commands
-            elif SMART_MONEY_COMMANDS_AVAILABLE and self.smart_money_commands:
-                if args.command == 'debug-smart-money':
-                    if not args.epic:
-                        self.logger.error("❌ --epic is required for debug-smart-money command")
-                        return False
-                    return self.smart_money_commands.debug_smart_money_analysis(
-                        epic=args.epic, timeframe=args.timeframe
-                    )
-                elif args.command == 'test-smart-validation':
-                    if not args.epic or not args.signal_type or args.price is None:
-                        self.logger.error("❌ --epic, --signal-type, and --price are required")
-                        return False
-                    return self.smart_money_commands.test_smart_money_validation(
-                        epic=args.epic, signal_type=args.signal_type, price=args.price
-                    )
-                elif args.command == 'smart-money-status':
-                    return self.smart_money_commands.get_smart_money_status()
-                elif args.command == 'smart-backtest':
-                    return self._smart_money_backtest(args)
-                elif args.command == 'smart-ema-test':
-                    if not args.epic:
-                        self.logger.error("❌ --epic is required for smart-ema-test command")
-                        return False
-                    return self._test_smart_ema_strategy(args)
-                elif args.command == 'smart-macd-test':
-                    if not args.epic:
-                        self.logger.error("❌ --epic is required for smart-macd-test command")
-                        return False
-                    return self._test_smart_macd_strategy(args)
-            
+
             else:
                 self.logger.error(f"❌ Unknown command: {args.command}")
                 return False

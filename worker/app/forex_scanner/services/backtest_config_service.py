@@ -15,12 +15,8 @@ from datetime import datetime, timezone
 from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, field
 
-try:
-    from forex_scanner.core.database import DatabaseManager
-    from forex_scanner import config
-except ImportError:
-    from core.database import DatabaseManager
-    import config
+from forex_scanner.core.database import DatabaseManager
+from forex_scanner import config
 
 
 @dataclass

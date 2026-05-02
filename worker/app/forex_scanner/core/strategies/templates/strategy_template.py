@@ -32,7 +32,7 @@ from datetime import datetime, timedelta, timezone
 from dataclasses import dataclass, field
 
 # Strategy Registry - auto-registers on import
-from .strategy_registry import register_strategy, StrategyInterface
+from forex_scanner.core.strategies.strategy_registry import register_strategy, StrategyInterface
 
 
 # ==============================================================================
@@ -195,7 +195,7 @@ class TemplateStrategy(StrategyInterface):
     TODO: Customize the detect_signal method for your strategy logic.
     """
 
-    def __init__(self, config=None, logger=None, db_manager=None):
+    def __init__(self, config=None, logger=None, db_manager=None, config_override=None):
         """
         Initialize TEMPLATE Strategy
 
@@ -203,6 +203,8 @@ class TemplateStrategy(StrategyInterface):
             config: Optional legacy config module (ignored, we use database)
             logger: Logger instance
             db_manager: Database manager for config loading
+            config_override: Optional dict of parameter overrides applied
+                on top of DB config (used by `bt.py --override`).
         """
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
@@ -211,6 +213,14 @@ class TemplateStrategy(StrategyInterface):
         if db_manager:
             TemplateConfigService.get_instance().set_db_manager(db_manager)
         self.config = get_template_config()
+
+        # Apply per-run overrides from backtest harness, if any.
+        # New strategies MUST honor this contract or `--override` flags
+        # will silently do nothing (see feedback_strategy_override_wiring).
+        if config_override:
+            for key, value in config_override.items():
+                if hasattr(self.config, key):
+                    setattr(self.config, key, value)
 
         # Cooldown tracking (per-pair)
         self._cooldowns: Dict[str, datetime] = {}
@@ -492,7 +502,8 @@ class TemplateStrategy(StrategyInterface):
 def create_template_strategy(
     config=None,
     db_manager=None,
-    logger=None
+    logger=None,
+    config_override=None,
 ) -> TemplateStrategy:
     """
     Factory function to create TEMPLATE strategy instance.
@@ -500,9 +511,14 @@ def create_template_strategy(
     Usage:
         from forex_scanner.core.strategies.template_strategy import create_template_strategy
         strategy = create_template_strategy(db_manager=db_manager)
+
+    config_override: optional dict applied on top of DB config (used by
+    backtest --override flag). New strategies MUST forward this to the
+    instance so bt.py overrides actually reach the strategy.
     """
     return TemplateStrategy(
         config=config,
         logger=logger,
-        db_manager=db_manager
+        db_manager=db_manager,
+        config_override=config_override,
     )

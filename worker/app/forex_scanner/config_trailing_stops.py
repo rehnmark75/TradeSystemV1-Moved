@@ -382,6 +382,10 @@ def get_scalp_trailing_config(epic: str, atr_pips: float = None) -> dict:
     """
     Get scalp trailing config for an epic, optionally with ATR-based adaptation.
 
+    DB lookup (trailing_pair_config, is_scalp=True) is attempted first via
+    TrailingConfigService.  On DB miss or error the hardcoded SCALP_TRAILING_CONFIGS
+    dict is used as fallback.
+
     Args:
         epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
         atr_pips: ATR value in pips at signal time (if None, use static config)
@@ -389,14 +393,66 @@ def get_scalp_trailing_config(epic: str, atr_pips: float = None) -> dict:
     Returns:
         Dictionary with trailing configuration values (ATR-scaled if atr_pips provided)
     """
-    # Get base static config
-    static_config = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_CONFIG.copy())
+    import logging
+    _log = logging.getLogger(__name__)
+
+    # --- DB lookup (primary) ---
+    static_config = None
+    try:
+        from forex_scanner.services.trailing_config_service import get_trailing_config_service
+        db_cfg = get_trailing_config_service().get_config(epic, is_scalp=True)
+        if db_cfg:
+            # Merge over the file-based default so any missing keys are covered
+            base = DEFAULT_SCALP_CONFIG.copy()
+            base.update(db_cfg)
+            static_config = base
+            _log.debug(f"[trailing] scalp config for {epic} loaded from DB")
+    except Exception as exc:
+        _log.warning(f"[trailing] DB scalp config unavailable for {epic}: {exc} — using file fallback")
+
+    # --- File fallback ---
+    if static_config is None:
+        static_config = SCALP_TRAILING_CONFIGS.get(epic, DEFAULT_SCALP_CONFIG.copy())
 
     # If ATR provided, compute dynamic config
     if atr_pips is not None and atr_pips > 0:
         return compute_atr_trailing_config(atr_pips, static_config)
 
     return static_config
+
+
+def get_pair_trailing_config(epic: str) -> dict:
+    """
+    Get non-scalp (regular) trailing config for an epic.
+
+    DB lookup (trailing_pair_config, is_scalp=False) is attempted first via
+    TrailingConfigService.  On DB miss or error the hardcoded PAIR_TRAILING_CONFIGS
+    dict is used as fallback.
+
+    Args:
+        epic: Trading symbol (e.g., 'CS.D.EURUSD.CEEM.IP')
+
+    Returns:
+        Dictionary with trailing configuration values.
+    """
+    import logging
+    _log = logging.getLogger(__name__)
+
+    # --- DB lookup (primary) ---
+    try:
+        from forex_scanner.services.trailing_config_service import get_trailing_config_service
+        db_cfg = get_trailing_config_service().get_config(epic, is_scalp=False)
+        if db_cfg:
+            # Merge over file-based config so any missing keys are covered
+            base = PAIR_TRAILING_CONFIGS.get(epic, {}).copy()
+            base.update(db_cfg)
+            _log.debug(f"[trailing] pair config for {epic} loaded from DB")
+            return base
+    except Exception as exc:
+        _log.warning(f"[trailing] DB pair config unavailable for {epic}: {exc} — using file fallback")
+
+    # --- File fallback ---
+    return PAIR_TRAILING_CONFIGS.get(epic, {})
 
 
 # Default scalp config for unlisted pairs

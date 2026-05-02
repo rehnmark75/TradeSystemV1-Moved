@@ -10,7 +10,7 @@ Legacy strategies have been archived to forex_scanner/archive/disabled_strategie
 import pandas as pd
 import numpy as np
 import logging
-from typing import Dict, List, Optional, Union, Tuple
+from typing import Any, Dict, List, Optional, Union, Tuple
 from datetime import datetime, timedelta
 
 try:
@@ -88,11 +88,9 @@ class SignalDetector:
         self.signal_analyzer = SignalAnalyzer()
 
         # Multi-strategy support (v3.0.0)
-        # These strategies are lazy-loaded on first use
-        self.mean_reversion_strategy = None
-        self.range_fade_strategy = None
+        # Strategy instances are cached in _strategies dict; use _get_strategy() to access.
+        self._strategies: Dict[str, Any] = {}
         self._range_fade_profile = None
-        self.range_structure_strategy = None
 
         # MEAN_REVERSION runs concurrently (not through the router) so it can
         # fire alongside whichever strategy the router picks. Per-pair
@@ -133,6 +131,61 @@ class SignalDetector:
         self.logger.info("📊 SignalDetector initialized (SMC Simple only - legacy strategies archived)")
 
     # =========================================================================
+    # STRATEGY HELPER
+    # =========================================================================
+
+    def _get_strategy(self, name: str, **extra_override) -> Optional[Any]:
+        """Return a cached strategy instance, creating it on first call.
+
+        Uses StrategyRegistry to look up the registered class, then
+        instantiates it with the SignalDetector's own db_manager / logger /
+        config_override so every strategy gets consistent dependencies.
+        The instance is stored in self._strategies[name] so subsequent calls
+        are free.
+
+        Args:
+            name: Canonical strategy name (e.g. 'MEAN_REVERSION').
+            **extra_override: Extra key/value pairs merged into config_override
+                              for this strategy (e.g. erf_profile='5m').
+
+        Returns:
+            Strategy instance, or None if the class is not registered.
+        """
+        key = name.upper()
+        if key in self._strategies:
+            return self._strategies[key]
+
+        try:
+            from .strategies.strategy_registry import StrategyRegistry
+        except (ImportError, ValueError):
+            from forex_scanner.core.strategies.strategy_registry import StrategyRegistry
+
+        registry = StrategyRegistry.get_instance()
+        strategy_class = registry._strategies.get(key)
+        if strategy_class is None:
+            self.logger.warning(f"⚠️ Strategy not registered in StrategyRegistry: {key}")
+            return None
+
+        override = dict(self._config_override or {})
+        override.update(extra_override)
+
+        try:
+            instance = strategy_class(
+                config=None,
+                db_manager=self.db_manager,
+                logger=self.logger,
+                config_override=override if override else None,
+            )
+            instance.data_fetcher = self.data_fetcher
+            override_note = f" with {len(override)} overrides" if override else ""
+            self.logger.info(f"✅ {key} strategy loaded via StrategyRegistry{override_note}")
+            self._strategies[key] = instance
+            return instance
+        except Exception as e:
+            self.logger.error(f"❌ Error instantiating {key} via StrategyRegistry: {e}")
+            return None
+
+    # =========================================================================
     # BACKTEST FORCE-INITIALIZATION METHODS
     # =========================================================================
 
@@ -151,73 +204,40 @@ class SignalDetector:
         """
         strategy_name = strategy_name.upper()
 
-        # Strategy initialization mapping - SMC Simple + multi-strategy support (v3.0.0)
-        init_map = {
-            'SMC_SIMPLE': self._force_init_smc_simple,
-            'SMC_EMA': self._force_init_smc_simple,
-            'SMC': self._force_init_smc_simple,  # Default SMC to SMC_SIMPLE
-            'MEAN_REVERSION': self._force_init_mean_reversion,
-            'MR': self._force_init_mean_reversion,
-            'RANGE_FADE': self._force_init_range_fade,
-            'RANGE_STRUCTURE': self._force_init_range_structure,
-            'RS': self._force_init_range_structure,
-            'XAU_GOLD': self._force_init_xau_gold,
-            'XAU': self._force_init_xau_gold,
-            'GOLD': self._force_init_xau_gold,
+        # Canonical name aliases
+        aliases = {
+            'SMC_EMA': 'SMC_SIMPLE',
+            'SMC': 'SMC_SIMPLE',
+            'MR': 'MEAN_REVERSION',
+            'RS': 'RANGE_STRUCTURE',
+            'XAU': 'XAU_GOLD',
+            'GOLD': 'XAU_GOLD',
         }
+        canonical = aliases.get(strategy_name, strategy_name)
 
-        if strategy_name not in init_map:
+        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'RANGE_STRUCTURE', 'XAU_GOLD'}
+        if canonical not in known:
             return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, RANGE_STRUCTURE."
 
-        return init_map[strategy_name]()
-
-    def _force_init_smc_simple(self) -> Tuple[bool, str]:
-        """Force-initialize SMC Simple strategy for backtest"""
-        try:
-            # SMC Simple uses lazy loading, just enable the flag
+        if canonical == 'SMC_SIMPLE':
+            # SMC Simple has its own lazy-load path; just arm the flag.
             self.smc_simple_enabled = True
-            self.smc_simple_strategy = None  # Will be lazy-loaded on first use
+            self.smc_simple_strategy = None
             self.logger.info("🔧 Force-initialized SMC Simple strategy (lazy-load)")
             return True, "SMC Simple strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init SMC Simple: {e}"
 
-    def _force_init_mean_reversion(self) -> Tuple[bool, str]:
-        """Force-initialize Mean Reversion strategy for backtest."""
-        try:
-            self.mean_reversion_strategy = None  # lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Mean Reversion strategy (lazy-load)")
-            return True, "Mean Reversion strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init Mean Reversion: {e}"
-
-    def _force_init_range_fade(self) -> Tuple[bool, str]:
-        """Force-initialize range-fade strategy for backtest (5m only)."""
-        try:
+        if canonical == 'RANGE_FADE':
             self._range_fade_profile = "5m"
-            self.range_fade_strategy = None  # lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Range Fade strategy (lazy-load, 5m)")
-            return True, "Range Fade strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init Range Fade: {e}"
 
-    def _force_init_range_structure(self) -> Tuple[bool, str]:
-        """Force-initialize Range Structure strategy for backtest."""
+        # For all other strategies, warm the cache via _get_strategy.
+        # Even if instantiation fails here, the detect_* method will retry.
         try:
-            self.range_structure_strategy = None  # lazy-loaded on first use
-            self.logger.info("🔧 Force-initialized Range Structure strategy (lazy-load)")
-            return True, "Range Structure strategy force-initialized"
+            extra = {"erf_profile": "5m"} if canonical == 'RANGE_FADE' else {}
+            self._get_strategy(canonical, **extra)
+            self.logger.info(f"🔧 Force-initialized {canonical} strategy via StrategyRegistry")
+            return True, f"{canonical} strategy force-initialized"
         except Exception as e:
-            return False, f"Failed to force-init Range Structure: {e}"
-
-    def _force_init_xau_gold(self) -> Tuple[bool, str]:
-        """Force-initialize XAU_GOLD strategy for backtest."""
-        try:
-            self.xau_gold_strategy = None  # Lazy-loaded in detect_xau_gold_signals
-            self.logger.info("🔧 Force-initialized XAU_GOLD strategy (lazy-load)")
-            return True, "XAU_GOLD strategy force-initialized"
-        except Exception as e:
-            return False, f"Failed to force-init XAU_GOLD: {e}"
+            return False, f"Failed to force-init {canonical}: {e}"
 
     def _get_default_timeframe(self, timeframe: str = None) -> str:
         """Get default timeframe from database config if not specified"""
@@ -1493,27 +1513,9 @@ class SignalDetector:
         technical indicators before returning.
         """
         try:
-            if self.mean_reversion_strategy is None:
-                try:
-                    try:
-                        from .strategies.mean_reversion_strategy import MeanReversionStrategy
-                    except (ImportError, ValueError):
-                        from forex_scanner.core.strategies.mean_reversion_strategy import MeanReversionStrategy
-                    self.mean_reversion_strategy = MeanReversionStrategy(
-                        config=None,
-                        logger=self.logger,
-                        db_manager=self.db_manager,
-                        config_override=self._config_override,
-                    )
-                    self.mean_reversion_strategy.data_fetcher = self.data_fetcher
-                    override_note = f" with {len(self._config_override)} overrides" if self._config_override else ""
-                    self.logger.info(f"✅ Mean Reversion strategy lazy-loaded{override_note}")
-                except ImportError as e:
-                    self.logger.warning(f"⚠️ Could not import Mean Reversion strategy: {e}")
-                    return None
-                except Exception as e:
-                    self.logger.error(f"❌ Error initializing Mean Reversion strategy: {e}")
-                    return None
+            mean_reversion_strategy = self._get_strategy('MEAN_REVERSION')
+            if mean_reversion_strategy is None:
+                return None
 
             df_trigger = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -1532,7 +1534,7 @@ class SignalDetector:
                 lookback_hours=72,
             )
 
-            signal = self.mean_reversion_strategy.detect_signal(
+            signal = mean_reversion_strategy.detect_signal(
                 df_trigger=df_trigger,
                 df_4h=df_4h,
                 epic=epic,
@@ -1562,28 +1564,9 @@ class SignalDetector:
     ) -> Optional[Dict]:
         """Detect signals using the range-fade strategy family (5m only)."""
         try:
-            if self.range_fade_strategy is None:
-                try:
-                    try:
-                        from .strategies.range_fade_strategy import RangeFadeStrategy
-                    except ImportError:
-                        from forex_scanner.core.strategies.range_fade_strategy import RangeFadeStrategy
-                    strategy_override = dict(self._config_override or {})
-                    strategy_override.setdefault("erf_profile", "5m")
-                    self.range_fade_strategy = RangeFadeStrategy(
-                        config=None,
-                        logger=self.logger,
-                        db_manager=self.db_manager,
-                        config_override=strategy_override,
-                    )
-                    self.range_fade_strategy.data_fetcher = self.data_fetcher
-                    self.logger.info("✅ Range Fade strategy lazy-loaded (5m)")
-                except ImportError as e:
-                    self.logger.warning(f"⚠️ Could not import Range Fade strategy: {e}")
-                    return None
-                except Exception as e:
-                    self.logger.error(f"❌ Error initializing Range Fade strategy: {e}")
-                    return None
+            range_fade_strategy = self._get_strategy('RANGE_FADE', erf_profile='5m')
+            if range_fade_strategy is None:
+                return None
 
             df_trigger = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -1602,7 +1585,7 @@ class SignalDetector:
                 lookback_hours=336,
             )
 
-            signal = self.range_fade_strategy.detect_signal(
+            signal = range_fade_strategy.detect_signal(
                 df_trigger=df_trigger,
                 df_4h=df_1h,
                 epic=epic,
@@ -1639,26 +1622,9 @@ class SignalDetector:
         with technical indicators before returning.
         """
         try:
-            if self.range_structure_strategy is None:
-                try:
-                    try:
-                        from .strategies.range_structure_strategy import create_range_structure_strategy
-                    except (ImportError, ValueError):
-                        from forex_scanner.core.strategies.range_structure_strategy import create_range_structure_strategy
-                    self.range_structure_strategy = create_range_structure_strategy(
-                        config=None,
-                        logger=self.logger,
-                        db_manager=self.db_manager,
-                        config_override=self._config_override,
-                    )
-                    self.range_structure_strategy.data_fetcher = self.data_fetcher
-                    self.logger.info("✅ Range Structure strategy lazy-loaded")
-                except ImportError as e:
-                    self.logger.warning(f"⚠️ Could not import Range Structure strategy: {e}")
-                    return None
-                except Exception as e:
-                    self.logger.error(f"❌ Error initializing Range Structure strategy: {e}")
-                    return None
+            range_structure_strategy = self._get_strategy('RANGE_STRUCTURE')
+            if range_structure_strategy is None:
+                return None
 
             df_trigger = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -1687,7 +1653,7 @@ class SignalDetector:
                 except Exception:
                     current_timestamp = None
 
-            signal = self.range_structure_strategy.detect_signal(
+            signal = range_structure_strategy.detect_signal(
                 df_trigger=df_trigger,
                 df_4h=df_1h,
                 epic=epic,

@@ -391,6 +391,17 @@ class XAUGoldStrategy(StrategyInterface):
             f"✅ [XAU_GOLD] {epic} {direction} @ {entry_price:.2f} "
             f"SL={sl_pips:.1f}p TP={tp_pips:.1f}p conf={confidence:.2f} regime={regime}"
         )
+
+        # LPF gate — strategy-side opt-in (LPF_ENABLED = True)
+        if getattr(self, 'LPF_ENABLED', True):
+            try:
+                try:
+                    from .lpf_gate import apply_lpf_gate
+                except ImportError:
+                    from forex_scanner.core.strategies.lpf_gate import apply_lpf_gate
+                signal = apply_lpf_gate(signal, self.logger)
+            except Exception as _lpf_exc:
+                self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
         return signal
 
     # ---- tier helpers -----------------------------------------------------

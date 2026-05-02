@@ -1,7 +1,11 @@
 # core/backtest_scanner.py
 """
-BacktestScanner - Extends IntelligentForexScanner for historical backtesting
-Operates on historical data from ig_candles table with same signal detection logic
+BacktestScanner - Standalone historical backtesting scanner.
+
+Composes SignalDetectionEngine instead of inheriting from IntelligentForexScanner.
+Both scanners share the same detection logic through that engine; alert dedup,
+order management, Claude integration and market-intelligence *capture* remain
+exclusively in IntelligentForexScanner (live path).
 """
 
 import json
@@ -13,26 +17,37 @@ import pandas as pd
 
 try:
     import config
-    from core.scanner import IntelligentForexScanner
     from core.database import DatabaseManager
+    from core.signal_detector import SignalDetector
     from core.trading.backtest_order_logger import BacktestOrderLogger
     from core.trading.trailing_stop_simulator import TrailingStopSimulator
     from core.backtest_candles_manager import BacktestCandlesManager
-    from configdata.strategies import config_momentum_strategy
+    from core.scanning.signal_detection_engine import SignalDetectionEngine
     from services.smc_simple_config_service import get_smc_simple_config
-    from services.strategy_router_service import get_strategy_router, StrategyRouterService
+    from services.scanner_config_service import get_scanner_config
+    try:
+        from configdata.strategies import config_momentum_strategy
+    except ImportError:
+        config_momentum_strategy = None
+    try:
+        from services.strategy_router_service import get_strategy_router, StrategyRouterService
+    except ImportError:
+        get_strategy_router = None
+        StrategyRouterService = None
 except ImportError:
     from forex_scanner import config
-    from forex_scanner.core.scanner import IntelligentForexScanner
     from forex_scanner.core.database import DatabaseManager
+    from forex_scanner.core.signal_detector import SignalDetector
     from forex_scanner.core.trading.backtest_order_logger import BacktestOrderLogger
     from forex_scanner.core.trading.trailing_stop_simulator import TrailingStopSimulator
     from forex_scanner.core.backtest_candles_manager import BacktestCandlesManager
+    from forex_scanner.core.scanning.signal_detection_engine import SignalDetectionEngine
+    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
+    from forex_scanner.services.scanner_config_service import get_scanner_config
     try:
         from forex_scanner.configdata.strategies import config_momentum_strategy
     except ImportError:
         config_momentum_strategy = None
-    from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
     try:
         from forex_scanner.services.strategy_router_service import get_strategy_router, StrategyRouterService
     except ImportError:
@@ -40,10 +55,14 @@ except ImportError:
         StrategyRouterService = None
 
 
-class BacktestScanner(IntelligentForexScanner):
+class BacktestScanner:
     """
-    Historical backtesting scanner that extends live scanner functionality
-    Uses same signal detection logic but operates on historical data
+    Historical backtesting scanner.
+
+    Composes a SignalDetectionEngine (shared with the live scanner path) instead
+    of inheriting from IntelligentForexScanner.  Alert dedup, order placement,
+    Claude AI analysis and market-intelligence capture are NOT present here —
+    they belong exclusively to the live scanner.
     """
 
     def __init__(self,
@@ -63,7 +82,7 @@ class BacktestScanner(IntelligentForexScanner):
         self._intelligence_history_manager = None  # Lazy-loaded
 
         # Store config override for backtest parameter isolation
-        # This is stored BEFORE super().__init__() so it's available in _initialize_signal_detector
+        # Must be set before _initialize_signal_detector is called
         self._config_override = config_override
 
         # Extract backtest parameters
@@ -82,28 +101,79 @@ class BacktestScanner(IntelligentForexScanner):
         # When True, scanner returns signals but doesn't log to DB (orchestrator does it)
         self.skip_signal_logging = backtest_config.get('skip_signal_logging', False)
 
-        # Initialize parent with backtest-specific settings
-        backtest_kwargs = kwargs.copy()
-        backtest_kwargs.update({
-            'intelligence_mode': 'backtest_consistent',
-            'epic_list': backtest_config.get('epics', config.EPIC_LIST),
-            'scan_interval': 0,  # No continuous scanning in backtest mode
-            'db_manager': db_manager
-        })
+        # ── Attributes previously provided by IntelligentForexScanner.__init__ ──
+        # Set up logging first (parent did this)
+        self.logger = logging.getLogger(__name__)
 
-        super().__init__(**backtest_kwargs)
+        # Load scanner + SMC config from DB (same path the live scanner uses)
+        self._scanner_cfg = get_scanner_config()
+        self._smc_cfg = get_smc_simple_config()
 
-        # CRITICAL: Disable market intelligence CAPTURE in backtest mode
-        # We can READ historical intelligence (replay) but should NOT WRITE new intelligence
-        # This prevents polluting the database and speeds up backtests
+        # Core configuration
+        self.db_manager = db_manager
+        base_epics = backtest_config.get('epics', None) or self._smc_cfg.get_effective_enabled_pairs()
+
+        # Inject XAU_GOLD epics if available (mirrors live scanner logic)
+        try:
+            from services.xau_gold_config_service import get_xau_gold_config
+        except ImportError:
+            try:
+                from forex_scanner.services.xau_gold_config_service import get_xau_gold_config
+            except ImportError:
+                get_xau_gold_config = None
+
+        gold_epics: List[str] = []
+        if get_xau_gold_config is not None:
+            try:
+                xau_cfg = get_xau_gold_config()
+                gold_epics = [e for e in xau_cfg.enabled_pairs if e not in base_epics]
+            except Exception:
+                pass
+
+        self.epic_list = base_epics + gold_epics
+        self.min_confidence = (
+            kwargs.get('min_confidence')
+            or (self._scanner_cfg.min_confidence if self._scanner_cfg else 0.55)
+        )
+        self.spread_pips = kwargs.get('spread_pips', 1.5)
+        self.scan_interval = 0  # No continuous scanning in backtest mode
+        self.user_timezone = kwargs.get('user_timezone', 'Europe/Stockholm')
+        self.intelligence_mode = 'backtest_consistent'
+        self.scanner_version = 'backtest_v1.0_integrated_pipeline'
+
+        # Stub attributes referenced by generic code that queries these
         self.enable_market_intelligence = False
         self.market_intelligence_engine = None
         self.market_intelligence_history = None
-
-        # Also disable scan performance capture to avoid DB writes
         self.enable_scan_performance = False
         self.scan_performance_manager = None
+        self.enable_deduplication = False
+        self.deduplication_manager = None
+        self.signal_processor = None
+        self.use_signal_processor = False
+        self.enable_smart_money = False
+        self.running = False
+        self.last_signals = {}
+        self.stats = {
+            'scans_completed': 0,
+            'signals_detected': 0,
+            'signals_processed': 0,
+            'errors': 0,
+        }
 
+        # Initialise the SignalDetector with config_override for parameter isolation
+        self.signal_detector = self._initialize_signal_detector(db_manager, self.user_timezone)
+
+        # Compose the shared detection engine
+        self.signal_engine = SignalDetectionEngine(
+            db_manager=self.db_manager,
+            signal_detector=self.signal_detector,
+            epic_list=self.epic_list,
+            spread_pips=self.spread_pips,
+            logger=self.logger,
+        )
+
+        self.logger.info("[CONFIG:DB] ✅ BacktestScanner config loaded from database (NO FALLBACK)")
         self.logger.info("🧠 Market Intelligence CAPTURE: DISABLED (backtest mode)")
         self.logger.info("📊 Scan Performance CAPTURE: DISABLED (backtest mode)")
 
@@ -122,9 +192,6 @@ class BacktestScanner(IntelligentForexScanner):
             except Exception as e:
                 self.logger.warning(f"Failed to initialize strategy router: {e}")
                 self._strategy_router = None
-
-        # Override scanner metadata
-        self.scanner_version = 'backtest_v1.0_integrated_pipeline'
 
         # Log pipeline mode
         mode_desc = "Full Pipeline (with validation)" if self.pipeline_mode else "Basic Strategy Testing"
@@ -1652,6 +1719,53 @@ class BacktestScanner(IntelligentForexScanner):
         else:
             # Default to 15 minutes
             return 15
+
+    def _convert_timestamp_safe(self, timestamp_value):
+        """Backtest-mode timestamp normaliser. Mirrors the live scanner helper
+        but without the live-scan stats counter."""
+        if timestamp_value is None:
+            return None
+        try:
+            if isinstance(timestamp_value, datetime):
+                if timestamp_value.tzinfo is None:
+                    return timestamp_value.replace(tzinfo=timezone.utc)
+                return timestamp_value
+            if isinstance(timestamp_value, str):
+                if 'T' in timestamp_value:
+                    return datetime.fromisoformat(timestamp_value.replace('Z', '+00:00'))
+                return datetime.fromisoformat(timestamp_value).replace(tzinfo=timezone.utc)
+            if isinstance(timestamp_value, (int, float)):
+                if 1577836800 <= timestamp_value <= 1893456000:
+                    return datetime.fromtimestamp(timestamp_value, tz=timezone.utc)
+                return None
+            if hasattr(timestamp_value, 'to_pydatetime'):
+                dt = timestamp_value.to_pydatetime()
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=timezone.utc)
+                return dt
+        except Exception:
+            return None
+        return None
+
+    def _prepare_signal(self, signal: Dict) -> Dict:
+        """Backtest-mode signal preparation. Was inherited from
+        IntelligentForexScanner; replicated here after C3 decomposition."""
+        clean_signal = signal.copy()
+        clean_signal['scanner_timestamp'] = datetime.now().isoformat()
+        clean_signal['scanner_version'] = 'backtest_scanner_v1'
+        clean_signal['scanner_validated'] = True
+        for field in ('market_timestamp', 'timestamp'):
+            if field in clean_signal:
+                clean_signal[field] = self._convert_timestamp_safe(clean_signal[field])
+        clean_signal['processing_pipeline'] = {
+            'raw_detection': True,
+            'confidence_filtered': True,
+            'dedup_filtered': False,
+            'smart_money_enhanced': bool(signal.get('smart_money_validated')),
+            'signal_processor_used': False,
+            'ready_for_execution': True,
+        }
+        return clean_signal
 
     def get_backtest_statistics(self) -> Dict:
         """Get current backtest statistics"""

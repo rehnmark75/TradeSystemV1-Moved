@@ -368,26 +368,9 @@ class OrderExecutor:
 
             # === SL/TP OVERRIDE (database-driven, per-pair configurable) ===
             # v3.3.0 (Jan 2026): Per-pair optimized SL/TP takes priority over legacy scalp mode
-            # v3.4.0 (Feb 2026): RANGING_MARKET signals use their own config (not SMC_SIMPLE overrides)
             # Priority: strategy-specific config > per-pair override > scalp mode legacy > strategy defaults
             try:
                 signal_strategy = signal.get('strategy', '')
-
-                # v3.4.0: RANGING_MARKET signals use ranging_market config tables
-                if signal_strategy == 'RANGING_MARKET':
-                    from forex_scanner.core.strategies.ranging_market_strategy import get_ranging_market_config
-                    ranging_config = get_ranging_market_config()
-                    pair_sl = ranging_config.get_pair_fixed_stop_loss(internal_epic)
-                    pair_tp = ranging_config.get_pair_fixed_take_profit(internal_epic)
-                    if pair_sl is not None and pair_tp is not None:
-                        original_sl = stop_distance
-                        original_tp = limit_distance
-                        stop_distance = pair_sl
-                        limit_distance = pair_tp
-                        self.logger.info(
-                            f"🔒 [RANGING MODE] SL/TP [{internal_epic}]: SL {original_sl}→{stop_distance}, "
-                            f"TP {original_tp}→{limit_distance} pips (ranging_market config)"
-                        )
 
                 from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
 

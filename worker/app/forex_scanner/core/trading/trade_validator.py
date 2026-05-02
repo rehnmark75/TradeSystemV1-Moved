@@ -1531,44 +1531,14 @@ class TradeValidator:
             elif self.backtest_mode:
                 self.logger.info(f"✅ BACKTEST STEP 12 SKIPPED - Market Intelligence capture (disabled)")
 
-            # 12. Loss Prevention Filter - pattern-based trade blocking
-            # Runs before Claude to save expensive API calls on known losing patterns
-            if self.loss_prevention_filter and self.loss_prevention_filter.is_enabled:
-                # In backtest mode, derive timestamp from signal
-                lpf_timestamp = None
-                if self.backtest_mode:
-                    for ts_field in ['signal_timestamp', 'market_timestamp', 'timestamp']:
-                        ts = signal.get(ts_field)
-                        if ts and isinstance(ts, datetime):
-                            lpf_timestamp = ts
-                            break
-
-                lpf_result = self.loss_prevention_filter.evaluate(signal, signal_timestamp=lpf_timestamp)
-
-                # Attach results to signal for alert_history storage
-                signal['lpf_penalty'] = lpf_result['total_penalty']
-                signal['lpf_would_block'] = lpf_result['decision'] in ('would_block', 'blocked')
-                signal['lpf_triggered_rules'] = [r['rule_name'] for r in lpf_result['triggered_rules']]
-
-                if not lpf_result['allowed']:
-                    self.validation_stats['failed_other'] += 1
-                    rules_str = ', '.join(signal['lpf_triggered_rules'])
-                    msg = f"LPF blocked (penalty={lpf_result['total_penalty']:.2f}, rules={rules_str})"
-                    if self.backtest_mode:
-                        self.logger.warning(f"🚫 BACKTEST STEP 12 FAILED - {msg}")
-                    self._log_validator_rejection(signal, msg)
-                    return False, msg
-                elif lpf_result['decision'] == 'would_block':
-                    if self.backtest_mode:
-                        self.logger.info(f"👁️ BACKTEST STEP 12 MONITOR - LPF would block (penalty={lpf_result['total_penalty']:.2f})")
-                elif self.backtest_mode:
-                    self.logger.info(f"✅ BACKTEST STEP 12 PASSED - Loss Prevention Filter (penalty={lpf_result['total_penalty']:.2f})")
-            else:
-                signal['lpf_penalty'] = None
-                signal['lpf_would_block'] = False
-                signal['lpf_triggered_rules'] = []
-                if self.backtest_mode:
-                    self.logger.info(f"✅ BACKTEST STEP 12 SKIPPED - Loss Prevention Filter (disabled)")
+            # NOTE: Step 12 (Loss Prevention Filter) was moved to strategy-side gate.
+            # Each strategy calls apply_lpf_gate() before returning its signal, which
+            # annotates lpf_penalty / lpf_would_block / lpf_triggered_rules on the signal
+            # dict so alert_history storage below still works unchanged.
+            # Ensure keys exist in case a non-LPF-enabled strategy produced this signal.
+            signal.setdefault('lpf_penalty', None)
+            signal.setdefault('lpf_would_block', False)
+            signal.setdefault('lpf_triggered_rules', [])
 
             # 13. ⭐ Claude AI filtering - FINAL VALIDATOR (if enabled) ⭐
             # Claude is the most comprehensive and expensive check, so it runs last
