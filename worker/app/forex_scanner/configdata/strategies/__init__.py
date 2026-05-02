@@ -6,9 +6,6 @@ NOTE: After January 2026 cleanup, only SMC Simple strategy is active.
 Legacy strategy configs have been archived to forex_scanner/archive/legacy_configs/
 """
 
-# Import only active strategy configuration
-from .config_smc_simple import *
-
 # Import main config flags for strategy enablement
 # Use importlib to handle circular import scenarios
 import importlib

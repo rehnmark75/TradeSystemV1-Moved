@@ -20,9 +20,19 @@
 # ██                                                                        ██
 # ████████████████████████████████████████████████████████████████████████████
 #
-# This file exists ONLY as emergency fallback when database is unavailable.
-# DO NOT TRUST ANY VALUES HERE - ALWAYS CHECK DATABASE/STREAMLIT UI
+# This file is COMPLETELY DEPRECATED. Importing it is a bug.
+# All SMC Simple configuration is in the strategy_config database.
 #
+# ============================================================================
+
+raise RuntimeError(
+    "config_smc_simple.py is deprecated — all SMC Simple config is "
+    "DB-driven (smc_simple_global_config / smc_simple_pair_overrides). "
+    "Remove this import and read from the DB via get_smc_simple_config()."
+)
+
+# ============================================================================
+# Historical values preserved below for reference only (never executed)
 # ============================================================================
 #
 # Version: 2.9.0 (Data-Driven Optimization from 85-trade analysis Dec 2025)

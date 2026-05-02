@@ -132,16 +132,6 @@ class SMCRejectionHistoryManager:
         self.db_manager = db_manager
         self.logger = logging.getLogger(__name__)
 
-        # Load config
-        if config is None:
-            try:
-                from forex_scanner.configdata.strategies import config_smc_simple as config
-            except ImportError:
-                try:
-                    from configdata.strategies import config_smc_simple as config
-                except ImportError:
-                    config = None
-
         self.config = config
         self.enabled = getattr(config, 'REJECTION_TRACKING_ENABLED', True) if config else True
         self.batch_size = getattr(config, 'REJECTION_BATCH_SIZE', 50) if config else 50
