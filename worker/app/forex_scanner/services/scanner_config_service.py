@@ -22,8 +22,9 @@ import os
 import json
 import copy
 import logging
+import dataclasses
 from dataclasses import dataclass, field
-from typing import Dict, Any, Optional, List
+from typing import Dict, Any, Optional, List, get_type_hints
 from datetime import datetime, timedelta
 from threading import RLock
 from contextlib import contextmanager
@@ -377,6 +378,41 @@ class ScannerConfig:
         return self.enabled_strategies or []
 
 
+# ---------------------------------------------------------------------------
+# C2 fix: derive field sets from ScannerConfig once at module load.
+# Adding a new DB column now only requires (1) adding it to ScannerConfig and
+# (2) running the DB migration — no manual list to maintain.
+# ---------------------------------------------------------------------------
+
+# Fields that need special deserialization (JSONB or metadata — not plain DB columns).
+_SCANNER_JSONB_DICT_FIELDS: frozenset = frozenset({
+    'deduplication_presets', 'pair_info', 'market_sessions',
+})
+_SCANNER_JSONB_LIST_FIELDS: frozenset = frozenset({
+    'claude_chart_timeframes', 'claude_vision_strategies',
+    'enabled_strategies', 'epic_list', 'critical_economic_events',
+})
+# Set by the service itself after DB load — not read from the row.
+_SCANNER_METADATA_FIELDS: frozenset = frozenset({
+    'source', 'loaded_at', 'cache_age_minutes', 'config_id',
+})
+_SCANNER_SKIP_FIELDS: frozenset = (
+    _SCANNER_JSONB_DICT_FIELDS | _SCANNER_JSONB_LIST_FIELDS | _SCANNER_METADATA_FIELDS
+)
+
+# All scalar DB columns — every dataclass field not handled above.
+_SCANNER_SCALAR_FIELDS: frozenset = frozenset(
+    f.name for f in dataclasses.fields(ScannerConfig)
+    if f.name not in _SCANNER_SKIP_FIELDS
+)
+
+# Fields whose DB value must be coerced to int (psycopg2 may return Decimal or str).
+_SCANNER_INT_FIELDS: frozenset = frozenset(
+    name for name, hint in get_type_hints(ScannerConfig).items()
+    if name in _SCANNER_SCALAR_FIELDS and hint is int
+)
+
+
 class ScannerConfigService:
     """
     Database-driven configuration service with in-memory caching.
@@ -567,184 +603,27 @@ class ScannerConfigService:
         """Build ScannerConfig from database row."""
         config = ScannerConfig()
 
-        # Direct field mappings
-        direct_fields = [
-            'version', 'scan_interval', 'min_confidence', 'default_timeframe',
-            'use_1m_base_synthesis', 'scan_align_to_boundaries', 'scan_boundary_offset_seconds',
-            'spread_pips', 'use_bid_adjustment',
-            'enable_duplicate_check', 'duplicate_sensitivity', 'signal_cooldown_minutes',
-            'alert_cooldown_minutes', 'strategy_cooldown_minutes', 'global_cooldown_seconds',
-            'max_alerts_per_hour', 'max_alerts_per_epic_hour', 'price_similarity_threshold',
-            'confidence_similarity_threshold', 'deduplication_preset', 'use_database_dedup_check',
-            'database_dedup_window_minutes', 'enable_signal_hash_check', 'deduplication_debug_mode',
-            'enable_price_similarity_check', 'enable_strategy_cooldowns', 'deduplication_lookback_hours',
-            'position_size_percent', 'stop_loss_pips', 'take_profit_pips', 'max_open_positions',
-            'max_daily_trades', 'risk_per_trade_percent', 'min_position_size', 'max_position_size',
-            'default_position_size', 'max_risk_per_trade', 'default_risk_reward', 'default_stop_distance',
-            # Extended Risk Management Settings (for RiskManager)
-            'max_daily_loss_percent', 'max_trades_per_pair', 'min_account_balance',
-            'daily_profit_target_percent', 'stop_on_daily_target', 'testing_max_stop_percent',
-            'testing_min_confidence', 'emergency_stop_enabled', 'disable_account_risk_validation',
-            'disable_position_sizing', 'account_balance',
-            'trading_start_hour', 'trading_end_hour', 'respect_market_hours', 'weekend_scanning',
-            'enable_trading_time_controls', 'trading_cutoff_time_utc', 'trade_cooldown_enabled',
-            'trade_cooldown_minutes', 'user_timezone', 'respect_trading_hours',
-            # Session Hours Configuration (Jan 2026 - database only, NO FALLBACK)
-            'session_asian_start_hour', 'session_asian_end_hour',
-            'session_london_start_hour', 'session_london_end_hour',
-            'session_newyork_start_hour', 'session_newyork_end_hour',
-            'session_overlap_start_hour', 'session_overlap_end_hour',
-            'block_asian_session',
-            # Order Executor Thresholds (Jan 2026 - database only, NO FALLBACK)
-            'executor_high_confidence_threshold', 'executor_medium_confidence_threshold',
-            'executor_max_stop_loss_pips', 'executor_max_take_profit_pips',
-            'executor_high_conf_stop_multiplier', 'executor_low_conf_stop_multiplier',
-            # NOTE: Safety filter fields removed (Jan 2026) - no longer loaded from database
-            # NOTE: ADX filter fields removed (Jan 2026) - was never used by active strategies
-            'smart_money_readonly_enabled', 'smart_money_analysis_timeout',
-            'smart_money_min_data_points', 'smart_money_structure_weight',
-            'smart_money_order_flow_weight', 'smart_money_min_confidence_boost',
-            'smart_money_max_confidence_boost', 'smart_money_liquidity_sweep_enabled',
-            'smart_money_liquidity_sweep_weight', 'smart_money_liquidity_sweep_lookback_bars',
-            'smart_money_min_sweep_quality',
-            'smc_conflict_filter_enabled', 'smc_min_directional_consensus',
-            'smc_reject_order_flow_conflict', 'smc_reject_ranging_structure',
-            'smc_min_structure_score', 'smc_conflict_tolerance',
-            'require_claude_approval', 'claude_fail_secure', 'claude_model',
-            'min_claude_quality_score', 'claude_include_chart', 'claude_vision_enabled',
-            'claude_vision_save_directory', 'claude_validate_in_backtest', 'save_claude_rejections',
-            'claude_save_vision_artifacts', 'claude_analysis_mode', 'claude_timeout',
-            'claude_strategic_focus',
-            # Claude Integration Settings (for IntegrationManager)
-            'claude_analysis_enabled', 'use_advanced_claude_prompts', 'claude_analysis_level',
-            'claude_auto_save', 'claude_save_directory', 'minio_enabled',
-            'enable_multi_timeframe_analysis', 'min_confluence_score', 'mtf_enhanced_min_confidence',
-            'enable_alert_deduplication', 'signal_hash_cache_expiry_minutes',
-            'max_signal_hash_cache_size', 'enable_signal_hash_check',
-            'enable_time_based_hash_components', 'use_database_dedup_check',
-            'database_dedup_window_minutes', 'duplicate_window_hours', 'save_to_database',
-            # Data Quality Settings
-            'lookback_reduction_factor', 'enable_data_quality_filtering',
-            'block_trading_on_data_issues', 'min_quality_score_for_trading',
-            # Performance/Data Fetching Settings
-            'data_batch_size', 'reduced_lookback_hours', 'enable_data_cache',
-            'lazy_indicator_loading', 'kama_period',
-            # Trading Control Flags
-            'auto_trading_enabled', 'enable_order_execution',
-            # S/R Validation Settings
-            'enable_sr_validation', 'enable_enhanced_sr_validation', 'sr_analysis_timeframe',
-            'sr_lookback_hours', 'sr_left_bars', 'sr_right_bars', 'sr_volume_threshold',
-            'sr_level_tolerance_pips', 'sr_min_level_distance_pips', 'sr_recent_flip_bars',
-            'sr_min_flip_strength', 'sr_cache_duration_minutes', 'min_bars_for_sr_analysis',
-            # Signal Freshness Settings
-            'enable_signal_freshness_check', 'max_signal_age_minutes',
-            # News Filtering Settings
-            'enable_news_filtering', 'reduce_confidence_near_news', 'news_filter_fail_secure',
-            'economic_calendar_url', 'news_high_impact_buffer_minutes',
-            'news_medium_impact_buffer_minutes', 'news_lookahead_hours',
-            'block_trades_before_high_impact_news', 'block_trades_before_medium_impact_news',
-            'news_cache_duration_minutes', 'news_service_timeout_seconds',
-            # Market Intelligence Settings
-            'enable_market_intelligence_capture', 'enable_market_intelligence_filtering',
-            'market_intelligence_min_confidence', 'market_intelligence_block_unsuitable_regimes',
-            'market_bias_filter_enabled', 'market_bias_min_consensus',
-            # Intelligence Manager Settings
-            'intelligence_preset', 'intelligence_debug_mode',
-            # Epic Validation Settings
-            'allowed_trading_epics', 'blocked_trading_epics',
-            # Testing & Validation Settings
-            'strategy_testing_mode', 'validate_spread', 'max_spread_pips',
-            'min_signal_confirmations', 'scalping_min_confidence',
-            # Notification Settings
-            'notifications_enabled',
-            # Market Monitor Settings
-            'low_volatility_threshold', 'normal_volatility_threshold',
-            'high_volatility_threshold', 'extreme_volatility_threshold',
-            'tight_spread_threshold', 'normal_spread_threshold', 'wide_spread_threshold',
-            'market_condition_cache_minutes',
-            # Order Executor Settings
-            'order_max_retries', 'order_retry_base_delay', 'order_retry_max_delay',
-            'order_connect_timeout', 'order_read_timeout', 'order_total_timeout',
-            'order_circuit_breaker_threshold', 'order_circuit_breaker_recovery',
-            'dynamic_stops_enabled',
-            # Entry Quality Filter Settings
-            'min_entry_quality_score',
-        ]
-
-        # Fields that should be integers
-        int_fields = {
-            'scan_interval', 'scan_boundary_offset_seconds', 'signal_cooldown_minutes',
-            'alert_cooldown_minutes', 'strategy_cooldown_minutes', 'global_cooldown_seconds',
-            'max_alerts_per_hour', 'max_alerts_per_epic_hour', 'database_dedup_window_minutes',
-            'deduplication_lookback_hours', 'stop_loss_pips', 'take_profit_pips',
-            'max_open_positions', 'max_daily_trades', 'max_risk_per_trade', 'default_stop_distance',
-            'trading_start_hour', 'trading_end_hour', 'trading_cutoff_time_utc',
-            'trade_cooldown_minutes',
-            # Session Hours integer fields (Jan 2026)
-            'session_asian_start_hour', 'session_asian_end_hour',
-            'session_london_start_hour', 'session_london_end_hour',
-            'session_newyork_start_hour', 'session_newyork_end_hour',
-            'session_overlap_start_hour', 'session_overlap_end_hour',
-            # Order Executor integer fields (Jan 2026)
-            'executor_max_stop_loss_pips', 'executor_max_take_profit_pips',
-            # NOTE: Safety filter int fields removed (Jan 2026)
-            # NOTE: ADX filter int fields (adx_period, adx_grace_period_bars) removed (Jan 2026)
-            'min_claude_quality_score',
-            'signal_hash_cache_expiry_minutes', 'max_signal_hash_cache_size',
-            # New integer fields
-            'sr_lookback_hours', 'sr_left_bars', 'sr_right_bars', 'sr_recent_flip_bars',
-            'sr_cache_duration_minutes', 'min_bars_for_sr_analysis', 'max_signal_age_minutes',
-            'min_signal_confirmations', 'claude_timeout', 'duplicate_window_hours',
-            # News Filtering integer fields
-            'news_high_impact_buffer_minutes', 'news_medium_impact_buffer_minutes',
-            'news_lookahead_hours', 'news_cache_duration_minutes', 'news_service_timeout_seconds',
-            # Market Monitor integer fields
-            'market_condition_cache_minutes',
-            # Smart Money integer fields
-            'smart_money_min_data_points', 'smart_money_liquidity_sweep_lookback_bars',
-            'smc_conflict_tolerance',
-            # Order Executor integer fields
-            'order_max_retries', 'order_circuit_breaker_threshold',
-            # Performance/Data Fetching integer fields
-            'data_batch_size', 'kama_period',
-        }
-
-        for field_name in direct_fields:
+        # Scalar fields: derived from ScannerConfig dataclass at module load (_SCANNER_SCALAR_FIELDS).
+        # Adding a new DB column only requires adding it to the dataclass — no list to update here.
+        for field_name in _SCANNER_SCALAR_FIELDS:
             if field_name in row and row[field_name] is not None:
                 value = row[field_name]
-
-                # Convert types as needed
-                if field_name in int_fields:
+                if field_name in _SCANNER_INT_FIELDS:
                     value = int(value)
                 elif isinstance(value, Decimal):
                     value = float(value)
-
                 setattr(config, field_name, value)
 
-        # Handle JSONB fields (dicts)
-        jsonb_dict_fields = [
-            'deduplication_presets',
-            # NOTE: safety_filter_presets, large_candle_filter_presets removed (Jan 2026)
-            # NOTE: adx_thresholds, adx_pair_multipliers removed (Jan 2026)
-            'pair_info',
-            # Market Monitor JSONB fields
-            'market_sessions',
-        ]
-
-        for field_name in jsonb_dict_fields:
+        # JSONB dict fields
+        for field_name in _SCANNER_JSONB_DICT_FIELDS:
             if field_name in row and row[field_name] is not None:
                 value = row[field_name]
                 if isinstance(value, str):
                     value = json.loads(value)
                 setattr(config, field_name, value)
 
-        # Handle JSONB fields (lists)
-        jsonb_list_fields = [
-            'claude_chart_timeframes', 'claude_vision_strategies', 'enabled_strategies',
-            'epic_list', 'critical_economic_events'
-        ]
-
-        for field_name in jsonb_list_fields:
+        # JSONB list fields
+        for field_name in _SCANNER_JSONB_LIST_FIELDS:
             if field_name in row and row[field_name] is not None:
                 value = row[field_name]
                 if isinstance(value, str):
