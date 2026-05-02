@@ -59,6 +59,11 @@ except ImportError:  # pragma: no cover
         apply_config_overrides,
     )
 
+try:
+    from services.regime_classifier import compute_adx, get_adx_from_df
+except ImportError:  # pragma: no cover
+    from forex_scanner.services.regime_classifier import compute_adx, get_adx_from_df
+
 
 logger = logging.getLogger(__name__)
 
@@ -92,28 +97,6 @@ def _rsi(s: pd.Series, period: int) -> pd.Series:
     rs = ru / rd.replace(0, np.nan)
     return (100 - 100 / (1 + rs)).fillna(50.0)
 
-
-def _adx(df: pd.DataFrame, period: int) -> pd.Series:
-    high = df["high"]
-    low = df["low"]
-    close = df["close"]
-    up_move = high.diff()
-    down_move = -low.diff()
-    plus_dm = np.where((up_move > down_move) & (up_move > 0), up_move, 0.0)
-    minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0.0)
-    tr = pd.concat(
-        [
-            (high - low).abs(),
-            (high - close.shift(1)).abs(),
-            (low - close.shift(1)).abs(),
-        ],
-        axis=1,
-    ).max(axis=1)
-    atr = tr.ewm(alpha=1 / period, adjust=False).mean()
-    plus_di = 100 * pd.Series(plus_dm, index=df.index).ewm(alpha=1 / period, adjust=False).mean() / atr.replace(0, np.nan)
-    minus_di = 100 * pd.Series(minus_dm, index=df.index).ewm(alpha=1 / period, adjust=False).mean() / atr.replace(0, np.nan)
-    dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-    return dx.ewm(alpha=1 / period, adjust=False).mean().fillna(0.0)
 
 
 def _macd(s: pd.Series, fast: int = 12, slow: int = 26, signal: int = 9) -> pd.DataFrame:
@@ -418,7 +401,7 @@ class XAUGoldStrategy(StrategyInterface):
         df = _ensure_col(df, f"ema_{c.ema_fast_period}", _ema(df["close"], c.ema_fast_period))
         df = _ensure_col(df, f"ema_{c.ema_slow_period}", _ema(df["close"], c.ema_slow_period))
         df = _ensure_col(df, f"atr_{c.atr_period}", _atr(df, c.atr_period))
-        df = _ensure_col(df, f"adx_{c.adx_period}", _adx(df, c.adx_period))
+        df = _ensure_col(df, f"adx_{c.adx_period}", compute_adx(df, c.adx_period))
         return df
 
     def _enrich_trigger(self, df: pd.DataFrame) -> pd.DataFrame:
@@ -450,7 +433,7 @@ class XAUGoldStrategy(StrategyInterface):
         self, df_htf: pd.DataFrame, df_trigger: pd.DataFrame
     ) -> Tuple[str, float, float]:
         c = self.config
-        adx_val = float(df_trigger.get(f"adx_{c.adx_period}", _adx(df_trigger, c.adx_period)).iloc[-1])
+        adx_val = get_adx_from_df(df_trigger, c.adx_period) or 0.0
         atr_series = df_htf[f"atr_{c.atr_period}"]
         lookback = min(c.atr_pct_lookback_bars, len(atr_series))
         recent = atr_series.iloc[-lookback:]

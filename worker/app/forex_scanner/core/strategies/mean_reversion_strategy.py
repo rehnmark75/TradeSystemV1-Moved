@@ -53,6 +53,11 @@ except ImportError:
         MeanReversionConfig, MeanReversionConfigService, get_mean_reversion_config,
     )
 
+try:
+    from forex_scanner.services.regime_classifier import get_adx_from_df
+except ImportError:
+    from services.regime_classifier import get_adx_from_df  # type: ignore[no-redef]
+
 
 
 # ============================================================================
@@ -356,37 +361,7 @@ class MeanReversionStrategy(StrategyInterface):
     # ------------------------------------------------------------------
 
     def _get_adx(self, df: pd.DataFrame) -> Optional[float]:
-        """Prefer pre-stamped df['adx'] (DataFetcher EMA-Wilder); fall back to
-        recomputing with the same EMA-Wilder formula so standalone calls
-        match live values exactly."""
-        if "adx" in df.columns:
-            try:
-                v = df["adx"].iloc[-1]
-                if v is not None and not pd.isna(v):
-                    return float(v)
-            except Exception:
-                pass
-        try:
-            period = self.config.adx_period
-            high, low, close = df["high"], df["low"], df["close"]
-            tr = pd.concat(
-                [high - low, (high - close.shift(1)).abs(), (low - close.shift(1)).abs()],
-                axis=1,
-            ).max(axis=1)
-            up = high - high.shift(1)
-            dn = low.shift(1) - low
-            plus_dm = pd.Series(np.where((up > dn) & (up > 0), up, 0.0), index=df.index)
-            minus_dm = pd.Series(np.where((dn > up) & (dn > 0), dn, 0.0), index=df.index)
-            a = 1.0 / period
-            atr = tr.ewm(alpha=a, adjust=False).mean()
-            plus_di = 100 * plus_dm.ewm(alpha=a, adjust=False).mean() / atr.replace(0, np.nan)
-            minus_di = 100 * minus_dm.ewm(alpha=a, adjust=False).mean() / atr.replace(0, np.nan)
-            dx = 100 * (plus_di - minus_di).abs() / (plus_di + minus_di).replace(0, np.nan)
-            adx = dx.ewm(alpha=a, adjust=False).mean()
-            return float(adx.iloc[-1])
-        except Exception as e:
-            self.logger.debug(f"[MEAN_REVERSION] ADX calc error: {e}")
-            return None
+        return get_adx_from_df(df, self.config.adx_period)
 
     @staticmethod
     def _rsi(close: pd.Series, period: int = 14) -> pd.Series:
