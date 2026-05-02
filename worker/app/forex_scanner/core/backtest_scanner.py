@@ -1392,11 +1392,21 @@ class BacktestScanner(IntelligentForexScanner):
             else:
                 # 📊 ATR-ADAPTIVE MODE: Use strategy SL/TP or fallback to scalp trailing config
                 # v3.2.0: VSL deprecated, now use ATR-based trailing with proper SL/TP
+                trailing_cfg: dict = {}
                 try:
-                    from config_trailing_stops import get_scalp_trailing_config
-                except ImportError:
-                    from forex_scanner.config_trailing_stops import get_scalp_trailing_config
-                trailing_cfg = get_scalp_trailing_config(epic)
+                    try:
+                        from forex_scanner.services.trailing_config_service import get_trailing_config_service
+                    except ImportError:
+                        from services.trailing_config_service import get_trailing_config_service  # type: ignore
+                    trailing_cfg = get_trailing_config_service().get_config(epic, is_scalp=True) or {}
+                except Exception:
+                    pass
+                if not trailing_cfg:
+                    try:
+                        from config_trailing_stops import get_scalp_trailing_config
+                    except ImportError:
+                        from forex_scanner.config_trailing_stops import get_scalp_trailing_config
+                    trailing_cfg = get_scalp_trailing_config(epic)
 
                 # Use signal's SL/TP if already set, otherwise use trailing config defaults
                 if not signal.get('risk_pips') or signal.get('risk_pips') == 0:

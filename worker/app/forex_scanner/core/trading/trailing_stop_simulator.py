@@ -297,7 +297,22 @@ class TrailingStopSimulator:
 
             pair_config = get_scalp_trailing_config(use_epic, atr_pips)
 
-            # Update trailing parameters from ATR-scaled config
+            # Overlay DB values so live and backtest stay in sync
+            try:
+                try:
+                    from forex_scanner.services.trailing_config_service import get_trailing_config_service
+                except ImportError:
+                    from services.trailing_config_service import get_trailing_config_service  # type: ignore
+                is_scalp = bool(getattr(self, '_is_scalp', False))
+                db_cfg = get_trailing_config_service().get_config(
+                    use_epic, is_scalp=is_scalp, strategy=getattr(self, '_strategy', 'DEFAULT')
+                )
+                if db_cfg:
+                    pair_config = {**pair_config, **db_cfg}
+            except Exception:
+                pass
+
+            # Update trailing parameters from merged config
             self.break_even_trigger = pair_config.get('break_even_trigger_points', self.break_even_trigger)
             self.stage1_trigger = pair_config.get('stage1_trigger_points', self.stage1_trigger)
             self.stage1_lock = pair_config.get('stage1_lock_points', self.stage1_lock)
