@@ -112,10 +112,14 @@ class SweepAndRejection:
 class RangeStructureStrategy(StrategyInterface):
     """Single-setup non-trending structure strategy (see module docstring)."""
 
-    def __init__(self, config=None, logger=None, db_manager=None):
+    def __init__(self, config=None, logger=None, db_manager=None, config_override: Optional[Dict[str, Any]] = None):
         self.logger = logger or logging.getLogger(__name__)
         self.db_manager = db_manager
         self.config: RangeStructureConfig = config or get_range_structure_config()
+        if config_override:
+            for key, value in config_override.items():
+                if hasattr(self.config, key):
+                    setattr(self.config, key, value)
 
         self._htf_bias_calc = HTFBiasCalculator(logger=self.logger)
         self._swing_validator = SwingProximityValidator(
@@ -801,5 +805,5 @@ class RangeStructureStrategy(StrategyInterface):
 # Factory helper (mirrors create_smc_simple_strategy)
 # ---------------------------------------------------------------------------
 
-def create_range_structure_strategy(config=None, logger=None, db_manager=None):
-    return RangeStructureStrategy(config=config, logger=logger, db_manager=db_manager)
+def create_range_structure_strategy(config=None, logger=None, db_manager=None, config_override=None):
+    return RangeStructureStrategy(config=config, logger=logger, db_manager=db_manager, config_override=config_override)

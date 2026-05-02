@@ -16,7 +16,7 @@ import numpy as np
 import pandas as pd
 import logging
 from dataclasses import dataclass, field
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from datetime import datetime, timedelta
 
 try:
@@ -61,9 +61,10 @@ class FVGRetestStrategy(StrategyInterface):
     Runs on 1H (macro) + 5m (trigger/entry) timeframes.
     """
 
-    def __init__(self, config=None, db_manager=None, logger=None):
+    def __init__(self, config=None, db_manager=None, logger=None, config_override: Optional[Dict[str, Any]] = None):
         self.logger = logger or logging.getLogger(__name__)
         self._config = None
+        self._config_override = config_override
         self._data_fetcher = None
 
         # FVG detector instance
@@ -111,6 +112,10 @@ class FVGRetestStrategy(StrategyInterface):
                 self.logger.warning(f"FVG Retest config load failed, using defaults: {e}")
                 from forex_scanner.services.fvg_retest_config_service import FVGRetestConfig
                 self._config = FVGRetestConfig()
+            if self._config_override:
+                for key, value in self._config_override.items():
+                    if hasattr(self._config, key):
+                        setattr(self._config, key, value)
         return self._config
 
     def _get_current_time(self) -> datetime:

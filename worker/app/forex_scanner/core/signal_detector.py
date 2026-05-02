@@ -1539,7 +1539,7 @@ class SignalDetector:
                     from forex_scanner.core.strategies.fvg_retest_strategy import FVGRetestStrategy
                 except ImportError:
                     from .strategies.fvg_retest_strategy import FVGRetestStrategy
-                self.fvg_retest_strategy = FVGRetestStrategy()
+                self.fvg_retest_strategy = FVGRetestStrategy(config_override=self._config_override)
                 # Pass data_fetcher reference for backtest time
                 self.fvg_retest_strategy._data_fetcher = self.data_fetcher
                 if self._is_backtest_mode:
@@ -1863,6 +1863,7 @@ class SignalDetector:
                         config=None,
                         logger=self.logger,
                         db_manager=self.db_manager,
+                        config_override=self._config_override,
                     )
                     self.range_structure_strategy.data_fetcher = self.data_fetcher
                     self.logger.info("✅ Range Structure strategy lazy-loaded")
