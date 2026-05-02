@@ -1513,7 +1513,10 @@ class SignalDetector:
         technical indicators before returning.
         """
         try:
-            mean_reversion_strategy = self._get_strategy('MEAN_REVERSION')
+            mean_reversion_strategy = self._get_strategy(
+                'MEAN_REVERSION',
+                config_override=self._config_override,
+            )
             if mean_reversion_strategy is None:
                 return None
 
@@ -1622,7 +1625,10 @@ class SignalDetector:
         with technical indicators before returning.
         """
         try:
-            range_structure_strategy = self._get_strategy('RANGE_STRUCTURE')
+            range_structure_strategy = self._get_strategy(
+                'RANGE_STRUCTURE',
+                config_override=self._config_override,
+            )
             if range_structure_strategy is None:
                 return None
 

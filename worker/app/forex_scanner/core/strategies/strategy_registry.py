@@ -26,6 +26,8 @@ from abc import ABC, abstractmethod
 from typing import Dict, List, Optional, Type, Any
 from functools import wraps
 
+from .signal_result import SignalResult
+
 logger = logging.getLogger(__name__)
 
 
@@ -43,16 +45,15 @@ class StrategyInterface(ABC):
         pass
 
     @abstractmethod
-    def detect_signal(self, **kwargs) -> Optional[Dict]:
+    def detect_signal(self, **kwargs) -> Optional[SignalResult]:
         """
         Detect trading signal.
 
         Returns:
-            Signal dict if detected, None otherwise.
-            Implementations should return a SignalResult-compatible dict
-            (see core/strategies/signal_result.py) with at minimum:
-            signal_type, strategy, epic, entry_price, risk_pips,
-            reward_pips, confidence_score.
+            SignalResult dict if detected, None otherwise.
+            See core/strategies/signal_result.py for the contract.
+            Required fields: signal_type, strategy, epic, entry_price,
+            risk_pips, reward_pips, confidence_score.
         """
         pass
 
