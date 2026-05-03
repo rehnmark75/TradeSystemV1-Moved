@@ -59,14 +59,6 @@ function deriveSettingsContext(row: any) {
           ["Dist Low", parseNumeric(row.range_distance_to_low_pips)],
           ["Dist High", parseNumeric(row.range_distance_to_high_pips)]
         ]
-      : strategy === "RANGE_STRUCTURE"
-      ? [
-          ["Sweep Side", row.rs_sweep_side],
-          ["Wick Ratio", parseNumeric(row.rs_wick_ratio)],
-          ["Range Top", parseNumeric(row.rs_range_top)],
-          ["Range Bottom", parseNumeric(row.rs_range_bottom)],
-          ["OB Count", parseNumeric(row.rs_ob_count)]
-        ]
       : [
           ["Trigger Type", row.trigger_type],
           ["Pattern", row.pattern_type],
@@ -183,14 +175,11 @@ export async function GET(request: Request) {
             THEN CASE WHEN UPPER(a.signal_type) = 'BUY' THEN 'LOW_FADE'
                       WHEN UPPER(a.signal_type) = 'SELL' THEN 'HIGH_FADE'
                       ELSE 'RANGE_FADE' END
-          WHEN UPPER(COALESCE(a.strategy, '')) = 'RANGE_STRUCTURE'
-            THEN COALESCE(a.strategy_indicators->>'sweep_side', NULLIF(a.signal_trigger, ''), 'RANGE_SWEEP')
           ELSE COALESCE(NULLIF(a.signal_trigger, ''), NULLIF(a.trigger_type, ''), NULLIF(a.pattern_type, ''), 'UNCLASSIFIED')
         END as entry_type,
         CASE
           WHEN UPPER(COALESCE(a.strategy, '')) = 'SMC_SIMPLE' THEN 'SMC Tier 3'
           WHEN UPPER(COALESCE(a.strategy, '')) = 'RANGE_FADE' THEN 'Range Fade'
-          WHEN UPPER(COALESCE(a.strategy, '')) = 'RANGE_STRUCTURE' THEN 'Range Structure'
           WHEN a.strategy IS NULL THEN 'Unlinked Alert'
           ELSE 'Generic Strategy'
         END as setup_family,

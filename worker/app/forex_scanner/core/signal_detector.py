@@ -98,9 +98,6 @@ class SignalDetector:
         # filtering. Enable flag is driven from scanner_global_config.
         self.mean_reversion_enabled = True
 
-        # RANGE_STRUCTURE runs concurrently (like MEAN_REVERSION) in monitor-only mode until its 30-day validation gate passes.
-        self.range_structure_enabled = True
-
         # RANGE_FADE runs concurrently (monitor-only by default).
         self.range_fade_enabled = True
 
@@ -209,15 +206,14 @@ class SignalDetector:
             'SMC_EMA': 'SMC_SIMPLE',
             'SMC': 'SMC_SIMPLE',
             'MR': 'MEAN_REVERSION',
-            'RS': 'RANGE_STRUCTURE',
             'XAU': 'XAU_GOLD',
             'GOLD': 'XAU_GOLD',
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
-        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'RANGE_STRUCTURE', 'XAU_GOLD'}
+        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD'}
         if canonical not in known:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, RANGE_STRUCTURE."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD."
 
         if canonical == 'SMC_SIMPLE':
             # SMC Simple has its own lazy-load path; just arm the flag.
@@ -682,20 +678,6 @@ class SignalDetector:
                     self.logger.error(f"❌ [MEAN_REVERSION] Error for {epic}: {e}")
                     individual_results['mean_reversion'] = None
 
-            elif routed_strategy == 'RANGE_STRUCTURE' and self._strategy_router:
-                try:
-                    self.logger.debug(f"🔍 [RANGE_STRUCTURE] Starting detection for {epic}")
-                    signal = self.detect_range_structure_signals(epic, pair, spread_pips, timeframe, routing_context=routing_result)
-                    individual_results['range_structure'] = signal
-                    if signal:
-                        all_signals.append(signal)
-                        self.logger.info(f"✅ [RANGE_STRUCTURE] Signal detected for {epic}: {signal.get('signal')} @ {signal.get('entry_price', 0):.5f}")
-                    else:
-                        self.logger.debug(f"📊 [RANGE_STRUCTURE] No signal for {epic}")
-                except Exception as e:
-                    self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
-                    individual_results['range_structure'] = None
-
             elif self._is_gold_epic(epic):
                 try:
                     self.logger.debug(f"🔍 [XAU_GOLD] Starting detection for {epic}")
@@ -761,32 +743,6 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [MEAN_REVERSION] Error for {epic}: {e}")
                     individual_results['mean_reversion'] = None
-
-            # RANGE_STRUCTURE runs concurrently (monitor-only) so we can
-            # observe its performance alongside whichever strategy the
-            # router picked. Internal hard ADX gates + per-pair enable
-            # flags inside the strategy filter out unsuitable conditions.
-            if (self.range_structure_enabled
-                    and routed_strategy != 'RANGE_STRUCTURE'
-                    and not self._is_gold_epic(epic)):
-                try:
-                    self.logger.debug(f"🔍 [RANGE_STRUCTURE] Starting detection for {epic}")
-                    rs_signal = self.detect_range_structure_signals(
-                        epic, pair, spread_pips, timeframe,
-                        routing_context=routing_result,
-                    )
-                    individual_results['range_structure'] = rs_signal
-                    if rs_signal:
-                        all_signals.append(rs_signal)
-                        self.logger.info(
-                            f"✅ [RANGE_STRUCTURE] Signal detected for {epic}: "
-                            f"{rs_signal.get('signal')} @ {rs_signal.get('entry_price', 0):.5f}"
-                        )
-                    else:
-                        self.logger.debug(f"📊 [RANGE_STRUCTURE] No signal for {epic}")
-                except Exception as e:
-                    self.logger.error(f"❌ [RANGE_STRUCTURE] Error for {epic}: {e}")
-                    individual_results['range_structure'] = None
 
             if self.range_fade_enabled and RangeFadeConfigService.get_instance().is_pair_enabled(epic):
                 try:
@@ -855,7 +811,6 @@ class SignalDetector:
         'SMC_EMA': 'SMC_SIMPLE',
         'MR': 'MEAN_REVERSION',
         'MEANREV': 'MEAN_REVERSION',
-        'RS': 'RANGE_STRUCTURE',
         'XAU': 'XAU_GOLD',
         'GOLD': 'XAU_GOLD',
     }
@@ -883,8 +838,6 @@ class SignalDetector:
                 signal = self.detect_xau_gold_signals(epic, pair, spread_pips, timeframe)
             elif name == 'RANGE_FADE':
                 signal = self.detect_range_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
-            elif name == 'RANGE_STRUCTURE':
-                signal = self.detect_range_structure_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'MEAN_REVERSION':
                 signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
@@ -1607,73 +1560,4 @@ class SignalDetector:
             self.logger.error(f"❌ Error detecting range-fade signals for {epic}: {e}")
             return None
 
-    def detect_range_structure_signals(
-        self,
-        epic: str,
-        pair: str,
-        spread_pips: float = 1.5,
-        timeframe: str = '15m',
-        current_timestamp: datetime = None,
-        routing_context: Dict = None,
-    ) -> Optional[Dict]:
-        """Detect signals using the Range Structure strategy.
-
-        Range boundary rejection-wick strategy (15m primary + 1h HTF) with hard
-        ADX gates. Mirrors detect_mean_reversion_signals wiring — lazy-loads on
-        first use, fetches primary + confirmation timeframes via DataFetcher,
-        delegates to the strategy's detect_signal() and enhances the result
-        with technical indicators before returning.
-        """
-        try:
-            range_structure_strategy = self._get_strategy(
-                'RANGE_STRUCTURE',
-                config_override=self._config_override,
-            )
-            if range_structure_strategy is None:
-                return None
-
-            df_trigger = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe=timeframe,
-                lookback_hours=48,
-            )
-            if df_trigger is None or df_trigger.empty:
-                self.logger.debug(f"[RANGE_STRUCTURE] No {timeframe} data for {epic}")
-                return None
-
-            df_1h = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='1h',
-                lookback_hours=72,
-            )
-
-            # Resolve a current_timestamp from the latest trigger bar if not supplied
-            if current_timestamp is None:
-                try:
-                    if 'start_time' in df_trigger.columns:
-                        current_timestamp = df_trigger['start_time'].iloc[-1]
-                    else:
-                        current_timestamp = df_trigger.index[-1]
-                except Exception:
-                    current_timestamp = None
-
-            signal = range_structure_strategy.detect_signal(
-                df_trigger=df_trigger,
-                df_4h=df_1h,
-                epic=epic,
-                pair=pair,
-                current_timestamp=current_timestamp,
-                routing_context=routing_context,
-            )
-
-            if signal:
-                signal = self._add_complete_technical_indicators(signal, df_trigger)
-
-            return signal
-
-        except Exception as e:
-            self.logger.error(f"❌ Error detecting range structure signals for {epic}: {e}")
-            return None
 

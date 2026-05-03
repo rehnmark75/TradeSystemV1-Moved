@@ -7,7 +7,6 @@ export const TRAILING_STRATEGIES = [
   "XAU_GOLD",
   "RANGE_FADE",
   "MEAN_REVERSION",
-  "RANGE_STRUCTURE",
 ] as const;
 
 export type TrailingStrategy = (typeof TRAILING_STRATEGIES)[number];

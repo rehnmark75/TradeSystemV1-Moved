@@ -57,15 +57,6 @@ const STRATEGIES = {
     defaultGlobalEnabled: true,
     defaultMonitorOnly: false,
   },
-  "range-structure": {
-    label: "RANGE_STRUCTURE",
-    globalTable: "range_structure_global_config",
-    overrideTable: "range_structure_pair_overrides",
-    configSetColumn: null,
-    overrideConfigJoin: false,
-    defaultGlobalEnabled: true,
-    defaultMonitorOnly: true,
-  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {

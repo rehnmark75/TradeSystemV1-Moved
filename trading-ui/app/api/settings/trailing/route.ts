@@ -26,7 +26,6 @@ const ALLOWED_STRATEGIES = new Set([
   "XAU_GOLD",
   "RANGE_FADE",
   "MEAN_REVERSION",
-  "RANGE_STRUCTURE",
 ]);
 
 async function invalidateTrailingCache(configSet: string) {
