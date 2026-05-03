@@ -251,22 +251,31 @@ class MeanReversionStrategy(StrategyInterface):
         if latest_upper is None or latest_lower is None or latest_rsi is None:
             return None
 
+        # Band rejection entry: require prev candle to have breached the band
+        # with RSI extreme, then current candle to close back inside — confirming
+        # rejection rather than just a band touch. Boosts WR by filtering false
+        # band touches where price continues through.
+        prev_close = float(close.iloc[-2]) if len(close) >= 2 else latest_close
+        prev_upper = float(upper.iloc[-2]) if pd.notna(upper.iloc[-2]) else latest_upper
+        prev_lower = float(lower.iloc[-2]) if pd.notna(lower.iloc[-2]) else latest_lower
+        prev_rsi = float(rsi.iloc[-2]) if len(rsi) >= 2 and pd.notna(rsi.iloc[-2]) else latest_rsi
+
         rsi_os = self.config.get_pair_rsi_oversold(epic)
         rsi_ob = self.config.get_pair_rsi_overbought(epic)
 
         direction: Optional[str] = None
         extremity = 0.0
-        if latest_close <= latest_lower and latest_rsi <= rsi_os:
+        if prev_close <= prev_lower and prev_rsi <= rsi_os and latest_close > latest_lower:
             direction = "BUY"
-            # extremity: how deep past thresholds
-            rsi_depth = max(0.0, (rsi_os - latest_rsi)) / max(rsi_os, 1)
-            bb_depth = max(0.0, (latest_lower - latest_close))
-            extremity = min(1.0, rsi_depth + bb_depth / max(abs(latest_upper - latest_lower), 1e-6))
-        elif latest_close >= latest_upper and latest_rsi >= rsi_ob:
+            # extremity measured from the trigger (prev) candle where the extreme occurred
+            rsi_depth = max(0.0, (rsi_os - prev_rsi)) / max(rsi_os, 1)
+            bb_depth = max(0.0, (prev_lower - prev_close))
+            extremity = min(1.0, rsi_depth + bb_depth / max(abs(prev_upper - prev_lower), 1e-6))
+        elif prev_close >= prev_upper and prev_rsi >= rsi_ob and latest_close < latest_upper:
             direction = "SELL"
-            rsi_depth = max(0.0, (latest_rsi - rsi_ob)) / max(100 - rsi_ob, 1)
-            bb_depth = max(0.0, (latest_close - latest_upper))
-            extremity = min(1.0, rsi_depth + bb_depth / max(abs(latest_upper - latest_lower), 1e-6))
+            rsi_depth = max(0.0, (prev_rsi - rsi_ob)) / max(100 - rsi_ob, 1)
+            bb_depth = max(0.0, (prev_close - prev_upper))
+            extremity = min(1.0, rsi_depth + bb_depth / max(abs(prev_upper - prev_lower), 1e-6))
 
         if direction is None:
             return None
@@ -351,8 +360,8 @@ class MeanReversionStrategy(StrategyInterface):
         adx_htf_str = f"{adx_htf:.1f}" if adx_htf is not None else "na"
         self.logger.info(
             f"[MEAN_REVERSION] ✅ {direction} {epic} @ {latest_close:.5f} "
-            f"RSI={latest_rsi:.1f} ADX(15m)={adx_str} ADX(1h)={adx_htf_str} "
-            f"conf={confidence:.2f}"
+            f"RSI(prev)={prev_rsi:.1f} ADX(15m)={adx_str} ADX(1h)={adx_htf_str} "
+            f"conf={confidence:.2f} [rejection entry]"
         )
 
         # LPF gate — strategy-side opt-in (LPF_ENABLED = True)
@@ -362,7 +371,7 @@ class MeanReversionStrategy(StrategyInterface):
                     from .lpf_gate import apply_lpf_gate
                 except ImportError:
                     from forex_scanner.core.strategies.lpf_gate import apply_lpf_gate
-                signal = apply_lpf_gate(signal, self.logger)
+                signal = apply_lpf_gate(signal, self.logger, backtest_timestamp=self._current_timestamp)
             except Exception as _lpf_exc:
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
         return signal
