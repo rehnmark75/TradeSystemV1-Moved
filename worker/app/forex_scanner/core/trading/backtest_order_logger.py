@@ -273,9 +273,9 @@ class BacktestOrderLogger:
                 elif trade_result == 'winner':
                     trade_result = 'win'
 
-            # Truncate exit_reason if too long for VARCHAR(10)
-            if exit_reason and len(exit_reason) > 10:
-                exit_reason = exit_reason[:10]
+            # Truncate exit_reason to fit VARCHAR(30) column
+            if exit_reason and len(exit_reason) > 30:
+                exit_reason = exit_reason[:30]
 
             # Performance metrics
             holding_time_minutes = signal.get('holding_time_minutes')

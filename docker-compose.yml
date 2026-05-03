@@ -313,6 +313,7 @@ services:
     volumes:
       - ./worker/app:/app
       - ./logs/worker:/app/logs
+      - ./dev-app/config.py:/app/trailing_config_live.py:ro
     environment:
       - PYTHONPATH=/app
       - TRADING_ENVIRONMENT=demo

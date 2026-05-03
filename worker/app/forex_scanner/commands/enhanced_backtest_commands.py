@@ -246,7 +246,7 @@ class EnhancedBacktestCommands:
             signals_query = """
             SELECT epic, timeframe, signal_timestamp, signal_type, strategy_name,
                    confidence_score, entry_price, stop_loss_price, take_profit_price,
-                   pips_gained, trade_result, validation_passed
+                   pips_gained, trade_result, validation_passed, exit_reason
             FROM backtest_signals
             WHERE execution_id = :execution_id
             ORDER BY signal_timestamp DESC
@@ -517,11 +517,17 @@ class EnhancedBacktestCommands:
                 self.logger.info(f"      ❌ Losers: {losers} (loss exits)")
                 self.logger.info(f"      ⚪ Neutral/Timeout: {breakeven} (no clear outcome)")
 
-                # Exit breakdown (simplified for now)
+                # Exit breakdown — count by exit_reason from simulation
+                profit_target_exits = len([s for s in completed_trades if s.get('exit_reason') == 'PROFIT_TARGET'])
+                trailing_stop_exits = len([s for s in completed_trades if s.get('exit_reason') == 'TRAILING_STOP'])
+                stop_loss_exits = len([s for s in completed_trades if s.get('exit_reason') == 'STOP_LOSS'])
+                timeout_exits = len([s for s in completed_trades if s.get('exit_reason') == 'TIMEOUT'])
                 self.logger.info(f"   🎯 Exit Breakdown:")
-                self.logger.info(f"      🏁 Profit Target: {winners} trades")
-                self.logger.info(f"      📈 Trailing Stop: 0 trades")
-                self.logger.info(f"      🛑 Stop Loss: {losers} trades")
+                self.logger.info(f"      🏁 Profit Target: {profit_target_exits} trades")
+                self.logger.info(f"      📈 Trailing Stop: {trailing_stop_exits} trades")
+                self.logger.info(f"      🛑 Stop Loss: {stop_loss_exits} trades")
+                if timeout_exits:
+                    self.logger.info(f"      ⏱️ Timeout: {timeout_exits} trades")
             else:
                 self.logger.info(f"   ⚠️ No completed trades found in backtest period")
 

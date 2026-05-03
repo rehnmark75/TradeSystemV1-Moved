@@ -21,6 +21,7 @@ try:
     from core.signal_detector import SignalDetector
     from core.trading.backtest_order_logger import BacktestOrderLogger
     from core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from core.backtesting.backtest_trailing_engine import BacktestTrailingEngine, BACKTEST_USE_LEGACY_SIMULATOR
     from core.backtest_candles_manager import BacktestCandlesManager
     from core.scanning.signal_detection_engine import SignalDetectionEngine
     from services.smc_simple_config_service import get_smc_simple_config
@@ -40,6 +41,7 @@ except ImportError:
     from forex_scanner.core.signal_detector import SignalDetector
     from forex_scanner.core.trading.backtest_order_logger import BacktestOrderLogger
     from forex_scanner.core.trading.trailing_stop_simulator import TrailingStopSimulator
+    from forex_scanner.core.backtesting.backtest_trailing_engine import BacktestTrailingEngine, BACKTEST_USE_LEGACY_SIMULATOR
     from forex_scanner.core.backtest_candles_manager import BacktestCandlesManager
     from forex_scanner.core.scanning.signal_detection_engine import SignalDetectionEngine
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -213,56 +215,52 @@ class BacktestScanner:
         )
 
         # ============================================================================
-        # STANDARD TRAILING STOP COMPONENT - Uses pair-specific config from config_trailing_stops.py
+        # TRAILING STOP ENGINE — single source of truth (live config via mount)
         # ============================================================================
-        # The trailing stop is now a STANDARD component that uses pair-specific
-        # Progressive 3-Stage configuration. Each pair has its own optimized settings.
-        # This ensures consistency between backtest and live trading systems.
+        # BacktestTrailingEngine reads PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS
+        # from dev-app/config.py (mounted as trailing_config_live.py).  This is the
+        # exact same dict the live fastapi-dev container uses, so backtest and live
+        # trailing behaviour are always in sync.
+        #
+        # Set env BACKTEST_USE_LEGACY_SIMULATOR=1 to A/B compare against old engine.
 
-        # Import the factory function for creating per-epic simulators
-        try:
-            from core.trading.trailing_stop_simulator import create_trailing_stop_simulator
-        except ImportError:
-            from forex_scanner.core.trading.trailing_stop_simulator import create_trailing_stop_simulator
-
-        # Cache for per-epic trailing stop simulators
+        # Cache for per-epic trailing engines
         self._trailing_stop_simulators = {}
-        self._create_trailing_stop_simulator = create_trailing_stop_simulator
 
-        # 🔥 SCALPING-SPECIFIC CONFIGURATION: Still uses fixed SL/TP (no trailing)
-        self._use_scalping_mode = 'SCALPING' in self.strategy_name.upper()
+        # Scalp flag — when True the engine selects SCALP_TRAILING_CONFIGS and runs
+        # full progressive trailing (old code used fixed SL/TP, which was wrong).
+        # bt.py --scalp puts scalp_mode_enabled=True into config_override (not backtest_config).
+        self._use_scalping_mode = (
+            'SCALPING' in self.strategy_name.upper()
+            or bool(self._config_override and self._config_override.get('scalp_mode_enabled'))
+        )
 
-        # 🆕 v3.2.0: ATR-Adaptive Trailing Mode
-        # When enabled, trailing distances scale to market volatility at signal time
-        self._use_atr_trailing = False
-        if self._config_override and self._config_override.get('use_atr_trailing'):
-            self._use_atr_trailing = True
-            self.logger.info(f"📊 ATR-Adaptive Trailing: ENABLED (distances scale with ATR)")
-
-        if self._use_scalping_mode:
+        if BACKTEST_USE_LEGACY_SIMULATOR:
+            self.logger.warning("⚠️ [LEGACY] BACKTEST_USE_LEGACY_SIMULATOR=1 — using old TrailingStopSimulator for A/B comparison")
             try:
-                from configdata.strategies.config_scalping_strategy import SCALPING_MODE, SCALPING_STRATEGY_CONFIG
-                scalping_config = SCALPING_STRATEGY_CONFIG.get(SCALPING_MODE, {})
-                self._scalping_target_pips = scalping_config.get('target_pips', 8.0)
-                self._scalping_stop_pips = scalping_config.get('stop_loss_pips', 4.0)
-                self._scalping_max_bars = scalping_config.get('max_bars', 10000)
-                self.logger.info(f"📊 Scalping Exit Rules: PURE FIXED SL/TP - Target={self._scalping_target_pips} pips, Stop={self._scalping_stop_pips} pips")
-                self.logger.info(f"   ⚠️ NO trailing, NO breakeven, NO time exits - trades MUST hit SL or TP")
+                from core.trading.trailing_stop_simulator import create_trailing_stop_simulator
             except ImportError:
-                self._scalping_target_pips = 8.0
-                self._scalping_stop_pips = 6.0
-                self._scalping_max_bars = 10000
-                self.logger.warning(f"⚠️ Could not load scalping config, using fallback")
+                from forex_scanner.core.trading.trailing_stop_simulator import create_trailing_stop_simulator
+            self._create_trailing_stop_simulator = create_trailing_stop_simulator
+            self._use_atr_trailing = bool(self._config_override and self._config_override.get('use_atr_trailing'))
         else:
-            # Standard strategies use Progressive 3-Stage trailing from config_trailing_stops.py
-            self.logger.info(f"📊 Trailing Stop: Using pair-specific Progressive 3-Stage system from config_trailing_stops.py")
+            self._create_trailing_stop_simulator = None  # unused when new engine active
+            self._use_atr_trailing = False
 
-        # Backward compatibility: keep a default simulator for legacy code
-        self.trailing_stop_simulator = TrailingStopSimulator(
-            target_pips=30.0,
-            initial_stop_pips=20.0,
+        scalp_label = "SCALP (progressive trailing, SCALP_TRAILING_CONFIGS)" if self._use_scalping_mode else "STANDARD (PAIR_TRAILING_CONFIGS)"
+        self.logger.info(f"📊 Trailing Engine: BacktestTrailingEngine — {scalp_label}")
+        if BACKTEST_USE_LEGACY_SIMULATOR:
+            pass  # logged above
+        else:
+            self.logger.info(f"   spread={getattr(self, '_spread_pips', 1.5)} pip | slippage=0.5 pip applied at entry")
+
+        # Backward-compat default engine (used by any legacy code that reads .trailing_stop_simulator)
+        self.trailing_stop_simulator = BacktestTrailingEngine(
+            epic=None,
+            is_scalp_trade=self._use_scalping_mode,
+            config_override=self._config_override,
             max_bars=96,
-            logger=self.logger
+            logger=self.logger,
         )
 
         # CRITICAL FIX: Override signal detector to use BacktestDataFetcher instead of live DataFetcher
@@ -1336,50 +1334,49 @@ class BacktestScanner:
 
     def _get_trailing_stop_simulator(self, epic: str, strategy: str = 'DEFAULT'):
         """
-        Get or create a per-epic trailing stop simulator with pair-specific config.
+        Get or create a per-epic trailing engine with pair-specific live config.
 
-        This ensures each pair uses its optimized Progressive 3-Stage trailing stop
-        settings from config_trailing_stops.py, matching the live trading system.
-
-        Args:
-            epic: Trading pair (e.g., 'CS.D.EURUSD.CEEM.IP')
-
-        Returns:
-            TrailingStopSimulator configured for the specific pair
+        Returns BacktestTrailingEngine (new) or TrailingStopSimulator (legacy A/B mode).
+        Cache is keyed by (epic, strategy) so per-strategy DB overrides are respected.
         """
-        # Cache key includes strategy so per-strategy DB overrides apply.
         strategy = (strategy or 'DEFAULT').upper()
         cache_key = (epic, strategy)
         if cache_key in self._trailing_stop_simulators:
             return self._trailing_stop_simulators[cache_key]
 
-        # Create new simulator with pair-specific config
-        if self._use_scalping_mode:
-            # Scalping uses fixed SL/TP, no trailing
-            simulator = TrailingStopSimulator(
-                epic=epic,
-                target_pips=self._scalping_target_pips,
-                initial_stop_pips=self._scalping_stop_pips,
-                max_bars=self._scalping_max_bars,
-                use_fixed_sl_tp=True,
-                strategy=strategy,
-                logger=self.logger
-            )
-            self.logger.debug(f"📊 Created SCALPING simulator for {epic}: SL={self._scalping_stop_pips}, TP={self._scalping_target_pips}")
+        if BACKTEST_USE_LEGACY_SIMULATOR:
+            # Legacy path: old simulator for A/B comparison runs
+            if self._use_scalping_mode:
+                simulator = TrailingStopSimulator(
+                    epic=epic,
+                    target_pips=getattr(self, '_scalping_target_pips', 8.0),
+                    initial_stop_pips=getattr(self, '_scalping_stop_pips', 6.0),
+                    max_bars=getattr(self, '_scalping_max_bars', 10000),
+                    use_fixed_sl_tp=True,
+                    strategy=strategy,
+                    logger=self.logger,
+                )
+            else:
+                simulator = self._create_trailing_stop_simulator(
+                    epic=epic,
+                    use_atr_trailing=self._use_atr_trailing,
+                    strategy=strategy,
+                    logger=self.logger,
+                )
         else:
-            # Standard strategies use Progressive 3-Stage from config_trailing_stops.py
-            # The factory function auto-loads pair config
-            # 🆕 v3.2.0: Pass use_atr_trailing for ATR-adaptive mode
-            simulator = self._create_trailing_stop_simulator(
+            # New engine: uses live PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS.
+            # Scalp mode uses SCALP_TRAILING_CONFIGS with full progressive trailing
+            # (old code used fixed SL/TP which produced meaningless scalp results).
+            simulator = BacktestTrailingEngine(
                 epic=epic,
-                use_atr_trailing=self._use_atr_trailing,
+                is_scalp_trade=self._use_scalping_mode,
+                config_override=self._config_override,
+                max_bars=200,
                 strategy=strategy,
-                logger=self.logger
+                logger=self.logger,
             )
-            mode_desc = "ATR-Adaptive" if self._use_atr_trailing else "Progressive 3-Stage"
-            self.logger.debug(f"📊 Created {mode_desc} simulator for {epic} (strategy={strategy})")
+            self.logger.debug(f"📊 BacktestTrailingEngine ready for {epic} (scalp={self._use_scalping_mode})")
 
-        # Cache for reuse (keyed by epic+strategy)
         self._trailing_stop_simulators[cache_key] = simulator
         return simulator
 

@@ -145,7 +145,7 @@ class RangeFadeStrategy(StrategyInterface):
             return None
 
         now = self._resolve_now(df)
-        if not cfg.is_session_allowed(now.hour):
+        if not cfg.is_session_allowed(now.hour, epic):
             self._reject(epic, "session_blocked")
             return None
 

@@ -82,6 +82,7 @@ class RangeFadeConfig:
 
     london_start_hour_utc: int = 6
     new_york_end_hour_utc: int = 18
+    blocked_hours_utc: str = ""  # comma-separated hours to block, e.g. "7,8,15,16,18"
 
     pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
@@ -115,8 +116,18 @@ class RangeFadeConfig:
     def get_pair_fixed_take_profit_pips(self, epic: str) -> float:
         return float(self._override(epic, "fixed_take_profit_pips", self.fixed_take_profit_pips))
 
-    def is_session_allowed(self, hour_utc: int) -> bool:
-        return self.london_start_hour_utc <= hour_utc <= self.new_york_end_hour_utc
+    def get_pair_blocked_hours(self, epic: str) -> set:
+        raw = self._override(epic, "blocked_hours_utc", self.blocked_hours_utc)
+        if not raw:
+            return set()
+        return {int(h.strip()) for h in str(raw).split(",") if h.strip().isdigit()}
+
+    def is_session_allowed(self, hour_utc: int, epic: str = "") -> bool:
+        if not (self.london_start_hour_utc <= hour_utc <= self.new_york_end_hour_utc):
+            return False
+        if epic and hour_utc in self.get_pair_blocked_hours(epic):
+            return False
+        return True
 
 
 def build_range_fade_config(profile: Optional[str] = None) -> RangeFadeConfig:
