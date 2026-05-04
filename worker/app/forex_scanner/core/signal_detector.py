@@ -835,7 +835,7 @@ class SignalDetector:
 
             if (self.smc_momentum_enabled
                     and not self._is_gold_epic(epic)
-                    and SMCMomentumConfigService.get_instance().is_pair_enabled(epic)):
+                    and SMCMomentumConfigService.get_instance().get_config().is_pair_enabled(epic)):
                 try:
                     self.logger.debug(f"🔍 [SMC_MOMENTUM] Starting detection for {epic}")
                     mom_signal = self.detect_smc_momentum_signals(epic, pair, spread_pips, timeframe)
@@ -852,7 +852,7 @@ class SignalDetector:
                     self.logger.error(f"❌ [SMC_MOMENTUM] Error for {epic}: {e}")
                     individual_results['smc_momentum'] = None
 
-            if self.range_fade_enabled and RangeFadeConfigService.get_instance().is_pair_enabled(epic):
+            if self.range_fade_enabled and RangeFadeConfigService.get_instance().get_config().is_pair_enabled(epic):
                 try:
                     self.logger.debug(f"🔍 [RANGE_FADE] Starting detection for {epic}")
                     erf_signal = self.detect_range_fade_signals(
