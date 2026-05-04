@@ -61,6 +61,21 @@ class MeanReversionConfig:
     # Routing
     trust_regime_routing: bool = True
 
+    # Entry mode: "rejection" (prev breach + close back inside) or "touch" (band touch + RSI extreme on same candle)
+    entry_mode: str = "rejection"
+
+    # Optional session window gate (None = no gate; hour values are UTC inclusive)
+    session_start_hour: Optional[int] = None
+    session_end_hour: Optional[int] = None
+
+    # Low-volatility regime filter — replaces ADX gate when enabled per-pair
+    # Uses ATR ≤ threshold AND flat EMA slope instead of ADX ceiling
+    low_vol_regime_filter_enabled: bool = False
+    regime_atr_max_pips: float = 7.0            # 15m scale (research used 3.0 on 5m)
+    regime_ema_period: int = 50
+    regime_ema_lookback_candles: int = 24        # candles for EMA slope measurement
+    regime_ema_max_change_pips: float = 5.0      # 15m scale (research used 4.5 on 5m)
+
     # Pair-level state (populated from DB)
     _pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
 
@@ -110,6 +125,35 @@ class MeanReversionConfig:
 
     def get_pair_max_confidence(self, epic: str) -> float:
         return float(self.get_for_pair(epic, "max_confidence", self.max_confidence))
+
+    def get_pair_primary_timeframe(self, epic: str) -> str:
+        return str(self.get_for_pair(epic, "primary_timeframe", self.primary_timeframe))
+
+    def get_pair_entry_mode(self, epic: str) -> str:
+        return str(self.get_for_pair(epic, "entry_mode", self.entry_mode))
+
+    def get_pair_session_start_hour(self, epic: str) -> Optional[int]:
+        v = self.get_for_pair(epic, "session_start_hour", self.session_start_hour)
+        return int(v) if v is not None else None
+
+    def get_pair_session_end_hour(self, epic: str) -> Optional[int]:
+        v = self.get_for_pair(epic, "session_end_hour", self.session_end_hour)
+        return int(v) if v is not None else None
+
+    def get_pair_low_vol_regime_filter_enabled(self, epic: str) -> bool:
+        return bool(self.get_for_pair(epic, "low_vol_regime_filter_enabled", self.low_vol_regime_filter_enabled))
+
+    def get_pair_regime_atr_max_pips(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, "regime_atr_max_pips", self.regime_atr_max_pips))
+
+    def get_pair_regime_ema_period(self, epic: str) -> int:
+        return int(self.get_for_pair(epic, "regime_ema_period", self.regime_ema_period))
+
+    def get_pair_regime_ema_lookback_candles(self, epic: str) -> int:
+        return int(self.get_for_pair(epic, "regime_ema_lookback_candles", self.regime_ema_lookback_candles))
+
+    def get_pair_regime_ema_max_change_pips(self, epic: str) -> float:
+        return float(self.get_for_pair(epic, "regime_ema_max_change_pips", self.regime_ema_max_change_pips))
 
     def is_pair_enabled(self, epic: str) -> bool:
         if epic in self._pair_overrides:

@@ -1611,10 +1611,13 @@ class SignalDetector:
             if mean_reversion_strategy is None:
                 return None
 
+            # Use the per-pair configured primary timeframe (may differ from the
+            # scan cadence timeframe — e.g. USDCHF touch-entry runs on 5m).
+            primary_tf = mean_reversion_strategy.get_config().get_pair_primary_timeframe(epic)
             df_trigger = self.data_fetcher.get_enhanced_data(
                 epic=epic,
                 pair=pair,
-                timeframe=timeframe,
+                timeframe=primary_tf,
                 lookback_hours=48,
             )
             if df_trigger is None or df_trigger.empty:

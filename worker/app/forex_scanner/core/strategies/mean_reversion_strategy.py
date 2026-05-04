@@ -177,6 +177,9 @@ class MeanReversionStrategy(StrategyInterface):
     def strategy_name(self) -> str:
         return "MEAN_REVERSION"
 
+    def get_config(self):
+        return self.config
+
     def get_required_timeframes(self) -> List[str]:
         return [self.config.confirmation_timeframe, self.config.primary_timeframe]
 
@@ -208,13 +211,34 @@ class MeanReversionStrategy(StrategyInterface):
         if not self._check_cooldown(epic):
             return None
 
+        # Session window gate (optional — configured per-pair)
+        session_start = self.config.get_pair_session_start_hour(epic)
+        session_end = self.config.get_pair_session_end_hour(epic)
+        if session_start is not None and session_end is not None:
+            eval_ts = current_timestamp or datetime.now(timezone.utc)
+            if getattr(eval_ts, "tzinfo", None) is None:
+                eval_ts = eval_ts.replace(tzinfo=timezone.utc)
+            utc_hour = eval_ts.hour
+            if not (session_start <= utc_hour <= session_end):
+                self.logger.debug(
+                    f"[MEAN_REVERSION] {epic}: outside session window (hour={utc_hour}, "
+                    f"window={session_start}-{session_end})"
+                )
+                return None
+
         adx_value = self._get_adx(df)
         adx_htf = self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None
 
-        # Hard ADX gates — always enforced (no trust_regime_routing bypass).
-        # Fail-closed: missing/NaN ADX blocks the signal (a reversion strategy
-        # with no regime context is unsafe).
-        if self.config.hard_adx_gate_enabled:
+        use_low_vol_filter = self.config.get_pair_low_vol_regime_filter_enabled(epic)
+        if use_low_vol_filter:
+            # Low-vol regime filter: ATR ≤ threshold + flat EMA slope.
+            # Used instead of ADX for touch-entry pairs (late-session fade).
+            if not self._low_vol_regime_passes(df, epic):
+                return None
+        elif self.config.hard_adx_gate_enabled:
+            # Hard ADX gates — always enforced (no trust_regime_routing bypass).
+            # Fail-closed: missing/NaN ADX blocks the signal (a reversion strategy
+            # with no regime context is unsafe).
             pri_ceiling = self.config.get_pair_adx_hard_ceiling_primary(epic)
             htf_ceiling = self.config.get_pair_adx_hard_ceiling_htf(epic)
             if adx_value is None or pd.isna(adx_value):
@@ -251,31 +275,45 @@ class MeanReversionStrategy(StrategyInterface):
         if latest_upper is None or latest_lower is None or latest_rsi is None:
             return None
 
-        # Band rejection entry: require prev candle to have breached the band
-        # with RSI extreme, then current candle to close back inside — confirming
-        # rejection rather than just a band touch. Boosts WR by filtering false
-        # band touches where price continues through.
-        prev_close = float(close.iloc[-2]) if len(close) >= 2 else latest_close
-        prev_upper = float(upper.iloc[-2]) if pd.notna(upper.iloc[-2]) else latest_upper
-        prev_lower = float(lower.iloc[-2]) if pd.notna(lower.iloc[-2]) else latest_lower
-        prev_rsi = float(rsi.iloc[-2]) if len(rsi) >= 2 and pd.notna(rsi.iloc[-2]) else latest_rsi
-
         rsi_os = self.config.get_pair_rsi_oversold(epic)
         rsi_ob = self.config.get_pair_rsi_overbought(epic)
+        entry_mode = self.config.get_pair_entry_mode(epic)
 
         direction: Optional[str] = None
         extremity = 0.0
-        if prev_close <= prev_lower and prev_rsi <= rsi_os and latest_close > latest_lower:
-            direction = "BUY"
-            # extremity measured from the trigger (prev) candle where the extreme occurred
-            rsi_depth = max(0.0, (rsi_os - prev_rsi)) / max(rsi_os, 1)
-            bb_depth = max(0.0, (prev_lower - prev_close))
-            extremity = min(1.0, rsi_depth + bb_depth / max(abs(prev_upper - prev_lower), 1e-6))
-        elif prev_close >= prev_upper and prev_rsi >= rsi_ob and latest_close < latest_upper:
-            direction = "SELL"
-            rsi_depth = max(0.0, (prev_rsi - rsi_ob)) / max(100 - rsi_ob, 1)
-            bb_depth = max(0.0, (prev_close - prev_upper))
-            extremity = min(1.0, rsi_depth + bb_depth / max(abs(prev_upper - prev_lower), 1e-6))
+        band_width = max(abs(latest_upper - latest_lower), 1e-6)
+
+        if entry_mode == "touch":
+            # Touch entry: current candle close beyond band with RSI extreme.
+            # No waiting for next candle — fires at the extreme itself.
+            if latest_close <= latest_lower and latest_rsi <= rsi_os:
+                direction = "BUY"
+                rsi_depth = max(0.0, (rsi_os - latest_rsi)) / max(rsi_os, 1)
+                bb_depth = max(0.0, latest_lower - latest_close)
+                extremity = min(1.0, rsi_depth + bb_depth / band_width)
+            elif latest_close >= latest_upper and latest_rsi >= rsi_ob:
+                direction = "SELL"
+                rsi_depth = max(0.0, (latest_rsi - rsi_ob)) / max(100 - rsi_ob, 1)
+                bb_depth = max(0.0, latest_close - latest_upper)
+                extremity = min(1.0, rsi_depth + bb_depth / band_width)
+        else:
+            # Rejection entry (default): prev candle breaches band with RSI extreme,
+            # current candle closes back inside — confirming rejection.
+            prev_close = float(close.iloc[-2]) if len(close) >= 2 else latest_close
+            prev_upper = float(upper.iloc[-2]) if pd.notna(upper.iloc[-2]) else latest_upper
+            prev_lower = float(lower.iloc[-2]) if pd.notna(lower.iloc[-2]) else latest_lower
+            prev_rsi = float(rsi.iloc[-2]) if len(rsi) >= 2 and pd.notna(rsi.iloc[-2]) else latest_rsi
+
+            if prev_close <= prev_lower and prev_rsi <= rsi_os and latest_close > latest_lower:
+                direction = "BUY"
+                rsi_depth = max(0.0, (rsi_os - prev_rsi)) / max(rsi_os, 1)
+                bb_depth = max(0.0, prev_lower - prev_close)
+                extremity = min(1.0, rsi_depth + bb_depth / band_width)
+            elif prev_close >= prev_upper and prev_rsi >= rsi_ob and latest_close < latest_upper:
+                direction = "SELL"
+                rsi_depth = max(0.0, (prev_rsi - rsi_ob)) / max(100 - rsi_ob, 1)
+                bb_depth = max(0.0, prev_close - prev_upper)
+                extremity = min(1.0, rsi_depth + bb_depth / band_width)
 
         if direction is None:
             return None
@@ -352,6 +390,7 @@ class MeanReversionStrategy(StrategyInterface):
                 "bb_mid": float(ma.iloc[-1]),
                 "bb_mult": bb_mult,
                 "extremity": round(extremity, 3),
+                "entry_mode": entry_mode,
             },
         }
 
@@ -360,8 +399,8 @@ class MeanReversionStrategy(StrategyInterface):
         adx_htf_str = f"{adx_htf:.1f}" if adx_htf is not None else "na"
         self.logger.info(
             f"[MEAN_REVERSION] ✅ {direction} {epic} @ {latest_close:.5f} "
-            f"RSI(prev)={prev_rsi:.1f} ADX(15m)={adx_str} ADX(1h)={adx_htf_str} "
-            f"conf={confidence:.2f} [rejection entry]"
+            f"RSI={latest_rsi:.1f} ADX(15m)={adx_str} ADX(1h)={adx_htf_str} "
+            f"conf={confidence:.2f} [{entry_mode} entry]"
         )
 
         # LPF gate — strategy-side opt-in (LPF_ENABLED = True)
@@ -379,6 +418,54 @@ class MeanReversionStrategy(StrategyInterface):
     # ------------------------------------------------------------------
     # UTILITIES
     # ------------------------------------------------------------------
+
+    def _low_vol_regime_passes(self, df: pd.DataFrame, epic: str) -> bool:
+        """ATR14 ≤ threshold AND EMA50 slope flat over lookback candles.
+
+        Used in place of the ADX gate for touch-entry pairs (late-session fade).
+        The ATR ceiling is calibrated for the strategy's primary timeframe (15m by default).
+        """
+        cfg = self.config
+        pip = 0.01 if "JPY" in epic.upper() else 0.0001
+
+        atr_max = cfg.get_pair_regime_atr_max_pips(epic)
+        ema_period = cfg.get_pair_regime_ema_period(epic)
+        lookback = cfg.get_pair_regime_ema_lookback_candles(epic)
+        ema_max_change = cfg.get_pair_regime_ema_max_change_pips(epic)
+
+        close = df["close"].astype(float)
+        if len(close) < max(ema_period + lookback, 20):
+            self.logger.debug(f"[MEAN_REVERSION] {epic}: insufficient rows for low-vol filter")
+            return False
+
+        # ATR14 check
+        high = df["high"].astype(float)
+        low = df["low"].astype(float)
+        prev_close = close.shift(1)
+        tr = pd.concat(
+            [(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+        ).max(axis=1)
+        atr_price = tr.rolling(14).mean().iloc[-1]
+        if pd.isna(atr_price) or atr_price <= 0:
+            self.logger.debug(f"[MEAN_REVERSION] {epic}: ATR unavailable for low-vol filter")
+            return False
+        atr_pips = atr_price / pip
+        if atr_pips > atr_max:
+            self.logger.debug(
+                f"[MEAN_REVERSION] {epic}: low-vol ATR block ({atr_pips:.2f} > {atr_max})"
+            )
+            return False
+
+        # EMA slope check
+        ema = close.ewm(span=ema_period, adjust=False).mean()
+        ema_change_pips = abs(float(ema.iloc[-1]) - float(ema.iloc[-1 - lookback])) / pip
+        if ema_change_pips >= ema_max_change:
+            self.logger.debug(
+                f"[MEAN_REVERSION] {epic}: low-vol EMA block (change={ema_change_pips:.2f} >= {ema_max_change})"
+            )
+            return False
+
+        return True
 
     def _get_adx(self, df: pd.DataFrame) -> Optional[float]:
         return get_adx_from_df(df, self.config.adx_period)
