@@ -359,9 +359,8 @@ class IntegrationManager:
             return signals
 
         # Guard: Skip Claude for disabled pairs and monitor-only pairs (saves API cost)
-        # SMC pair-table check applies only to SMC strategies; other strategies
-        # (RANGE_FADE, MEAN_REVERSION, RANGE_STRUCTURE, XAU_GOLD) enforce their own
-        # enabled/monitor flags via their own config services upstream.
+        # SMC pair-table check applies only to SMC strategies; other strategies enforce
+        # their own enabled/monitor flags via their own config services upstream.
         enabled_signals = []
         skipped_signals = []
         if _SMC_CONFIG_AVAILABLE:

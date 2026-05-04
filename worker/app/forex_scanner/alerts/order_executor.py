@@ -378,8 +378,7 @@ class OrderExecutor:
                 is_scalp_mode = getattr(smc_config, 'scalp_mode_enabled', False)
 
                 # SMC SL/TP override applies only to SMC_SIMPLE signals. Other strategies
-                # (XAU_GOLD, RANGING_MARKET, RANGE_STRUCTURE, MEAN_REVERSION, …) carry their
-                # own SL/TP and must not be rewritten with SMC scalp values calibrated for FX.
+                # carry their own SL/TP and must not be rewritten with SMC scalp values.
                 _signal_strategy_upper = (signal_strategy or '').upper()
                 _is_smc_signal = _signal_strategy_upper in ('SMC_SIMPLE', 'SMC')
 
@@ -619,8 +618,8 @@ class OrderExecutor:
             # NOTE: virtual_sl_pips is NOT passed - VSL service uses its own per-pair config
             # (3 pips for majors, 4 pips for JPY) from config_virtual_stop.py
             # The broker SL (~10 pips) is just a safety net if streaming fails
-            # Apr 2026: scope scalp flag to SMC_SIMPLE only — other strategies (XAU_GOLD,
-            # RANGE_FADE, RANGE_STRUCTURE, MEAN_REVERSION) must NOT inherit SMC scalp trailing.
+            # Apr 2026: scope scalp flag to SMC_SIMPLE only; other strategies must not
+            # inherit SMC scalp trailing.
             is_scalp_trade = False
             virtual_sl_pips = None  # Let VSL service use its per-pair config
             signal_strategy_name = (signal.get('strategy') or '').upper()

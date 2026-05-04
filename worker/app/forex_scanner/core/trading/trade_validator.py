@@ -585,8 +585,7 @@ class TradeValidator:
             return True, "Claude skipped (signal monitor_only)", None
 
         # Skip Claude for disabled pairs and monitor-only pairs (saves API cost).
-        # SMC-only: other strategies (RANGE_FADE, MEAN_REVERSION, RANGE_STRUCTURE, XAU_GOLD)
-        # enforce their own enabled/monitor flags upstream via their own config services.
+        # SMC-only: other strategies enforce their own enabled/monitor flags upstream.
         _epic_check = signal.get('epic', '')
         _strategy_name = str(signal.get('strategy', '')).upper()
         if _epic_check and _strategy_name.startswith('SMC'):

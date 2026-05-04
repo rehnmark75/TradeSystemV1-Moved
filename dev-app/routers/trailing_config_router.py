@@ -29,7 +29,6 @@ ALLOWED_STRATEGIES = {
     "XAU_GOLD",
     "RANGE_FADE",
     "MEAN_REVERSION",
-    "RANGE_STRUCTURE",
 }
 
 ALLOWED_CONFIG_SETS = {"demo", "live"}
