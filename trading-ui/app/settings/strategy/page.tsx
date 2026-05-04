@@ -77,7 +77,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -156,6 +156,24 @@ const STRATEGIES: Record<StrategyKey, {
       "Volatility Gates",
       "Session",
       "Risk Management",
+      "Other",
+    ],
+  },
+  "smc-momentum": {
+    label: "SMC_MOMENTUM",
+    apiBase: "/api/settings/strategy/smc-momentum",
+    draftKey: "smc-momentum-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/smc-momentum/effective",
+    columnEndpoint: "/api/settings/strategy/smc-momentum/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "General",
+      "Timeframes",
+      "Sweep Detection",
+      "Risk Management",
+      "Confidence",
+      "Filters",
+      "Cooldown",
       "Other",
     ],
   },

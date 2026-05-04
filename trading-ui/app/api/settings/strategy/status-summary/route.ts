@@ -57,6 +57,15 @@ const STRATEGIES = {
     defaultGlobalEnabled: true,
     defaultMonitorOnly: false,
   },
+  "smc-momentum": {
+    label: "SMC_MOMENTUM",
+    globalTable: "smc_momentum_global_config",
+    overrideTable: "smc_momentum_pair_overrides",
+    configSetColumn: "config_set",
+    overrideConfigJoin: false,
+    defaultGlobalEnabled: false,
+    defaultMonitorOnly: true,
+  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
