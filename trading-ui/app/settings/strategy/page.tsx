@@ -749,7 +749,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion", "range-fade"] as const).map((key) => {
+        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum"] as const).map((key) => {
           const summary = statusSummary[key];
           const counts = summary?.counts;
           return (
