@@ -547,13 +547,13 @@ export default function UnifiedStrategySettings() {
         delete copy.monitor_only;
       } else if (status === "disabled") {
         copy.is_enabled = false;
-        delete copy.monitor_only;
+        copy.monitor_only = true;
       } else if (status === "monitor") {
         copy.is_enabled = true;
         copy.monitor_only = true;
       } else {
         copy.is_enabled = true;
-        delete copy.monitor_only;
+        copy.monitor_only = false;
       }
       return copy;
     });
