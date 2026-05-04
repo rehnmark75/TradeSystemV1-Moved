@@ -2457,6 +2457,7 @@ class TradeValidator:
                 # 2.0 trend-strategy floor would reject every signal).
                 strategy_rr_overrides = {
                     'RANGE_FADE': 1.3,
+                    'IMPULSE_FADE': 0.53,  # inverted R:R (TP=8/SL=15), high WR (82%) compensates
                 }
                 strategy_upper = strategy.upper()
                 min_rr = strategy_rr_overrides.get(strategy_upper, self.min_risk_reward_ratio)

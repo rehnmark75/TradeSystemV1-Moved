@@ -77,7 +77,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -173,6 +173,22 @@ const STRATEGIES: Record<StrategyKey, {
       "Risk Management",
       "Confidence",
       "Filters",
+      "Cooldown",
+      "Other",
+    ],
+  },
+  "impulse-fade": {
+    label: "IMPULSE_FADE",
+    apiBase: "/api/settings/strategy/impulse-fade",
+    draftKey: "impulse-fade-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/impulse-fade/effective",
+    columnEndpoint: "/api/settings/strategy/impulse-fade/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "Session",
+      "Impulse Detection",
+      "Risk Management",
+      "Confidence",
       "Cooldown",
       "Other",
     ],
@@ -749,7 +765,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum"] as const).map((key) => {
+        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade"] as const).map((key) => {
           const summary = statusSummary[key];
           const counts = summary?.counts;
           return (

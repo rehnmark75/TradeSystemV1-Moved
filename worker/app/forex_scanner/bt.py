@@ -71,7 +71,7 @@ def main():
             # Handle strategy shortcuts
             # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
             # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
-            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP"]:
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF"]:
                 strategy_mapping = {
                     "SMC": "SMC_SIMPLE",
                     "SMC_SIMPLE": "SMC_SIMPLE",
@@ -87,6 +87,8 @@ def main():
                     "MR": "MEAN_REVERSION",
                     "SMC_MOMENTUM": "SMC_MOMENTUM",
                     "SWEEP": "SMC_MOMENTUM",
+                    "IMPULSE_FADE": "IMPULSE_FADE",
+                    "IF": "IMPULSE_FADE",
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])

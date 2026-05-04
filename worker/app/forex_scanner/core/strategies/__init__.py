@@ -15,6 +15,7 @@ from .base_strategy import BaseStrategy
 from .smc_simple_strategy import SMCSimpleStrategy, create_smc_simple_strategy
 from .xau_gold_strategy import XAUGoldStrategy, create_xau_gold_strategy
 from .mean_reversion_strategy import MeanReversionStrategy
+from .impulse_fade_strategy import ImpulseFadeStrategy
 from .range_fade_strategy import (
     RangeFadeStrategy,
     EURUSDRangeFadeStrategy,  # back-compat alias
@@ -40,6 +41,7 @@ __all__ = [
     'XAUGoldStrategy',
     'create_xau_gold_strategy',
     'MeanReversionStrategy',
+    'ImpulseFadeStrategy',
     'RangeFadeStrategy',
     'EURUSDRangeFadeStrategy',  # back-compat alias
     'create_range_fade_strategy',

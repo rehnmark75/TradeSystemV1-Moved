@@ -66,6 +66,15 @@ const STRATEGIES = {
     defaultGlobalEnabled: false,
     defaultMonitorOnly: true,
   },
+  "impulse-fade": {
+    label: "IMPULSE_FADE",
+    globalTable: "impulse_fade_global_config",
+    overrideTable: "impulse_fade_pair_overrides",
+    configSetColumn: undefined,
+    overrideConfigJoin: false,
+    defaultGlobalEnabled: false,
+    defaultMonitorOnly: true,
+  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {

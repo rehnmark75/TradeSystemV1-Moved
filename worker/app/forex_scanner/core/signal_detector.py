@@ -37,12 +37,14 @@ try:
     from services.xau_gold_config_service import XAUGoldConfigService
     from services.range_fade_config_service import RangeFadeConfigService
     from services.smc_momentum_config_service import SMCMomentumConfigService
+    from services.impulse_fade_config_service import ImpulseFadeConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
     from forex_scanner.services.xau_gold_config_service import XAUGoldConfigService
     from forex_scanner.services.range_fade_config_service import RangeFadeConfigService
     from forex_scanner.services.smc_momentum_config_service import SMCMomentumConfigService
+    from forex_scanner.services.impulse_fade_config_service import ImpulseFadeConfigService
 
 
 class SignalDetector:
@@ -106,6 +108,10 @@ class SignalDetector:
         # SMC_MOMENTUM runs concurrently (liquidity sweep + rejection wick).
         # Per-pair is_enabled flags in smc_momentum_pair_overrides gate actual execution.
         self.smc_momentum_enabled = True
+
+        # IMPULSE_FADE runs concurrently (late-US session large-body fade).
+        # Per-pair is_enabled flags in impulse_fade_pair_overrides gate execution.
+        self.impulse_fade_enabled = True
 
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
@@ -217,9 +223,9 @@ class SignalDetector:
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
-        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM'}
+        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM', 'IMPULSE_FADE'}
         if canonical not in known:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM, IMPULSE_FADE."
 
         if canonical == 'SMC_SIMPLE':
             # SMC Simple has its own lazy-load path; just arm the flag.
@@ -873,6 +879,25 @@ class SignalDetector:
                     self.logger.error(f"❌ [RANGE_FADE] Error for {epic}: {e}")
                     individual_results['range_fade'] = None
 
+            if (self.impulse_fade_enabled
+                    and not self._is_gold_epic(epic)
+                    and ImpulseFadeConfigService.get_instance().get_config().is_pair_enabled(epic)):
+                try:
+                    self.logger.debug(f"🔍 [IMPULSE_FADE] Starting detection for {epic}")
+                    if_signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['impulse_fade'] = if_signal
+                    if if_signal:
+                        all_signals.append(if_signal)
+                        self.logger.info(
+                            f"✅ [IMPULSE_FADE] Signal detected for {epic}: "
+                            f"{if_signal.get('signal')} @ {if_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [IMPULSE_FADE] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [IMPULSE_FADE] Error for {epic}: {e}")
+                    individual_results['impulse_fade'] = None
+
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
@@ -951,6 +976,8 @@ class SignalDetector:
                 signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'SMC_MOMENTUM':
                 signal = self.detect_smc_momentum_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'IMPULSE_FADE':
+                signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
@@ -1669,6 +1696,50 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting range-fade signals for {epic}: {e}")
+            return None
+
+    def detect_impulse_fade_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the Impulse Fade strategy (5m only, late-US session)."""
+        try:
+            impulse_fade_strategy = self._get_strategy(
+                'IMPULSE_FADE',
+                config_override=self._config_override,
+            )
+            if impulse_fade_strategy is None:
+                return None
+
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='5m',
+                lookback_hours=48,
+            )
+            if df_5m is None or df_5m.empty:
+                self.logger.debug(f"[IMPULSE_FADE] No 5m data for {epic}")
+                return None
+
+            signal = impulse_fade_strategy.detect_signal(
+                df_trigger=df_5m,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_5m)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting impulse-fade signals for {epic}: {e}")
             return None
 
 
