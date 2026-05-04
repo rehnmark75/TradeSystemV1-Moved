@@ -188,7 +188,10 @@ class ForexChartGenerator:
             direction = signal.get('signal_type', signal.get('signal', 'UNKNOWN'))
             confidence = signal.get('confidence_score', 0)
             strategy = signal.get('strategy', 'SMC')
-            rr_ratio = signal.get('rr_ratio', 0)
+            rr_ratio = signal.get('rr_ratio') or (
+                signal.get('reward_pips', 0) / signal.get('risk_pips', 1)
+                if signal.get('risk_pips') else 0
+            )
 
             fig.suptitle(
                 f"{pair} - {direction} Signal | {strategy} | Confidence: {confidence:.1%} | R:R {rr_ratio:.1f}",
@@ -721,16 +724,17 @@ class ForexChartGenerator:
         try:
             # Extract key trade data
             direction = signal.get('signal_type', signal.get('signal', '')).upper()
-            entry_type = signal.get('entry_type', 'UNKNOWN')
+            _strategy = signal.get('strategy', '')
+            _entry_fallback = 'FADE' if _strategy in ('IMPULSE_FADE', 'RANGE_FADE', 'MEAN_REVERSION') else 'UNKNOWN'
+            entry_type = signal.get('entry_type', _entry_fallback)
             confidence = signal.get('confidence_score', 0)
-            rr_ratio = signal.get('rr_ratio', 0)
-
             # Get SL/TP from strategy_indicators or signal
             strategy_indicators = signal.get('strategy_indicators', {})
             risk_mgmt = strategy_indicators.get('risk_management', {})
 
             risk_pips = risk_mgmt.get('risk_pips', signal.get('risk_pips', 0))
             reward_pips = risk_mgmt.get('reward_pips', signal.get('reward_pips', 0))
+            rr_ratio = signal.get('rr_ratio') or (reward_pips / risk_pips if risk_pips else 0)
 
             # Get pullback depth for context
             tier3_entry = strategy_indicators.get('tier3_entry', {})
