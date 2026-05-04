@@ -21,10 +21,6 @@ from .range_fade_strategy import (
     create_range_fade_strategy,
     create_eurusd_range_fade_strategy,  # back-compat alias
 )
-from .range_structure_strategy import (
-    RangeStructureStrategy,
-    create_range_structure_strategy,
-)
 from .signal_result import SignalResult
 from .strategy_registry import (
     StrategyRegistry,
@@ -48,8 +44,6 @@ __all__ = [
     'EURUSDRangeFadeStrategy',  # back-compat alias
     'create_range_fade_strategy',
     'create_eurusd_range_fade_strategy',  # back-compat alias
-    'RangeStructureStrategy',
-    'create_range_structure_strategy',
 
     # Registry
     'StrategyRegistry',

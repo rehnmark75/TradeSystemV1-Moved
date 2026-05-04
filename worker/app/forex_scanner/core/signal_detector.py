@@ -36,11 +36,13 @@ try:
     from services.smc_simple_config_service import get_smc_simple_config
     from services.xau_gold_config_service import XAUGoldConfigService
     from services.range_fade_config_service import RangeFadeConfigService
+    from services.smc_momentum_config_service import SMCMomentumConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
     from forex_scanner.services.xau_gold_config_service import XAUGoldConfigService
     from forex_scanner.services.range_fade_config_service import RangeFadeConfigService
+    from forex_scanner.services.smc_momentum_config_service import SMCMomentumConfigService
 
 
 class SignalDetector:
@@ -100,6 +102,10 @@ class SignalDetector:
 
         # RANGE_FADE runs concurrently (monitor-only by default).
         self.range_fade_enabled = True
+
+        # SMC_MOMENTUM runs concurrently (liquidity sweep + rejection wick).
+        # Per-pair is_enabled flags in smc_momentum_pair_overrides gate actual execution.
+        self.smc_momentum_enabled = True
 
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
@@ -211,9 +217,9 @@ class SignalDetector:
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
-        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD'}
+        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM'}
         if canonical not in known:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM."
 
         if canonical == 'SMC_SIMPLE':
             # SMC Simple has its own lazy-load path; just arm the flag.
@@ -641,6 +647,89 @@ class SignalDetector:
             self.logger.debug(f"Full traceback: {traceback.format_exc()}")
             return None
 
+    def detect_smc_momentum_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = None,
+        current_timestamp=None,
+    ) -> Optional[Dict]:
+        """Detect SMC_MOMENTUM (liquidity sweep + rejection wick) signals."""
+        try:
+            if not hasattr(self, '_smc_momentum_strategy') or self._smc_momentum_strategy is None:
+                try:
+                    from .strategies.smc_momentum_strategy import SMCMomentumStrategy
+                except ImportError:
+                    from forex_scanner.core.strategies.smc_momentum_strategy import SMCMomentumStrategy
+                self._smc_momentum_strategy = SMCMomentumStrategy(
+                    config=None,
+                    db_manager=self.db_manager,
+                    logger=self.logger,
+                    config_override=self._config_override,
+                )
+                self.logger.info("✅ SMC_MOMENTUM strategy initialized (lazy-load)")
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            sim_time = None
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_smc_momentum_backtest_id', None) != current_id:
+                    self._smc_momentum_backtest_id = current_id
+                    self._smc_momentum_strategy.reset_cooldowns()
+                sim_time = self.data_fetcher.current_backtest_time
+
+            # Data requirements: 4H EMA50 bias, 15m sweep detection, 1H ATR
+            # 4H needs 880h lookback to get ~220 4H bars (EMA50 needs 55 trading bars;
+            # weekends compress ~10 calendar days to ~42 trading bars — not enough)
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe='4h',
+                lookback_hours=4 * 220,  # ~880h = ~37 days = ~220 4H bars
+            )
+            df_4h = self._filter_incomplete_candles(df_4h, '4h')
+            if df_4h is None or len(df_4h) < 55:
+                self.logger.debug(f"⚠️ [SMC_MOMENTUM] Insufficient 4H data for {epic}: {0 if df_4h is None else len(df_4h)} bars")
+                return None
+
+            df_15m = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe='15m',
+                lookback_hours=48,  # ~192 15m bars
+            )
+            df_15m = self._filter_incomplete_candles(df_15m, '15m')
+            if df_15m is None or len(df_15m) < 30:
+                self.logger.debug(f"⚠️ [SMC_MOMENTUM] Insufficient 15m data for {epic}: {0 if df_15m is None else len(df_15m)} bars")
+                return None
+
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe='1h',
+                lookback_hours=72,  # ~72 1H bars for ATR(14)
+            )
+            df_1h = self._filter_incomplete_candles(df_1h, '1h')
+
+            signal = self._smc_momentum_strategy.detect_signal(
+                df_trigger=df_15m,
+                df_4h=df_4h,
+                df_1h=df_1h,
+                epic=epic,
+                pair=pair,
+                current_time=sim_time,
+            )
+
+            if signal:
+                signal = self._add_market_context(signal, df_15m)
+
+            self._smc_momentum_strategy.flush_rejections()
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ [SMC_MOMENTUM] Error for {epic}: {e}")
+            import traceback
+            self.logger.debug(f"Full traceback: {traceback.format_exc()}")
+            return None
+
     def detect_signals_all_strategies(
         self,
         epic: str,
@@ -744,6 +833,25 @@ class SignalDetector:
                     self.logger.error(f"❌ [MEAN_REVERSION] Error for {epic}: {e}")
                     individual_results['mean_reversion'] = None
 
+            if (self.smc_momentum_enabled
+                    and not self._is_gold_epic(epic)
+                    and SMCMomentumConfigService.get_instance().is_pair_enabled(epic)):
+                try:
+                    self.logger.debug(f"🔍 [SMC_MOMENTUM] Starting detection for {epic}")
+                    mom_signal = self.detect_smc_momentum_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['smc_momentum'] = mom_signal
+                    if mom_signal:
+                        all_signals.append(mom_signal)
+                        self.logger.info(
+                            f"✅ [SMC_MOMENTUM] Signal detected for {epic}: "
+                            f"{mom_signal.get('signal')} @ {mom_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [SMC_MOMENTUM] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [SMC_MOMENTUM] Error for {epic}: {e}")
+                    individual_results['smc_momentum'] = None
+
             if self.range_fade_enabled and RangeFadeConfigService.get_instance().is_pair_enabled(epic):
                 try:
                     self.logger.debug(f"🔍 [RANGE_FADE] Starting detection for {epic}")
@@ -813,6 +921,7 @@ class SignalDetector:
         'MEANREV': 'MEAN_REVERSION',
         'XAU': 'XAU_GOLD',
         'GOLD': 'XAU_GOLD',
+        'SWEEP': 'SMC_MOMENTUM',
     }
 
     def _detect_single_strategy(
@@ -840,6 +949,8 @@ class SignalDetector:
                 signal = self.detect_range_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'MEAN_REVERSION':
                 signal = self.detect_mean_reversion_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'SMC_MOMENTUM':
+                signal = self.detect_smc_momentum_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None

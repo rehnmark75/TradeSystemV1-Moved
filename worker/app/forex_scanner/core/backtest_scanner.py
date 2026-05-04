@@ -1363,6 +1363,20 @@ class BacktestScanner:
                     strategy=strategy,
                     logger=self.logger,
                 )
+        elif strategy == 'SMC_MOMENTUM':
+            # SMC_MOMENTUM uses fixed SL/TP (ATR-based TP, no trailing stages).
+            # Scalp trailing configs would exit winners at 10-14 pips, far below the
+            # 40-70 pip ATR TP — use fixed-SL/TP simulator so only TP/SL matter.
+            simulator = TrailingStopSimulator(
+                epic=epic,
+                target_pips=50.0,       # placeholder — overridden per-signal via reward_pips
+                initial_stop_pips=10.0, # placeholder — overridden per-signal via risk_pips
+                max_bars=400,
+                use_fixed_sl_tp=True,
+                strategy=strategy,
+                logger=self.logger,
+            )
+            self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP) ready for {epic} (SMC_MOMENTUM)")
         else:
             # New engine: uses live PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS.
             # Scalp mode uses SCALP_TRAILING_CONFIGS with full progressive trailing
