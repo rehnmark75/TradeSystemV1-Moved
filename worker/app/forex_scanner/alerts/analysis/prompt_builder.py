@@ -1815,10 +1815,10 @@ Be concise. Your assessment determines if real capital is tested on this mechani
         """
         Vision prompt for IMPULSE_FADE (large 5m candle body exhaustion fade).
 
-        Edge: In the late-US session (20-22 UTC), large-body 5m candles (≥2.2×ATR14) tend
+        Edge: In the late-US session (18-22 UTC), large-body 5m candles (≥2.2×ATR14) tend
         to exhaust rather than continue. Entry fades the impulse at the close of that candle.
         No HTF alignment — purely behavioural (late-session stop-run exhaustion).
-        Inverted R:R (TP=8 pips, SL=15 pips) compensated by high WR (~80%).
+        Inverted R:R is allowed for this strategy and compensated by the high WR thesis.
         """
         try:
             epic = signal.get('epic', 'Unknown')
@@ -1826,7 +1826,7 @@ Be concise. Your assessment determines if real capital is tested on this mechani
             direction = signal.get('signal_type', signal.get('signal', 'Unknown')).upper()
             confidence = signal.get('confidence_score', signal.get('confidence', 0))
             entry_price = signal.get('entry_price', signal.get('price', 0))
-            risk_pips = signal.get('risk_pips', 15)
+            risk_pips = signal.get('risk_pips', 12)
             reward_pips = signal.get('reward_pips', 8)
             monitor_only = bool(signal.get('monitor_only', False))
             body_pips = signal.get('body_pips', 0)
@@ -1871,7 +1871,7 @@ The chart shows the 5m timeframe — this is a single-timeframe strategy, so foc
 - {approve_if}
 - Surrounding context shows choppy / ranging price before the spike (no established trend)
 - The impulse candle ran into a visible S/R level, prior high/low, or round number
-- Session context: late-US hours (20-22 UTC) — low-liquidity stop-run environment
+- Session context: late-US hours (18-22 UTC) — low-liquidity stop-run environment
 
 ❌ **REJECT if:**
 - {reject_if}
@@ -1890,7 +1890,7 @@ The chart shows the 5m timeframe — this is a single-timeframe strategy, so foc
 
 **STRATEGY THESIS — READ FIRST (IMPULSE_FADE v1)**
 IMPULSE_FADE fires when a 5m candle has an unusually large body (≥2.2× ATR14) during the late-US
-session (20-22 UTC). The thesis: large impulsive moves in low-liquidity late-US hours frequently
+session (18-22 UTC). The thesis: large impulsive moves in low-liquidity late-US hours frequently
 exhaust rather than continue — they are often stop-hunts or overextensions that snap back.
 
 Entry is a COUNTER-DIRECTION trade at the close of the impulse candle:
@@ -1903,7 +1903,7 @@ The edge is purely behavioural: late-session exhaustion after an oversized singl
 Critical rules for your analysis:
 - ❌ Do NOT reject because the HTF trend opposes — no HTF filter exists in this strategy
 - ❌ Do NOT reject because RSI is extreme — impulses fire at extremes by design
-- ❌ Do NOT reject because R:R looks inverted (TP=8 pips, SL=15 pips) — this is by design; high WR compensates
+- ❌ Do NOT reject because R:R looks inverted (TP={fmt(reward_pips)} pips, SL={fmt(risk_pips)} pips) — this is by design; high WR compensates
 - ✅ DO reject if price continued strongly in the impulse direction after the trigger candle
 - ✅ DO reject if the impulse is clearly part of sustained momentum (multiple large candles in a row)
 - ✅ DO reject if the candle looks like a genuine breakout through a major level (not exhaustion)
@@ -1930,7 +1930,7 @@ Critical rules for your analysis:
 ═══════════════════════════════════════════════════════════════
 • Impulse Body: {fmt(body_pips)} pips  ({fmt(body_multiplier)}× ATR14)
 • ATR14 at signal: {fmt(atr_pips)} pips
-• Session Hour (UTC): {session_hour}:00  (valid window: 20-22 UTC)
+• Session Hour (UTC): {session_hour}:00  (valid window: 18-22 UTC)
 {chart_instruction}
 ═══════════════════════════════════════════════════════════════
 📋 REQUIRED RESPONSE FORMAT
@@ -1956,7 +1956,7 @@ REASON: [2-3 sentences. Focus on: (a) whether the impulse candle stands out as a
 **NOT rejection criteria (do NOT apply these):**
 - HTF trend opposing the entry direction
 - RSI overbought/oversold at the entry side
-- Inverted R:R (8 TP / 15 SL) — this is the intended design
+- Inverted R:R ({fmt(reward_pips)} TP / {fmt(risk_pips)} SL) — this is the intended design
 - Low volume (FX tick volume is unreliable)
 
 Be concise. Your assessment determines if real capital is tested on this edge."""
