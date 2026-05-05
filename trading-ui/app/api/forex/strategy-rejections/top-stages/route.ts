@@ -15,6 +15,7 @@ export async function GET(request: Request) {
 
   const conditions: string[] = [
     `scan_timestamp >= NOW() - INTERVAL '${days} days'`,
+    `NOT (strategy = 'RANGE_FADE' AND stage = 'NO_TRIGGER')`,
   ];
   const params: unknown[] = [];
 

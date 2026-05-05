@@ -23,6 +23,7 @@ type Stats = {
   by_hour: Record<string, number>;
   by_session: Record<string, number>;
   by_direction: Record<string, number>;
+  excluded_no_setup: number;
 };
 
 type TopStageRow = {
@@ -89,6 +90,9 @@ function Bar({ value, max, color }: { value: number; max: number; color: string 
 }
 
 function StatCard({ label, value }: { label: string; value: string | number }) {
+  const valueText = String(value);
+  const isLongText = typeof value === "string" && valueText.length > 16;
+
   return (
     <div
       style={{
@@ -98,10 +102,22 @@ function StatCard({ label, value }: { label: string; value: string | number }) {
         display: "flex",
         flexDirection: "column",
         gap: 4,
+        minWidth: 0,
       }}
     >
       <span style={{ color: "#64748b", fontSize: 11, textTransform: "uppercase", letterSpacing: "0.05em" }}>{label}</span>
-      <span style={{ color: "#f1f5f9", fontSize: 22, fontWeight: 700 }}>{value}</span>
+      <span
+        style={{
+          color: "#f1f5f9",
+          fontSize: isLongText ? 14 : 22,
+          fontWeight: 700,
+          lineHeight: isLongText ? 1.25 : 1.1,
+          overflowWrap: "anywhere",
+          wordBreak: "break-word",
+        }}
+      >
+        {value}
+      </span>
     </div>
   );
 }
@@ -401,10 +417,19 @@ export default function StrategyRejectionsPage() {
         <>
           {/* KPI cards */}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(140px, 1fr))", gap: 12, marginBottom: 24 }}>
-            <StatCard label="Total rejections" value={stats.total.toLocaleString()} />
+            <StatCard label="Actionable rejections" value={stats.total.toLocaleString()} />
             <StatCard label="Unique pairs" value={stats.unique_pairs} />
             <StatCard label="Most rejected" value={stats.most_rejected_pair} />
+            {stats.excluded_no_setup > 0 && (
+              <StatCard label="No setup scans hidden" value={stats.excluded_no_setup.toLocaleString()} />
+            )}
           </div>
+          {stats.excluded_no_setup > 0 && (
+            <p style={{ color: "#64748b", fontSize: 12, marginTop: -12, marginBottom: 20 }}>
+              RANGE_FADE / NO_TRIGGER means the scanner checked a bar but no full setup was present, so it is excluded from summary charts.
+              Use Raw Log to inspect those rows.
+            </p>
+          )}
 
           {/* Per-strategy breakdown */}
           {strategyEntries.length > 0 && (

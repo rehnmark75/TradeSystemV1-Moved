@@ -33,10 +33,20 @@ export async function GET(request: Request) {
   try {
     const result = await strategyConfigPool.query(
       `
-      WITH base AS (
+      WITH raw_base AS (
         SELECT strategy, epic, pair, stage, direction, hour_utc, session
         FROM v_strategy_rejections_unified
         WHERE ${where}
+      ),
+      base AS (
+        SELECT *
+        FROM raw_base
+        WHERE NOT (strategy = 'RANGE_FADE' AND stage = 'NO_TRIGGER')
+      ),
+      no_setup AS (
+        SELECT COUNT(*) AS excluded_no_setup
+        FROM raw_base
+        WHERE strategy = 'RANGE_FADE' AND stage = 'NO_TRIGGER'
       ),
       totals AS (
         SELECT COUNT(*) AS total, COUNT(DISTINCT epic) AS unique_pairs
@@ -78,8 +88,10 @@ export async function GET(request: Request) {
         (SELECT json_object_agg(stage, cnt) FROM by_stage) AS by_stage,
         (SELECT json_object_agg(hour_utc, cnt) FROM by_hour) AS by_hour,
         (SELECT json_object_agg(session, cnt) FROM by_session) AS by_session,
-        (SELECT json_object_agg(direction, cnt) FROM by_direction) AS by_direction
+        (SELECT json_object_agg(direction, cnt) FROM by_direction) AS by_direction,
+        ns.excluded_no_setup
       FROM totals t
+      CROSS JOIN no_setup ns
       LEFT JOIN top_pair tp ON true
       `,
       params
@@ -95,6 +107,7 @@ export async function GET(request: Request) {
       by_hour: row?.by_hour ?? {},
       by_session: row?.by_session ?? {},
       by_direction: row?.by_direction ?? {},
+      excluded_no_setup: Number(row?.excluded_no_setup ?? 0),
     });
   } catch (error) {
     console.error("Failed to load strategy rejection stats", error);
