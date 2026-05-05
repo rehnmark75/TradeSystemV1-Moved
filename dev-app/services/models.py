@@ -45,8 +45,10 @@ class TradeLog(Base):
     entry_price = Column(Float, nullable=False)
     # Take profit level (NOT the limit order entry - this is the TP target price!)
     limit_price = Column(Float, nullable=True)
-    # Stop loss level (absolute price)
+    # Stop loss level (absolute price) — updated by trailing system as stops move
     sl_price = Column(Float, nullable=True)
+    # SL at order placement — never updated after creation, used for counterfactual analysis
+    initial_sl_price = Column(Float, nullable=True)
     # Alternative TP storage (same concept as limit_price)
     tp_price = Column(Float, nullable=True)
     direction = Column(String, nullable=False)

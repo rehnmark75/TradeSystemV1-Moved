@@ -1153,3 +1153,289 @@ async def get_trade_outcome_analysis(trade_id: int, db: Session = Depends(get_db
     }
 
     return response
+
+
+# ---------------------------------------------------------------------------
+# Chart data endpoint — unified payload for the trade chart + timeline UI
+# ---------------------------------------------------------------------------
+
+def _get_pip_multiplier(symbol: str) -> int:
+    if "JPY" in symbol:
+        return 100
+    if "CEEM" in symbol:
+        return 1
+    return 10000
+
+
+def _extract_sl_history(trade: TradeLog, log_events: Dict[str, Any]) -> List[Dict]:
+    """
+    Build a chronological list of SL levels from log events.
+    Returns [{time_iso, sl, event}] sorted by time.
+    """
+    history = []
+
+    initial_sl = getattr(trade, "initial_sl_price", None) or (
+        trade.sl_price if (trade.stop_limit_changes_count or 0) == 0 else None
+    )
+    if initial_sl and trade.timestamp:
+        history.append({
+            "time_iso": trade.timestamp.isoformat(),
+            "sl": float(initial_sl),
+            "event": "initial",
+        })
+
+    # Parse EARLY BE events directly from log lines (pattern not covered by existing parser)
+    log_file = "/app/logs/trade_monitor.log"
+    trade_pattern = re.compile(rf"\btrade\s+{trade.id}\b", re.IGNORECASE)
+    early_be_pattern = re.compile(r"\[EARLY BE(?:\s+SUCCESS)?\].*SL at ([\d.]+)", re.IGNORECASE)
+    early_be_move_pattern = re.compile(r"\[EARLY BE\].*Moving SL.*=\s*([\d.]+)", re.IGNORECASE)
+
+    for log_path in get_rotated_log_files(log_file):
+        try:
+            with open(log_path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if not trade_pattern.search(line):
+                        continue
+                    ts_match = re.search(r"(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})", line)
+                    ts = ts_match.group(1) if ts_match else None
+                    if not ts:
+                        continue
+
+                    m = early_be_pattern.search(line) or early_be_move_pattern.search(line)
+                    if m:
+                        history.append({
+                            "time_iso": ts,
+                            "sl": float(m.group(1)),
+                            "event": "early_be",
+                        })
+        except Exception:
+            pass
+
+    # Add remaining stop adjustments from the existing parser
+    for adj in log_events.get("stop_adjustments", []):
+        if adj.get("timestamp") and adj.get("new_stop"):
+            history.append({
+                "time_iso": adj["timestamp"],
+                "sl": float(adj["new_stop"]),
+                "event": adj.get("type", "trail"),
+            })
+
+    # Sort and deduplicate (same timestamp + sl → keep one)
+    def _ts_key(item):
+        ts = item["time_iso"].replace("T", " ").split(".")[0]
+        try:
+            return datetime.strptime(ts, "%Y-%m-%d %H:%M:%S")
+        except Exception:
+            return datetime.min
+    history.sort(key=_ts_key)
+    seen = set()
+    deduped = []
+    for item in history:
+        key = (item["time_iso"], item["sl"])
+        if key not in seen:
+            seen.add(key)
+            deduped.append(item)
+
+    return deduped
+
+
+def _compute_counterfactual(
+    trade: TradeLog,
+    initial_sl: Optional[float],
+    tp: Optional[float],
+    post_close_candles: List[Any],
+    pip_mult: int,
+) -> Dict[str, Any]:
+    """
+    Scan post-close candles to determine whether TP or original SL would have been hit
+    first, had the trailing system not moved the stop.
+    """
+    if not initial_sl or not tp or not post_close_candles:
+        return {"verdict": "UNKNOWN", "detail": "Insufficient data for counterfactual"}
+
+    direction = trade.direction
+    entry = float(trade.entry_price)
+
+    actual_pips = 0.0
+    pips_gained = getattr(trade, "pips_gained", None)
+    if pips_gained is not None:
+        actual_pips = float(pips_gained)
+    elif trade.closed_at and trade.timestamp:
+        # Rough estimate from current sl proximity to entry
+        if direction == "SELL":
+            actual_pips = round((entry - float(trade.sl_price or entry)) * pip_mult, 1)
+        else:
+            actual_pips = round((float(trade.sl_price or entry) - entry) * pip_mult, 1)
+        # Clamp — this is an approximation, actual exit was near BE
+        actual_pips = max(actual_pips, 0.0)
+
+    would_hit = "neither"
+    hit_at = None
+
+    for c in post_close_candles:
+        high = float(c.high)
+        low = float(c.low)
+
+        if direction == "SELL":
+            tp_hit = low <= tp
+            sl_hit = high >= initial_sl
+        else:
+            tp_hit = high >= tp
+            sl_hit = low <= initial_sl
+
+        if tp_hit or sl_hit:
+            if tp_hit and sl_hit:
+                # Ambiguous — use close direction as tiebreaker
+                would_hit = "tp" if float(c.close) < float(c.open) and direction == "SELL" else "original_sl"
+            elif tp_hit:
+                would_hit = "tp"
+            else:
+                would_hit = "original_sl"
+            hit_at = c.start_time.isoformat() if hasattr(c.start_time, "isoformat") else str(c.start_time)
+            break
+
+    if direction == "SELL":
+        would_have_pips = round((entry - tp) * pip_mult, 1) if would_hit == "tp" else (
+            -round((initial_sl - entry) * pip_mult, 1) if would_hit == "original_sl" else 0.0
+        )
+    else:
+        would_have_pips = round((tp - entry) * pip_mult, 1) if would_hit == "tp" else (
+            -round((entry - initial_sl) * pip_mult, 1) if would_hit == "original_sl" else 0.0
+        )
+
+    delta = would_have_pips - actual_pips
+
+    if abs(delta) <= 3:
+        verdict = "NEUTRAL"
+    elif delta < -3:
+        verdict = "SAVED"   # trailing avoided a worse outcome
+    else:
+        verdict = "KILLED"  # trailing left pips on the table
+
+    return {
+        "verdict": verdict,
+        "would_have_hit": would_hit,
+        "would_have_pips": would_have_pips,
+        "actual_pips": round(actual_pips, 1),
+        "delta_pips": round(delta, 1),
+        "hit_at": hit_at,
+        "detail": (
+            f"Would have hit {would_hit} ({would_have_pips:+.1f} pips) "
+            f"vs actual exit ({actual_pips:+.1f} pips)"
+        ),
+    }
+
+
+@router.get("/chart-data/{trade_id}")
+async def get_chart_data(trade_id: int, db: Session = Depends(get_db)):
+    """
+    Unified payload for the trade chart UI:
+    - 1m candles from 30 min before entry to 60 min after close
+    - SL step-history (initial → early BE → stage locks)
+    - MFE / MAE points
+    - Post-close zone markers
+    - Counterfactual verdict (SAVED / KILLED / NEUTRAL / UNKNOWN)
+    """
+    trade = db.query(TradeLog).filter(
+        TradeLog.id == trade_id,
+        TradeLog.environment == TRADING_ENVIRONMENT,
+    ).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    symbol = trade.symbol
+    pip_mult = _get_pip_multiplier(symbol)
+    open_time = trade.timestamp
+    close_time = trade.closed_at or datetime.utcnow()
+
+    window_start = open_time - timedelta(minutes=30)
+    window_end = close_time + timedelta(minutes=60)
+
+    # 1m candles for the full window
+    candles_raw = (
+        db.query(IGCandle)
+        .filter(
+            IGCandle.epic == symbol,
+            IGCandle.timeframe == 1,
+            IGCandle.start_time >= window_start,
+            IGCandle.start_time <= window_end,
+        )
+        .order_by(IGCandle.start_time)
+        .all()
+    )
+
+    candles = [
+        {
+            "time": int(c.start_time.timestamp()),
+            "open": float(c.open),
+            "high": float(c.high),
+            "low": float(c.low),
+            "close": float(c.close),
+        }
+        for c in candles_raw
+    ]
+
+    # SL step-history
+    log_events = parse_trade_logs(trade_id)
+    sl_history = _extract_sl_history(trade, log_events)
+
+    # MFE / MAE from trade-window candles
+    entry = float(trade.entry_price)
+    direction = trade.direction
+    trade_candles = [c for c in candles_raw if open_time <= c.start_time <= close_time]
+
+    mfe: Dict[str, Any] = {"price": None, "pips": 0.0, "time": None}
+    mae: Dict[str, Any] = {"price": None, "pips": 0.0, "time": None}
+    for c in trade_candles:
+        high, low = float(c.high), float(c.low)
+        if direction == "SELL":
+            fav = (entry - low) * pip_mult
+            adv = (high - entry) * pip_mult
+        else:
+            fav = (high - entry) * pip_mult
+            adv = (entry - low) * pip_mult
+
+        if fav > mfe["pips"]:
+            mfe = {"price": low if direction == "SELL" else high, "pips": round(fav, 1),
+                   "time": int(c.start_time.timestamp())}
+        if adv > mae["pips"]:
+            mae = {"price": high if direction == "SELL" else low, "pips": round(adv, 1),
+                   "time": int(c.start_time.timestamp())}
+
+    # Counterfactual — use initial_sl_price if set, otherwise fall back to first
+    # event in sl_history (the "initial" log entry captures the SL at order placement)
+    initial_sl = getattr(trade, "initial_sl_price", None) or (
+        trade.sl_price if (trade.stop_limit_changes_count or 0) == 0 else None
+    )
+    if not initial_sl and sl_history:
+        first = sl_history[0]  # already sorted chronologically
+        if first.get("event") == "initial":
+            initial_sl = first["sl"]
+    tp = trade.tp_price or trade.limit_price
+    post_close_candles = [c for c in candles_raw if c.start_time > close_time]
+    counterfactual = _compute_counterfactual(trade, initial_sl, tp, post_close_candles, pip_mult)
+
+    return {
+        "trade_id": trade_id,
+        "symbol": symbol,
+        "direction": direction,
+        "entry_price": entry,
+        "initial_sl": float(initial_sl) if initial_sl else None,
+        "current_sl": float(trade.sl_price) if trade.sl_price else None,
+        "tp": float(tp) if tp else None,
+        "open_time": int(open_time.timestamp()),
+        "close_time": int(close_time.timestamp()),
+        "profit_loss": float(trade.profit_loss) if trade.profit_loss is not None else None,
+        "pnl_currency": trade.pnl_currency,
+        "early_be_executed": trade.early_be_executed,
+        "stop_limit_changes_count": trade.stop_limit_changes_count or 0,
+        "candles": candles,
+        "sl_history": sl_history,
+        "mfe": mfe,
+        "mae": mae,
+        "post_close_zone": {
+            "start": int(close_time.timestamp()),
+            "end": int(window_end.timestamp()),
+        },
+        "counterfactual": counterfactual,
+    }

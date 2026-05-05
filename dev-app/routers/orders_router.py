@@ -765,6 +765,7 @@ async def ig_place_order(
                         direction=direction.upper(),
                         limit_price=actual_limit_price,  # Take profit price (NOT entry!)
                         sl_price=actual_stop_price,  # Stop loss price
+                        initial_sl_price=actual_stop_price,  # Captured at placement, never updated
                         deal_reference=deal_reference,
                         endpoint="dev-limit",  # Identify as limit order
                         status="pending_limit",  # New status for limit orders
@@ -1080,6 +1081,7 @@ async def ig_place_order(
                 direction=direction.upper(),
                 limit_price=actual_limit_price,
                 sl_price=actual_stop_price,
+                initial_sl_price=actual_stop_price,
                 deal_id=deal_id,
                 min_stop_distance_points=min_distance,
                 deal_reference=deal_reference,
