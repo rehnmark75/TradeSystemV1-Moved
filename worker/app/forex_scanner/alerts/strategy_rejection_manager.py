@@ -13,10 +13,19 @@ from __future__ import annotations
 
 import json
 import logging
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, List, Optional
 
+import psycopg2
+import psycopg2.extras
+
 logger = logging.getLogger(__name__)
+
+_STRATEGY_CONFIG_DSN = os.environ.get(
+    "STRATEGY_CONFIG_DATABASE_URL",
+    "postgresql://postgres:postgres@postgres:5432/strategy_config",
+)
 
 
 def _safe_json(value: Any) -> Optional[str]:
@@ -84,12 +93,16 @@ class StrategyRejectionManager:
         ON CONFLICT DO NOTHING
     """
 
-    def __init__(self, strategy_name: str, db_manager) -> None:
-        if db_manager is None:
-            raise ValueError("db_manager required")
+    def __init__(self, strategy_name: str, db_manager=None) -> None:
         self.strategy_name = strategy_name
-        self.db_manager = db_manager
         self._buffer: List[Dict] = []
+        self._conn: Optional[psycopg2.extensions.connection] = None
+        try:
+            self._conn = psycopg2.connect(_STRATEGY_CONFIG_DSN)
+            self._conn.autocommit = False
+        except Exception as exc:
+            logger.warning("[StrategyRejectionManager] failed to connect to strategy_config (%s): %s", strategy_name, exc)
+            self._conn = None
 
     def reject(
         self,
@@ -121,15 +134,23 @@ class StrategyRejectionManager:
             self.flush()
 
     def flush(self) -> None:
-        """Write all buffered rejections to the database and clear the buffer."""
+        """Write all buffered rejections to strategy_config DB and clear the buffer."""
         if not self._buffer:
             return
+        if self._conn is None:
+            # Retry connection once per flush cycle
+            try:
+                self._conn = psycopg2.connect(_STRATEGY_CONFIG_DSN)
+                self._conn.autocommit = False
+            except Exception as exc:
+                logger.warning("[StrategyRejectionManager] reconnect failed (%s): %s", self.strategy_name, exc)
+                self._buffer.clear()
+                return
         batch = self._buffer[:]
         self._buffer.clear()
-        conn = cursor = None
+        cursor = None
         try:
-            conn = self.db_manager.get_connection()
-            cursor = conn.cursor()
+            cursor = self._conn.cursor()
             rows = [
                 (
                     r["strategy"],
@@ -146,16 +167,21 @@ class StrategyRejectionManager:
                 for r in batch
             ]
             cursor.executemany(self.INSERT_SQL, rows)
-            conn.commit()
+            self._conn.commit()
         except Exception as exc:
             logger.warning(
                 "[StrategyRejectionManager] flush failed (%s): %s", self.strategy_name, exc
             )
-            if conn:
-                try:
-                    conn.rollback()
-                except Exception:
-                    pass
+            try:
+                self._conn.rollback()
+            except Exception:
+                pass
+            # Drop and reset connection so next flush gets a fresh one
+            try:
+                self._conn.close()
+            except Exception:
+                pass
+            self._conn = None
         finally:
             if cursor:
                 try:
