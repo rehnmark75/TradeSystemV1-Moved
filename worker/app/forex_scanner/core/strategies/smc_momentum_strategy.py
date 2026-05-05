@@ -23,6 +23,14 @@ except ImportError:
     from .strategy_registry import register_strategy, StrategyInterface
 
 try:
+    from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from ...alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment,misc]
+
+try:
     from forex_scanner.services.smc_momentum_config_service import (
         get_smc_momentum_config,
         apply_config_overrides,
@@ -124,6 +132,13 @@ class SMCMomentumStrategy(StrategyInterface):
         self._cooldowns: Dict[str, datetime] = {}
         self._pending_rejections: List[Dict] = []
 
+        self._rej_mgr = None
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("SMC_MOMENTUM", db_manager)
+            except Exception:
+                pass
+
         self.logger.info(
             f"SMC_MOMENTUM Strategy v{self.config.version} initialized "
             f"(htf_alignment={self.config.htf_alignment_required})"
@@ -170,9 +185,11 @@ class SMCMomentumStrategy(StrategyInterface):
         min_15m = cfg.swing_max_age_bars + cfg.swing_pivot_bars + 10
         if df_trigger is None or len(df_trigger) < min_15m:
             self.logger.debug(f"[SMC_MOMENTUM] Insufficient 15m data for {epic}: {0 if df_trigger is None else len(df_trigger)} bars")
+            self._log_rejection(epic, "INSUFFICIENT_DATA", f"need {min_15m} bars", hour_utc=now.hour)
             return None
         if df_4h is None or len(df_4h) < cfg.htf_ema_period + 5:
             self.logger.debug(f"[SMC_MOMENTUM] Insufficient 4H data for {epic}")
+            self._log_rejection(epic, "INSUFFICIENT_HTF_DATA", "not enough 4H bars", hour_utc=now.hour)
             return None
 
         # --- 2. Session gates (rollover / Asian / kill-zone) ---
@@ -183,16 +200,19 @@ class SMCMomentumStrategy(StrategyInterface):
         hour_utc = last_ts.hour
         if cfg.is_pair_blocked_session(epic, hour_utc):
             self.logger.debug(f"[SMC_MOMENTUM] Session block active (hour {hour_utc} UTC) for {epic}")
+            self._log_rejection(epic, "SESSION", f"hour={hour_utc} blocked", hour_utc=hour_utc)
             return None
 
         # --- 3. Cooldown ---
         if not self._check_cooldown(epic, cfg.get_pair_cooldown_minutes(epic), now):
+            self._log_rejection(epic, "COOLDOWN", "within cooldown window", hour_utc=hour_utc)
             return None
 
         # --- 4. HTF bias + distance gate ---
         bias = _htf_bias(df_4h, cfg.htf_ema_period)
         if cfg.get_pair_htf_alignment_required(epic) and bias is None:
             self.logger.debug(f"[SMC_MOMENTUM] No clear HTF bias for {epic}")
+            self._log_rejection(epic, "NO_HTF_BIAS", "HTF EMA bias indeterminate", hour_utc=hour_utc)
             return None
         htf_min_dist = cfg.get_pair_htf_min_distance_pips(epic)
         if htf_min_dist > 0:
@@ -201,6 +221,8 @@ class SMCMomentumStrategy(StrategyInterface):
                 self.logger.debug(
                     f"[SMC_MOMENTUM] HTF distance {dist:.1f} pips < {htf_min_dist} threshold for {epic}"
                 )
+                self._log_rejection(epic, "HTF_DISTANCE", f"{dist:.1f} pips < {htf_min_dist}", hour_utc=hour_utc,
+                                    details={"dist_pips": round(dist, 2), "min_pips": htf_min_dist})
                 return None
 
         # --- 5. Liquidity pool detection ---
@@ -212,6 +234,7 @@ class SMCMomentumStrategy(StrategyInterface):
 
         if not pool_highs and not pool_lows:
             self.logger.debug(f"[SMC_MOMENTUM] No liquidity pools found for {epic}")
+            self._log_rejection(epic, "NO_LIQUIDITY_POOLS", "no swing highs/lows in lookback", hour_utc=hour_utc)
             return None
 
         is_jpy = _is_jpy(pair)
@@ -229,6 +252,7 @@ class SMCMomentumStrategy(StrategyInterface):
         )
 
         if sweep is None:
+            self._log_rejection(epic, "NO_SWEEP", "no sweep-and-rejection pattern", hour_utc=hour_utc)
             return None
 
         # --- 7. HTF alignment gate (load-bearing: PF 0.90 → 1.22) ---
@@ -236,17 +260,17 @@ class SMCMomentumStrategy(StrategyInterface):
         # SELL (swept high → reversal down): requires bearish HTF bias
         if cfg.get_pair_htf_alignment_required(epic) and bias is not None:
             if sweep.direction == "BUY" and bias != "bullish":
-                self._log_rejection(epic, "HTF_MISALIGN", f"BUY but bias={bias}")
+                self._log_rejection(epic, "HTF_MISALIGN", f"BUY but bias={bias}", direction="BUY", hour_utc=hour_utc)
                 return None
             if sweep.direction == "SELL" and bias != "bearish":
-                self._log_rejection(epic, "HTF_MISALIGN", f"SELL but bias={bias}")
+                self._log_rejection(epic, "HTF_MISALIGN", f"SELL but bias={bias}", direction="SELL", hour_utc=hour_utc)
                 return None
 
         # --- 8. Momentum quality filter (optional) ---
         filter_mode = cfg.get_pair_momentum_filter_mode(epic)
         if filter_mode == "atr_expansion":
             if not self._atr_expansion_ok(df_trigger, cfg.atr_expansion_threshold):
-                self._log_rejection(epic, "ATR_EXPANSION", "sweep bar TR not expanded")
+                self._log_rejection(epic, "ATR_EXPANSION", "sweep bar TR not expanded", hour_utc=hour_utc)
                 return None
 
         # --- 9. ATR for TP ---
@@ -256,13 +280,16 @@ class SMCMomentumStrategy(StrategyInterface):
             atr = self._atr_from_15m(df_trigger, cfg.atr_period)
         if atr is None or atr <= 0:
             self.logger.debug(f"[SMC_MOMENTUM] Cannot compute ATR for {epic}")
+            self._log_rejection(epic, "ATR_UNAVAILABLE", "ATR is None or zero", hour_utc=hour_utc)
             return None
 
         # --- 10. Confidence scoring ---
         confidence = self._score_confidence(sweep, bias, df_trigger, cfg, epic, is_jpy)
         min_conf = cfg.get_pair_min_confidence(epic)
         if confidence < min_conf:
-            self._log_rejection(epic, "LOW_CONFIDENCE", f"{confidence:.3f} < {min_conf}")
+            self._log_rejection(epic, "LOW_CONFIDENCE", f"{confidence:.3f} < {min_conf}",
+                                direction=sweep.direction, hour_utc=hour_utc,
+                                details={"confidence": round(confidence, 3), "min_confidence": min_conf})
             return None
 
         # --- 11. SL / TP ---
@@ -453,14 +480,40 @@ class SMCMomentumStrategy(StrategyInterface):
     # Rejection logging
     # ------------------------------------------------------------------
 
-    def _log_rejection(self, epic: str, reason: str, detail: str = "") -> None:
+    def _log_rejection(
+        self,
+        epic: str,
+        reason: str,
+        detail: str = "",
+        direction: Optional[str] = None,
+        hour_utc: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
         self._pending_rejections.append({
             "epic": epic,
             "reason": reason,
             "detail": detail,
             "ts": datetime.now(timezone.utc).isoformat(),
         })
+        if self._rej_mgr is not None:
+            now = self._current_timestamp if hasattr(self, "_current_timestamp") and self._current_timestamp else datetime.now(timezone.utc)
+            if isinstance(now, pd.Timestamp):
+                now = now.to_pydatetime()
+            if getattr(now, "tzinfo", None) is None:
+                now = now.replace(tzinfo=timezone.utc)
+            self._rej_mgr.reject(
+                stage=reason,
+                reason=detail or reason,
+                epic=epic,
+                pair=epic,
+                direction=direction,
+                hour_utc=hour_utc if hour_utc is not None else now.hour,
+                scan_timestamp=now,
+                details=details,
+            )
 
     def flush_rejections(self) -> None:
         """Called by signal_detector after each scan tick; clears pending log buffer."""
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
         self._pending_rejections.clear()

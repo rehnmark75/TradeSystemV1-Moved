@@ -100,7 +100,12 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
     label: "Regime",
     description: "Volatility / trend regime gate rejected the signal (ADX, low-vol, trending required)",
     color: "#f59e0b",
-    stages: ["LOW_VOL_REGIME", "ADX_PRIMARY", "ADX_HTF", "REGIME_NOT_TRENDING", "REGIME_RANGING", "REGIME_EXPANSION"],
+    stages: [
+      "LOW_VOL_REGIME", "ADX_PRIMARY", "ADX_HTF", "REGIME_NOT_TRENDING", "REGIME_RANGING", "REGIME_EXPANSION",
+      // SMC_MOMENTUM structure gates
+      "HTF_MISALIGN", "HTF_DISTANCE", "ATR_EXPANSION",
+      "NO_LIQUIDITY_POOLS", "NO_SWEEP", "LOW_CONFIDENCE",
+    ],
   },
   atr: {
     label: "ATR / Body",
@@ -207,6 +212,13 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   PAIR_DISABLED: "Pair is disabled in strategy configuration",
   BAND_WIDTH_OUT_OF_RANGE: "Bollinger Band width outside min/max pip threshold",
   BAR_RANGE_TOO_WIDE: "Current bar range exceeds max_current_range_pips limit",
+  // SMC_MOMENTUM stages
+  HTF_MISALIGN: "Trade direction conflicts with 4H EMA50 bias",
+  HTF_DISTANCE: "Price too close to 4H EMA — minimum distance not met",
+  ATR_EXPANSION: "Sweep bar true range did not expand (momentum filter)",
+  NO_LIQUIDITY_POOLS: "No swing high/low liquidity pools found in lookback",
+  NO_SWEEP: "No sweep-and-rejection wick pattern detected",
+  LOW_CONFIDENCE: "Confidence score below minimum threshold",
 };
 
 export function describeStage(stage: string): string {
