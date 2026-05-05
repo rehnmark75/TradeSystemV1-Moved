@@ -1,0 +1,73 @@
+{
+  "typeCheckingMode": "basic",
+  "pythonVersion": "3.12",
+  "include": [
+    "dev-app",
+    "prod-app",
+    "stream-app",
+    "streamlit",
+    "worker/app",
+    "stock-scanner/app",
+    "economic-calendar/app",
+    "system-monitor/app",
+    "fastapi-general/app",
+    "scripts"
+  ],
+  "exclude": [
+    "**/__pycache__",
+    "**/.pytest_cache",
+    "**/.mypy_cache",
+    "**/.ruff_cache",
+    "**/.venv",
+    "**/venv",
+    "**/node_modules",
+    "**/.next",
+    "**/dist",
+    "**/build",
+    ".git",
+    ".agents",
+    ".claude",
+    "archive",
+    "analysis",
+    "analysis_docs",
+    "certs",
+    "data",
+    "docs",
+    "logs",
+    "memory",
+    "optimization",
+    "postgres",
+    "tmp",
+    "vector-db",
+    "worker/app/claude_analysis_enhanced",
+    "worker/app/claude_rejections",
+    "worker/app/forex_scanner/archive",
+    "streamlit/claude_analysis_enhanced",
+    "streamlit/code"
+  ],
+  "ignore": [
+    "worker/app/claude_analysis_enhanced",
+    "worker/app/claude_rejections",
+    "streamlit/claude_analysis_enhanced"
+  ],
+  "executionEnvironments": [
+    {
+      "root": "worker/app",
+      "extraPaths": [
+        "worker/app"
+      ]
+    },
+    {
+      "root": "dev-app",
+      "extraPaths": [
+        "dev-app"
+      ]
+    },
+    {
+      "root": "streamlit",
+      "extraPaths": [
+        "streamlit"
+      ]
+    }
+  ]
+}

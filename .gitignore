@@ -13,6 +13,12 @@
 **/.coverage
 **/htmlcov/
 
+# 🐍 Python virtual environments
+.venv/
+venv/
+**/.venv/
+**/venv/
+
 # 🔧 IDE and editor files
 .vscode/
 .idea/
@@ -58,6 +64,7 @@ postgresbackup/
 **/*_restore_*.sql
 
 # 🔐 Certificates and keys
+/certs/accounts/
 **/*.pem
 **/*.key
 **/*.crt
