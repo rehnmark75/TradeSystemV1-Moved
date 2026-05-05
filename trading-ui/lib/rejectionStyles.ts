@@ -120,6 +120,14 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
       "NO_OB_OR_FVG",
       "TIER2_NO_SIGNAL",
       "TIER3_NO_ENTRY",
+      // RANGE_FADE-specific
+      "INDICATOR_NAN",
+      "NO_PRIOR_RANGE",
+      "NO_HTF_BIAS",
+      "NO_TRIGGER",
+      "PAIR_DISABLED",
+      "BAND_WIDTH_OUT_OF_RANGE",
+      "BAR_RANGE_TOO_WIDE",
     ],
   },
 };
@@ -191,6 +199,14 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   NO_OB_OR_FVG: "No Order Block or Fair Value Gap found at pullback",
   TIER2_NO_SIGNAL: "Tier 2 (trigger) timeframe produced no valid signal",
   TIER3_NO_ENTRY: "Tier 3 (entry) timeframe: no pullback entry found",
+  // RANGE_FADE stages
+  INDICATOR_NAN: "Indicator returned NaN — insufficient candle history",
+  NO_PRIOR_RANGE: "No prior range high/low found in lookback window",
+  NO_HTF_BIAS: "Higher-timeframe EMA bias could not be determined",
+  NO_TRIGGER: "Price not at BB band + RSI extremity + range boundary simultaneously",
+  PAIR_DISABLED: "Pair is disabled in strategy configuration",
+  BAND_WIDTH_OUT_OF_RANGE: "Bollinger Band width outside min/max pip threshold",
+  BAR_RANGE_TOO_WIDE: "Current bar range exceeds max_current_range_pips limit",
 };
 
 export function describeStage(stage: string): string {

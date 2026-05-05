@@ -41,6 +41,13 @@ except ImportError:
 
 from .strategy_registry import StrategyInterface, register_strategy
 
+try:
+    from ...alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment,misc]
 
 logger = logging.getLogger(__name__)
 
@@ -89,6 +96,13 @@ class RangeFadeStrategy(StrategyInterface):
         self._rej_counts: Dict[str, int] = {}
         self._rej_last_log: datetime = datetime.now(timezone.utc)
         self._rej_log_interval_minutes: int = 15
+
+        self._rej_mgr = None
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("RANGE_FADE", db_manager)
+            except Exception:
+                pass
 
         self.logger.info(
             "[RANGE_FADE] profile=%s v%s initialized | TF=%s HTF=%s "
@@ -409,10 +423,29 @@ class RangeFadeStrategy(StrategyInterface):
             now = now.replace(tzinfo=timezone.utc)
         self._cooldowns[epic] = now + timedelta(minutes=self.config.signal_cooldown_minutes)
 
-    def _reject(self, epic: str, reason: str) -> None:
-        self._rej_counts[reason] = self._rej_counts.get(reason, 0) + 1
+    def _reject(self, epic: str, reason: str, direction: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
+        stage = reason.upper()
+        self._rej_counts[stage] = self._rej_counts.get(stage, 0) + 1
+        if self._rej_mgr is not None:
+            now = self._current_timestamp or datetime.now(timezone.utc)
+            if isinstance(now, pd.Timestamp):
+                now = now.to_pydatetime()
+            if getattr(now, "tzinfo", None) is None:
+                now = now.replace(tzinfo=timezone.utc)
+            self._rej_mgr.reject(
+                stage=stage,
+                reason=reason,
+                epic=epic,
+                pair=epic,
+                direction=direction,
+                hour_utc=now.hour,
+                scan_timestamp=now,
+                details=details,
+            )
 
     def flush_rejections(self) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
         if not self._rej_counts:
             return
         now = datetime.now(timezone.utc)

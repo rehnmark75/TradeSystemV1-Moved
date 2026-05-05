@@ -1695,6 +1695,9 @@ class SignalDetector:
                 routing_context=routing_context,
             )
 
+            if hasattr(range_fade_strategy, 'flush_rejections'):
+                range_fade_strategy.flush_rejections()
+
             if signal:
                 signal = self._add_complete_technical_indicators(signal, df_trigger)
 
