@@ -10,7 +10,11 @@ export type CategoryKey =
   | "scalp"
   | "filters"
   | "lpf"
-  | "claude";
+  | "claude"
+  // Generic strategy categories (MEAN_REVERSION, IMPULSE_FADE, XAU_GOLD)
+  | "regime"
+  | "atr"
+  | "data";
 
 export interface CategoryDef {
   label: string;
@@ -92,6 +96,32 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
     color: "#c084fc",
     stages: ["CLAUDE_REJECTED"],
   },
+  regime: {
+    label: "Regime",
+    description: "Volatility / trend regime gate rejected the signal (ADX, low-vol, trending required)",
+    color: "#f59e0b",
+    stages: ["LOW_VOL_REGIME", "ADX_PRIMARY", "ADX_HTF", "REGIME_NOT_TRENDING", "REGIME_RANGING", "REGIME_EXPANSION"],
+  },
+  atr: {
+    label: "ATR / Body",
+    description: "ATR spike guard or impulse body check failed",
+    color: "#10b981",
+    stages: ["ATR_SPIKE", "ATR_UNAVAILABLE", "BODY_TOO_SMALL"],
+  },
+  data: {
+    label: "Data",
+    description: "Insufficient candle data or missing indicators",
+    color: "#6b7280",
+    stages: [
+      "INSUFFICIENT_DATA",
+      "INSUFFICIENT_HTF_DATA",
+      "NO_PATTERN",
+      "NO_BOS",
+      "NO_OB_OR_FVG",
+      "TIER2_NO_SIGNAL",
+      "TIER3_NO_ENTRY",
+    ],
+  },
 };
 
 export const CATEGORY_ORDER: CategoryKey[] = [
@@ -107,6 +137,9 @@ export const CATEGORY_ORDER: CategoryKey[] = [
   "filters",
   "lpf",
   "claude",
+  "regime",
+  "atr",
+  "data",
 ];
 
 export const STAGE_DESCRIPTIONS: Record<string, string> = {
@@ -141,6 +174,23 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   NEWS_FILTER: "Blocked by news filter",
   LPF_BLOCKED: "Loss Prevention Filter: signal blocked by penalty rules",
   CLAUDE_REJECTED: "Claude AI rejected signal after chart analysis",
+  // Generic strategy stages
+  LOW_VOL_REGIME: "Low volatility regime: ADX too low for mean-reversion entry",
+  ADX_PRIMARY: "ADX on primary timeframe below minimum threshold",
+  ADX_HTF: "ADX on higher timeframe below minimum threshold",
+  REGIME_NOT_TRENDING: "Market regime is not trending (required for this strategy)",
+  REGIME_RANGING: "Market regime is ranging (blocked for this strategy)",
+  REGIME_EXPANSION: "Volatility expansion detected — news-spike guard active",
+  ATR_SPIKE: "ATR spike: extreme post-news volatility blocks entry",
+  ATR_UNAVAILABLE: "ATR could not be calculated (insufficient data)",
+  BODY_TOO_SMALL: "Candle body below ATR multiplier threshold",
+  INSUFFICIENT_DATA: "Not enough candle rows to evaluate strategy",
+  INSUFFICIENT_HTF_DATA: "Not enough higher-timeframe candle rows",
+  NO_PATTERN: "No qualifying BB/RSI pattern in current candle",
+  NO_BOS: "No Break of Structure detected on trigger timeframe",
+  NO_OB_OR_FVG: "No Order Block or Fair Value Gap found at pullback",
+  TIER2_NO_SIGNAL: "Tier 2 (trigger) timeframe produced no valid signal",
+  TIER3_NO_ENTRY: "Tier 3 (entry) timeframe: no pullback entry found",
 };
 
 export function describeStage(stage: string): string {

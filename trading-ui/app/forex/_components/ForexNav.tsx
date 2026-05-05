@@ -31,6 +31,7 @@ const DEFAULT_ITEMS: ForexNavItem[] = [
   { href: "/forex/market-conditions", label: "Market Conditions" },
   { href: "/forex/adx-regime", label: "ADX Regime" },
   { href: "/forex/smc-rejections", label: "SMC Rejections" },
+  { href: "/forex/strategy-rejections", label: "Strategy Rejections" },
   { href: "/forex/validator-rejections", label: "Validator Rejections" },
   { href: "/forex/claude-rejections", label: "Claude Rejections" },
   { href: "/forex/filter-effectiveness", label: "Filter Audit" }

@@ -145,6 +145,9 @@ function countByCategory(
     filters: 0,
     lpf: 0,
     claude: 0,
+    regime: 0,
+    atr: 0,
+    data: 0,
   };
   for (const r of rejections) {
     if (!selected.has(r.rejection_stage)) continue;
