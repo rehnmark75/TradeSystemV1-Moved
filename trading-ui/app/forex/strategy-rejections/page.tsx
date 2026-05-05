@@ -186,7 +186,7 @@ export default function StrategyRejectionsPage() {
 
   // ── Fetch options once ──────────────────────────────────────────────────
   useEffect(() => {
-    fetch("/api/forex/strategy-rejections/options")
+    fetch("/trading/api/forex/strategy-rejections/options")
       .then((r) => r.json())
       .then(setOptions)
       .catch(console.error);
@@ -197,8 +197,8 @@ export default function StrategyRejectionsPage() {
     setLoadingStats(true);
     const params = new URLSearchParams({ days: String(days), strategy, epic });
     Promise.all([
-      fetch(`/api/forex/strategy-rejections/stats?${params}`).then((r) => r.json()),
-      fetch(`/api/forex/strategy-rejections/top-stages?${params}`).then((r) => r.json()),
+      fetch(`/trading/api/forex/strategy-rejections/stats?${params}`).then((r) => r.json()),
+      fetch(`/trading/api/forex/strategy-rejections/top-stages?${params}`).then((r) => r.json()),
     ])
       .then(([s, ts]) => {
         setStats(s);
@@ -221,7 +221,7 @@ export default function StrategyRejectionsPage() {
       limit: String(LIMIT),
       offset: String(offset),
     });
-    fetch(`/api/forex/strategy-rejections/list?${params}`)
+    fetch(`/trading/api/forex/strategy-rejections/list?${params}`)
       .then((r) => r.json())
       .then((d) => {
         setRows(d.rows ?? []);
