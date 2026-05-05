@@ -39,6 +39,14 @@ except ImportError:
         get_impulse_fade_config,
     )
 
+try:
+    from ...alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment,misc]
+
 from .strategy_registry import StrategyInterface, register_strategy
 
 logger = logging.getLogger(__name__)
@@ -102,6 +110,13 @@ class ImpulseFadeStrategy(StrategyInterface):
         self._cooldowns: Dict[str, datetime] = {}
         self._current_timestamp: Optional[datetime] = None
 
+        self._rej_mgr = None
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("IMPULSE_FADE", db_manager)
+            except Exception:
+                pass
+
         self.logger.info(
             "[IMPULSE_FADE] v%s initialized | session=%d-%dUTC "
             "atr_mult=%.1f max_atr=%.1f SL/TP=%.1f/%.1f cooldown=%dm",
@@ -130,8 +145,35 @@ class ImpulseFadeStrategy(StrategyInterface):
         """Called by BacktestScanner between pairs."""
         self._cooldowns.clear()
 
+    def flush_rejections(self) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
+
     def get_config(self) -> ImpulseFadeConfig:
         return self.config
+
+    def _reject(
+        self,
+        stage: str,
+        reason: str,
+        epic: str,
+        pair: str,
+        hour_utc: Optional[int] = None,
+        direction: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+        scan_timestamp: Optional[datetime] = None,
+    ) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.reject(
+                stage=stage,
+                reason=reason,
+                epic=epic,
+                pair=pair,
+                direction=direction,
+                hour_utc=hour_utc,
+                scan_timestamp=scan_timestamp or self._current_timestamp,
+                details=details,
+            )
 
     # ------------------------------------------------------------------
     # Signal detection
@@ -152,11 +194,13 @@ class ImpulseFadeStrategy(StrategyInterface):
             cfg = self.config
             pip = _pip_size(pair or epic or "")
             pair_key = epic or pair or "UNKNOWN"
+            self._current_timestamp = current_timestamp
 
             # Need enough rows for ATR + one completed candle
             min_rows = cfg.atr_period + 5
             if df_trigger is None or len(df_trigger) < min_rows:
                 self.logger.debug("[IMPULSE_FADE] %s: insufficient data (%d rows)", pair_key, len(df_trigger) if df_trigger is not None else 0)
+                self._reject("INSUFFICIENT_DATA", "not enough rows", pair_key, pair or pair_key)
                 return None
 
             # Pair-level enable check
@@ -185,13 +229,18 @@ class ImpulseFadeStrategy(StrategyInterface):
                 else:
                     eval_ts = datetime.now(timezone.utc)
 
-            # ── Session gate ─────────────────────────────────────────────
+            self._current_timestamp = eval_ts
             utc_hour = eval_ts.hour
+
+            # ── Session gate ─────────────────────────────────────────────
             start_h = cfg.session_start_hour
             end_h = cfg.session_end_hour
             in_session = start_h <= utc_hour <= end_h
             if not in_session:
                 self.logger.debug("[IMPULSE_FADE] %s: outside session (hour=%d)", pair_key, utc_hour)
+                self._reject("SESSION", f"hour={utc_hour} outside {start_h}-{end_h}",
+                             pair_key, pair or pair_key, hour_utc=utc_hour,
+                             details={"hour": utc_hour, "session_start": start_h, "session_end": end_h})
                 return None
 
             # ── Cooldown check ────────────────────────────────────────────
@@ -200,6 +249,9 @@ class ImpulseFadeStrategy(StrategyInterface):
                 elapsed = (eval_ts - self._cooldowns[pair_key]).total_seconds() / 60
                 if elapsed < cooldown_mins:
                     self.logger.debug("[IMPULSE_FADE] %s: in cooldown (%.1f / %d min)", pair_key, elapsed, cooldown_mins)
+                    self._reject("COOLDOWN", f"elapsed={elapsed:.1f}m < {cooldown_mins}m",
+                                 pair_key, pair or pair_key, hour_utc=utc_hour,
+                                 details={"elapsed_min": round(elapsed, 1), "cooldown_min": cooldown_mins})
                     return None
 
             # ── ATR calculation ───────────────────────────────────────────
@@ -207,6 +259,8 @@ class ImpulseFadeStrategy(StrategyInterface):
             atr_price = atr_series.iloc[-1]
             if pd.isna(atr_price) or atr_price <= 0:
                 self.logger.debug("[IMPULSE_FADE] %s: ATR unavailable", pair_key)
+                self._reject("ATR_UNAVAILABLE", "ATR is NaN or zero", pair_key, pair or pair_key,
+                             hour_utc=utc_hour)
                 return None
 
             atr_pips = atr_price / pip
@@ -215,6 +269,9 @@ class ImpulseFadeStrategy(StrategyInterface):
             max_atr = cfg.get_pair_max_atr_pips(pair_key)
             if atr_pips > max_atr:
                 self.logger.debug("[IMPULSE_FADE] %s: ATR spike blocked (%.1f > %.1f pips)", pair_key, atr_pips, max_atr)
+                self._reject("ATR_SPIKE", f"atr={atr_pips:.1f} > max={max_atr:.1f} pips",
+                             pair_key, pair or pair_key, hour_utc=utc_hour,
+                             details={"atr_pips": round(atr_pips, 2), "max_atr_pips": max_atr})
                 return None
 
             # ── Impulse body check ────────────────────────────────────────
@@ -230,6 +287,10 @@ class ImpulseFadeStrategy(StrategyInterface):
                 self.logger.debug(
                     "[IMPULSE_FADE] %s: body too small (%.1f < %.1f pips)", pair_key, body_pips, threshold_pips
                 )
+                self._reject("BODY_TOO_SMALL", f"body={body_pips:.1f} < threshold={threshold_pips:.1f} pips",
+                             pair_key, pair or pair_key, hour_utc=utc_hour,
+                             details={"body_pips": round(body_pips, 2), "threshold_pips": round(threshold_pips, 2),
+                                      "atr_pips": round(atr_pips, 2), "atr_mult": threshold_mult})
                 return None
 
             # ── Direction: fade the impulse ───────────────────────────────
@@ -260,6 +321,10 @@ class ImpulseFadeStrategy(StrategyInterface):
             max_conf = cfg.get_pair_max_confidence(pair_key)
             if confidence < min_conf:
                 self.logger.debug("[IMPULSE_FADE] %s: confidence %.2f < min %.2f", pair_key, confidence, min_conf)
+                self._reject("LOW_CONFIDENCE", f"confidence={confidence:.3f} < min={min_conf:.3f}",
+                             pair_key, pair or pair_key, hour_utc=utc_hour,
+                             details={"confidence": round(confidence, 3), "min_confidence": min_conf,
+                                      "body_pips": round(body_pips, 2), "atr_pips": round(atr_pips, 2)})
                 return None
             confidence = min(confidence, max_conf)
 

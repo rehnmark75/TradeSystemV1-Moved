@@ -58,6 +58,14 @@ try:
 except ImportError:
     from services.regime_classifier import get_adx_from_df  # type: ignore[no-redef]
 
+try:
+    from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment,misc]
+
 
 
 # ============================================================================
@@ -102,6 +110,13 @@ class MeanReversionStrategy(StrategyInterface):
 
         self._cooldowns: Dict[str, datetime] = {}
         self._current_timestamp: Optional[datetime] = None
+
+        self._rej_mgr = None
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("MEAN_REVERSION", db_manager)
+            except Exception:
+                pass
 
         self.logger.info(
             f"[MEAN_REVERSION] v{self.config.version} initialized | "
@@ -183,6 +198,32 @@ class MeanReversionStrategy(StrategyInterface):
     def get_required_timeframes(self) -> List[str]:
         return [self.config.confirmation_timeframe, self.config.primary_timeframe]
 
+    def flush_rejections(self) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
+
+    def _reject(
+        self,
+        stage: str,
+        reason: str,
+        epic: str,
+        pair: str,
+        hour_utc: Optional[int] = None,
+        direction: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.reject(
+                stage=stage,
+                reason=reason,
+                epic=epic,
+                pair=pair,
+                direction=direction,
+                hour_utc=hour_utc,
+                scan_timestamp=self._current_timestamp,
+                details=details,
+            )
+
     # ------------------------------------------------------------------
     # ENTRY POINT
     # ------------------------------------------------------------------
@@ -200,8 +241,15 @@ class MeanReversionStrategy(StrategyInterface):
     ) -> Optional[Dict]:
         self._current_timestamp = current_timestamp
 
+        # Resolve UTC hour once for all rejection calls below
+        _eval_ts = current_timestamp or datetime.now(timezone.utc)
+        if getattr(_eval_ts, "tzinfo", None) is None:
+            _eval_ts = _eval_ts.replace(tzinfo=timezone.utc)
+        _utc_hour = _eval_ts.hour
+
         df = df_trigger if df_trigger is not None else df_entry
         if df is None or len(df) < max(self.config.bb_period, self.config.rsi_period) + 5:
+            self._reject("INSUFFICIENT_DATA", "not enough rows", epic, pair, hour_utc=_utc_hour)
             return None
 
         if not self.config.is_pair_enabled(epic):
@@ -209,21 +257,21 @@ class MeanReversionStrategy(StrategyInterface):
             return None
 
         if not self._check_cooldown(epic):
+            self._reject("COOLDOWN", "cooldown active", epic, pair, hour_utc=_utc_hour)
             return None
 
         # Session window gate (optional — configured per-pair)
         session_start = self.config.get_pair_session_start_hour(epic)
         session_end = self.config.get_pair_session_end_hour(epic)
         if session_start is not None and session_end is not None:
-            eval_ts = current_timestamp or datetime.now(timezone.utc)
-            if getattr(eval_ts, "tzinfo", None) is None:
-                eval_ts = eval_ts.replace(tzinfo=timezone.utc)
-            utc_hour = eval_ts.hour
-            if not (session_start <= utc_hour <= session_end):
+            if not (session_start <= _utc_hour <= session_end):
                 self.logger.debug(
-                    f"[MEAN_REVERSION] {epic}: outside session window (hour={utc_hour}, "
+                    f"[MEAN_REVERSION] {epic}: outside session window (hour={_utc_hour}, "
                     f"window={session_start}-{session_end})"
                 )
+                self._reject("SESSION", f"hour={_utc_hour} outside {session_start}-{session_end}",
+                             epic, pair, hour_utc=_utc_hour,
+                             details={"hour": _utc_hour, "session_start": session_start, "session_end": session_end})
                 return None
 
         adx_value = self._get_adx(df)
@@ -234,6 +282,9 @@ class MeanReversionStrategy(StrategyInterface):
             # Low-vol regime filter: ATR ≤ threshold + flat EMA slope.
             # Used instead of ADX for touch-entry pairs (late-session fade).
             if not self._low_vol_regime_passes(df, epic):
+                self._reject("LOW_VOL_REGIME", "low-vol regime filter failed", epic, pair,
+                             hour_utc=_utc_hour,
+                             details={"adx": round(adx_value, 2) if adx_value is not None else None})
                 return None
         elif self.config.hard_adx_gate_enabled:
             # Hard ADX gates — always enforced (no trust_regime_routing bypass).
@@ -243,19 +294,31 @@ class MeanReversionStrategy(StrategyInterface):
             htf_ceiling = self.config.get_pair_adx_hard_ceiling_htf(epic)
             if adx_value is None or pd.isna(adx_value):
                 self.logger.debug(f"[MEAN_REVERSION] ❌ {epic} 15m ADX unavailable — fail-closed")
+                self._reject("ADX_PRIMARY", "15m ADX unavailable (fail-closed)", epic, pair,
+                             hour_utc=_utc_hour)
                 return None
             if adx_value > pri_ceiling:
                 self.logger.debug(
                     f"[MEAN_REVERSION] ❌ {epic} 15m ADX {adx_value:.1f} > {pri_ceiling}"
                 )
+                self._reject("ADX_PRIMARY", f"15m ADX {adx_value:.1f} > ceiling {pri_ceiling}",
+                             epic, pair, hour_utc=_utc_hour,
+                             details={"adx_15m": round(adx_value, 2), "ceiling": pri_ceiling})
                 return None
             if adx_htf is None or pd.isna(adx_htf):
                 self.logger.debug(f"[MEAN_REVERSION] ❌ {epic} 1h ADX unavailable — fail-closed")
+                self._reject("ADX_HTF", "1h ADX unavailable (fail-closed)", epic, pair,
+                             hour_utc=_utc_hour,
+                             details={"adx_15m": round(adx_value, 2)})
                 return None
             if adx_htf > htf_ceiling:
                 self.logger.debug(
                     f"[MEAN_REVERSION] ❌ {epic} 1h ADX {adx_htf:.1f} > {htf_ceiling}"
                 )
+                self._reject("ADX_HTF", f"1h ADX {adx_htf:.1f} > ceiling {htf_ceiling}",
+                             epic, pair, hour_utc=_utc_hour,
+                             details={"adx_15m": round(adx_value, 2), "adx_1h": round(adx_htf, 2),
+                                      "ceiling": htf_ceiling})
                 return None
 
         # Compute BB + RSI
@@ -316,6 +379,13 @@ class MeanReversionStrategy(StrategyInterface):
                 extremity = min(1.0, rsi_depth + bb_depth / band_width)
 
         if direction is None:
+            self._reject("NO_PATTERN", "no BB+RSI pattern matched", epic, pair,
+                         hour_utc=_utc_hour,
+                         details={"rsi": round(latest_rsi, 2) if latest_rsi is not None else None,
+                                  "close": latest_close, "upper_bb": latest_upper,
+                                  "lower_bb": latest_lower,
+                                  "adx_15m": round(adx_value, 2) if adx_value is not None else None,
+                                  "adx_1h": round(adx_htf, 2) if adx_htf is not None else None})
             return None
 
         # Confidence: min + extremity × range

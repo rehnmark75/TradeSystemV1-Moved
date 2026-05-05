@@ -1644,6 +1644,9 @@ class SignalDetector:
             if signal:
                 signal = self._add_complete_technical_indicators(signal, df_trigger)
 
+            if hasattr(mean_reversion_strategy, 'flush_rejections'):
+                mean_reversion_strategy.flush_rejections()
+
             return signal
 
         except Exception as e:
@@ -1738,6 +1741,9 @@ class SignalDetector:
 
             if signal:
                 signal = self._add_complete_technical_indicators(signal, df_5m)
+
+            if hasattr(impulse_fade_strategy, 'flush_rejections'):
+                impulse_fade_strategy.flush_rejections()
 
             return signal
 

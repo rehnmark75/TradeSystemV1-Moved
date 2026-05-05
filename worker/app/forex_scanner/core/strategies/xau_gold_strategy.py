@@ -37,6 +37,14 @@ except ImportError:  # pragma: no cover
     )
 
 try:
+    from ..alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment,misc]
+
+try:
     from .helpers.smc_fair_value_gaps import FVGType, SMCFairValueGaps
 except ImportError:  # pragma: no cover
     from forex_scanner.core.strategies.helpers.smc_fair_value_gaps import (
@@ -152,6 +160,14 @@ class XAUGoldStrategy(StrategyInterface):
         self._rej_counts: Dict[str, int] = {}
         self._rej_last_log: datetime = datetime.now(timezone.utc)
         self._rej_log_interval_minutes: int = 15
+
+        self._rej_mgr = None
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("XAU_GOLD", db_manager)
+            except Exception:
+                pass
+
         self.logger.info(f"XAU_GOLD strategy v{self.config.version} initialized")
 
     # ---- interface --------------------------------------------------------
@@ -168,8 +184,9 @@ class XAUGoldStrategy(StrategyInterface):
         self._cooldowns.clear()
 
     def flush_rejections(self) -> None:
-        # Clear the per-scan rejection list. Counters in self._rej_counts keep
-        # accumulating across scans so the rollup below can report an aggregate.
+        # Persist buffered rejections to DB, then clear per-scan list.
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
         self._rejections.clear()
 
         if not self._rej_counts:
@@ -694,12 +711,20 @@ class XAUGoldStrategy(StrategyInterface):
     # ---- rejection --------------------------------------------------------
 
     def _reject(self, epic: str, reason: str, detail: str = "") -> None:
-        self._rejections.append(
-            _Rejection(epic=epic, reason=reason, detail=detail, ts=datetime.now(timezone.utc))
-        )
+        now = datetime.now(timezone.utc)
+        self._rejections.append(_Rejection(epic=epic, reason=reason, detail=detail, ts=now))
         self._rej_counts[reason] = self._rej_counts.get(reason, 0) + 1
         self._scan_count += 1
         self.logger.debug(f"[XAU_GOLD] {epic} rejected: {reason} ({detail})")
+        if self._rej_mgr is not None:
+            self._rej_mgr.reject(
+                stage=reason,
+                reason=detail or reason,
+                epic=epic,
+                pair=epic,
+                scan_timestamp=now,
+                details={"detail": detail} if detail else None,
+            )
 
 
 def create_xau_gold_strategy(
