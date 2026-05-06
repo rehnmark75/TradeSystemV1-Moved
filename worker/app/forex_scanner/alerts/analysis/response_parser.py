@@ -63,7 +63,7 @@ class ResponseParser:
     # whitespace. The header regex tolerates all three and an optional
     # leading "- "/"* " bullet that Claude sometimes emits.
     _HEADER_RE = re.compile(
-        r'^\s*(?:[-*]\s+)?\**\s*(SCORE|DECISION|REASON|CORRECT_TYPE)\s*\**\s*[:\-]\s*(.*)$',
+        r'^\s*(?:[-*]\s+)?\**\s*(SCORE|DECISION|REASON_CODE|REASON|CORRECT_TYPE)\s*\**\s*[:\-]\s*(.*)$',
         re.IGNORECASE,
     )
 
@@ -101,6 +101,7 @@ class ResponseParser:
             'score': 0,
             'decision': 'REJECT',
             'reason': None,
+            'reason_code': None,
             'approved': False,
             'parse_ok': False,
         }
@@ -150,6 +151,11 @@ class ResponseParser:
                         result['decision'] = decision
                         result['approved'] = decision == 'APPROVE'
                         found_decision = True
+
+                elif field == 'REASON_CODE':
+                    code = re.sub(r'[^A-Z0-9_]', '', value.upper())
+                    if code:
+                        result['reason_code'] = code
 
                 elif field == 'REASON':
                     reason_parts = [value] if value else []

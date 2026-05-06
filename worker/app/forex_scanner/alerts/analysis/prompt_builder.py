@@ -583,27 +583,39 @@ REASON: Analysis error - neutral assessment"""
     def build_forex_vision_prompt(self, signal: Dict, has_chart: bool = True) -> str:
         """
         Build a vision-enabled prompt for strategy analysis.
-        Routes to strategy-specific prompt builders.
-
-        Args:
-            signal: Signal dictionary with all trading data
-            has_chart: Whether a chart image will be included
-
-        Returns:
-            Formatted prompt string for Claude vision analysis
+        Routes to strategy-specific prompt modules.
         """
+        try:
+            from .prompts import (
+                fvg_retest,
+                mean_reversion,
+                range_fade,
+                smc_momentum,
+                impulse_fade,
+                smc_simple,
+            )
+        except ImportError:
+            from forex_scanner.alerts.analysis.prompts import (  # type: ignore[no-redef]
+                fvg_retest,
+                mean_reversion,
+                range_fade,
+                smc_momentum,
+                impulse_fade,
+                smc_simple,
+            )
+
         strategy = signal.get('strategy', 'SMC_SIMPLE').upper()
         if strategy == 'FVG_RETEST':
-            return self._build_fvg_retest_prompt(signal, has_chart)
+            return fvg_retest.build_prompt(signal, has_chart)
         if strategy == 'MEAN_REVERSION':
-            return self._build_mean_reversion_prompt(signal, has_chart)
+            return mean_reversion.build_prompt(signal, has_chart)
         if strategy == 'RANGE_FADE':
-            return self._build_range_fade_prompt(signal, has_chart)
+            return range_fade.build_prompt(signal, has_chart)
         if strategy == 'SMC_MOMENTUM':
-            return self._build_smc_momentum_prompt(signal, has_chart)
+            return smc_momentum.build_prompt(signal, has_chart)
         if strategy == 'IMPULSE_FADE':
-            return self._build_impulse_fade_prompt(signal, has_chart)
-        return self._build_smc_prompt(signal, has_chart)
+            return impulse_fade.build_prompt(signal, has_chart)
+        return smc_simple.build_prompt(signal, has_chart)
 
 
 
