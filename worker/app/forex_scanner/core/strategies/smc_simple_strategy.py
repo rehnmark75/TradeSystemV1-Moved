@@ -3362,6 +3362,7 @@ class SMCSimpleStrategy:
 
             # v2.9.0: Use round(2) for both values to avoid floating-point precision issues
             # (e.g., 0.4799 displaying as 48% but failing 48% threshold)
+            self.logger.info(f"   🔍 Confidence gate: score={confidence*100:.0f}% | effective_floor={pair_min_confidence*100:.0f}% ({adjustment_type})")
             if round(confidence, 2) < round(pair_min_confidence, 2):
                 reason = f"Confidence too low ({confidence*100:.0f}% < {pair_min_confidence*100:.0f}%)"
                 self.logger.info(f"\n❌ {reason} ({adjustment_type})")
@@ -5894,6 +5895,14 @@ class SMCSimpleStrategy:
         in_asian_session = hour >= asian_start or hour < asian_end
 
         if in_asian_session:
+            # config_override support for --override allow_asian_session=true in backtests
+            if self._config_override and 'allow_asian_session' in self._config_override:
+                if self._config_override['allow_asian_session']:
+                    pair_name = epic.split('.')[2] if epic and '.' in epic else epic
+                    return True, f"Asian session ALLOWED via override (hour={hour})"
+                else:
+                    return False, f"Asian session blocked via override (hour={hour})"
+
             # v2.8.0: Check pair-specific override for Asian session using database config
             if epic and self._config_service:
                 if self._config_service.is_asian_session_allowed(epic):
