@@ -2814,7 +2814,23 @@ class SMCSimpleStrategy:
                 and self._db_config
                 and self._get_pair_param(epic, 'regime_sl_tp_enabled', False)
             )
-            if _regime_sl_tp_enabled:
+            _blocked_volatility_states = self._get_pair_param(epic, 'block_volatility_states', [])
+            if isinstance(_blocked_volatility_states, str):
+                _blocked_volatility_states = [
+                    state.strip().lower()
+                    for state in _blocked_volatility_states.split(',')
+                    if state.strip()
+                ]
+            elif _blocked_volatility_states:
+                _blocked_volatility_states = [
+                    str(state).strip().lower()
+                    for state in _blocked_volatility_states
+                    if str(state).strip()
+                ]
+            else:
+                _blocked_volatility_states = []
+
+            if _regime_sl_tp_enabled or _blocked_volatility_states:
                 try:
                     from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
                         get_performance_metrics_calculator
@@ -2828,9 +2844,43 @@ class SMCSimpleStrategy:
                         epic=epic
                     )
                     _pre_market_regime = _pre_metrics.market_regime
-                    self.logger.info(f"   📊 Pre-metrics regime: {_pre_market_regime}")
+                    self.logger.info(
+                        f"   📊 Pre-metrics regime: {_pre_market_regime}, "
+                        f"volatility={_pre_metrics.volatility_state}"
+                    )
                 except Exception as _e:
                     self.logger.debug(f"Pre-metrics regime detection failed: {_e}")
+
+            if _blocked_volatility_states and _pre_metrics is not None:
+                _pre_volatility_state = str(_pre_metrics.volatility_state or 'unknown').lower()
+                if _pre_volatility_state in _blocked_volatility_states:
+                    reason = (
+                        f"Volatility state blocked ({_pre_volatility_state}; "
+                        f"blocked={','.join(_blocked_volatility_states)})"
+                    )
+                    self.logger.info(f"\n❌ {reason}")
+                    context = self._collect_market_context(
+                        df_trigger,
+                        df_4h,
+                        df_entry,
+                        pip_value,
+                        ema_result=ema_result,
+                        swing_result=swing_result,
+                        pullback_result=pullback_result,
+                        direction=direction,
+                    )
+                    context['volatility_state'] = _pre_volatility_state
+                    context['market_regime_detected'] = _pre_market_regime
+                    self._track_rejection(
+                        stage='VOLATILITY_STATE',
+                        reason=reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=context,
+                    )
+                    return None
 
             # ================================================================
             # STEP 4: Calculate Stop Loss and Take Profit
