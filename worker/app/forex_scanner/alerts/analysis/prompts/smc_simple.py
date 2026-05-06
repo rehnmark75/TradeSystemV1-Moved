@@ -350,8 +350,9 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
             bb_upper_val = other_indicators.get('bb_upper')
             bb_middle = other_indicators.get('bb_middle')
             bb_lower_val = other_indicators.get('bb_lower')
-            if bb_upper_val and bb_lower_val and entry_price:
-                bb_width = (bb_upper_val - bb_lower_val) * 10000
+            if bb_upper_val and bb_lower_val and bb_middle is not None and entry_price:
+                pip_scale = 100 if 'JPY' in pair else 10000
+                bb_width = (bb_upper_val - bb_lower_val) * pip_scale
                 price_in_bb = "Upper band" if entry_price > bb_middle else "Lower band"
                 bb_context = f"""
 **BOLLINGER BAND CONTEXT:**
@@ -498,6 +499,7 @@ REASON: [≤40 words. Focus on: (a) {primary_htf_label} trend alignment vs signa
 - 7–8  STRONG: {primary_htf_label} trend aligned with minor concerns (e.g., momentum slightly extended, minor S/R nearby, entry slightly outside optimal Fib zone)
 - 5–6  ACCEPTABLE: {primary_htf_label} trend aligned, swing break present, entry location acceptable — positive expectancy midband
 - 3–4  MARGINAL: {primary_htf_label} trend unclear/choppy, or entry near (but not at) a meaningful S/R level — APPROVE unless a rejection criterion is clearly met
+- 1–2  REJECT: one of the rejection criteria below is clearly met
 
 **Penalty cap:** combined penalty from market context (RSI, ADX, regime, MTF) is capped at −2 total. Do NOT stack all context items into a cumulative −4 to −6.
 
