@@ -235,19 +235,19 @@ PAIR_TRAILING_CONFIGS = {
 
     # ========== MAJOR PAIRS (10 pip early BE) ==========
     'CS.D.EURUSD.CEEM.IP': {
-        'early_breakeven_trigger_points': 10,   # v4.0.0: 15→10 (median winner MFE is 5-7 pips)
-        'early_breakeven_buffer_points': 3,     # v4.0.0: 2→3 (lock slightly more profit)
-        'stage1_trigger_points': 14,            # v4.0.0: 25→14 (just below TP=18, captures near-TP reversals)
-        'stage1_lock_points': 8,                # v4.0.0: 12→8 (lock halfway to TP if price reverses)
-        'stage2_trigger_points': 25,            # For wide-TP or scalp overshoot scenarios
-        'stage2_lock_points': 15,
-        'stage3_trigger_points': 35,
+        'early_breakeven_trigger_points': 6,    # fires at 60% of TP=10, avoids race condition with TP
+        'early_breakeven_buffer_points': 2,
+        'stage1_trigger_points': 9,             # just below TP=10, captures near-TP reversals
+        'stage1_lock_points': 5,
+        'stage2_trigger_points': 14,            # overshoot / wider TP scenarios
+        'stage2_lock_points': 8,
+        'stage3_trigger_points': 20,
         'stage3_atr_multiplier': 2.0,
-        'stage3_min_distance': 8,
-        'min_trail_distance': 8,               # v4.0.0: 10→8
-        'break_even_trigger_points': 12,       # v4.0.0: 18→12
+        'stage3_min_distance': 6,
+        'min_trail_distance': 5,
+        'break_even_trigger_points': 8,         # standard BE below TP=10
         'enable_partial_close': False,
-        'partial_close_trigger_points': 18,
+        'partial_close_trigger_points': 12,
         'partial_close_size': 0.4,
     },
 
