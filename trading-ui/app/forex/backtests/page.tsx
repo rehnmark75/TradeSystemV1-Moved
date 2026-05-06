@@ -5,6 +5,13 @@ import { useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
 import { useEnvironment } from "../../../lib/environment";
 import EnvironmentToggle from "../../../components/EnvironmentToggle";
+import {
+  BACKTEST_STRATEGY_LABELS,
+  GOLD_EPIC,
+  epicToPair,
+  formatDateTime,
+  formatDuration,
+} from "../../../lib/backtests";
 
 type JobRow = {
   id: number;
@@ -79,32 +86,18 @@ type BacktestsPayload = {
 
 const DAY_OPTIONS = [7, 14, 30, 60, 90];
 
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return "N/A";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return value;
-  return parsed.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
+const getStrategyLabel = (strategyName: string | null | undefined) => {
+  if (!strategyName) return "N/A";
+  return BACKTEST_STRATEGY_LABELS[strategyName as keyof typeof BACKTEST_STRATEGY_LABELS] ?? strategyName;
 };
 
-const formatDuration = (seconds: number | null | undefined) => {
-  if (!seconds || seconds <= 0) return "Pending";
-  if (seconds < 60) return `${Math.round(seconds)}s`;
-  const mins = Math.floor(seconds / 60);
-  const secs = Math.round(seconds % 60);
-  return `${mins}m ${secs}s`;
-};
-
-const epicToPair = (epic: string | null | undefined) => {
-  if (!epic) return "N/A";
-  const parts = epic.split(".");
-  if (parts.length >= 3) return parts[2].slice(0, 6);
-  return epic;
+const getStrategyBadgeStyle = (strategyName: string | null | undefined) => {
+  if (strategyName === "XAU_GOLD") return { background: "#fff7ed", color: "#9a3412", borderColor: "#fed7aa" };
+  if (strategyName === "MEAN_REVERSION") return { background: "#ecfdf5", color: "#047857", borderColor: "#a7f3d0" };
+  if (strategyName === "IMPULSE_FADE") return { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" };
+  if (strategyName === "RANGE_FADE") return { background: "#f5f3ff", color: "#6d28d9", borderColor: "#ddd6fe" };
+  if (strategyName?.startsWith("SMC")) return { background: "#f8fafc", color: "#334155", borderColor: "#cbd5e1" };
+  return { background: "#f3f4f6", color: "#4b5563", borderColor: "#d1d5db" };
 };
 
 export default function ForexBacktestsPage() {
@@ -144,6 +137,14 @@ export default function ForexBacktestsPage() {
     variation_top_n: 10,
   });
 
+  const launchPairOptions = useMemo(() => {
+    const options = payload?.form_options?.pairs ?? [];
+    if (form.strategy === "XAU_GOLD") {
+      return options.filter((option) => option.value === GOLD_EPIC);
+    }
+    return options.filter((option) => option.value !== GOLD_EPIC);
+  }, [form.strategy, payload?.form_options?.pairs]);
+
   const loadBacktests = () => {
     setLoading(true);
     setError(null);
@@ -171,31 +172,54 @@ export default function ForexBacktestsPage() {
   }, [days, strategy, pair, environment]);
 
   useEffect(() => {
+    if (!launchPairOptions.length) return;
+    if (launchPairOptions.some((option) => option.value === form.epic)) return;
+    setForm((current) => ({ ...current, epic: launchPairOptions[0].value }));
+  }, [form.epic, launchPairOptions]);
+
+  useEffect(() => {
     if (!selectedJobId) {
       setSelectedJob(null);
       return;
     }
 
+    const controller = new AbortController();
     setJobStatusLoading(true);
-    fetch(`/trading/api/forex/backtests/jobs/${selectedJobId}/`)
+    fetch(`/trading/api/forex/backtests/jobs/${selectedJobId}/`, { signal: controller.signal })
       .then((res) => res.json())
-      .then((data) => setSelectedJob(data.job ?? null))
-      .catch(() => setSelectedJob(null))
-      .finally(() => setJobStatusLoading(false));
+      .then((data) => {
+        if (!controller.signal.aborted) setSelectedJob(data.job ?? null);
+      })
+      .catch((err) => {
+        if (!controller.signal.aborted && !(err instanceof Error && err.name === "AbortError")) {
+          setSelectedJob(null);
+        }
+      })
+      .finally(() => {
+        if (!controller.signal.aborted) setJobStatusLoading(false);
+      });
+
+    return () => controller.abort();
   }, [selectedJobId]);
 
   useEffect(() => {
     if (!selectedJobId || !selectedJob) return;
     if (selectedJob.status !== "pending" && selectedJob.status !== "running") return;
 
+    const controller = new AbortController();
     const timer = window.setTimeout(() => {
-      fetch(`/trading/api/forex/backtests/jobs/${selectedJobId}/`)
+      fetch(`/trading/api/forex/backtests/jobs/${selectedJobId}/`, { signal: controller.signal })
         .then((res) => res.json())
-        .then((data) => setSelectedJob(data.job ?? null))
+        .then((data) => {
+          if (!controller.signal.aborted) setSelectedJob(data.job ?? null);
+        })
         .catch(() => undefined);
     }, 5000);
 
-    return () => window.clearTimeout(timer);
+    return () => {
+      window.clearTimeout(timer);
+      controller.abort();
+    };
   }, [selectedJob, selectedJobId]);
 
   const queueStats = useMemo(() => {
@@ -388,7 +412,7 @@ export default function ForexBacktestsPage() {
                   value={form.epic}
                   onChange={(event) => setForm((current) => ({ ...current, epic: event.target.value }))}
                 >
-                  {(payload?.form_options?.pairs ?? []).map((option) => (
+                  {launchPairOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
@@ -399,11 +423,17 @@ export default function ForexBacktestsPage() {
                 <label>Strategy</label>
                 <select
                   value={form.strategy}
-                  onChange={(event) => setForm((current) => ({ ...current, strategy: event.target.value }))}
+                  onChange={(event) =>
+                    setForm((current) => ({
+                      ...current,
+                      strategy: event.target.value,
+                      epic: event.target.value === "XAU_GOLD" ? GOLD_EPIC : current.epic === GOLD_EPIC ? "" : current.epic,
+                    }))
+                  }
                 >
                   {(payload?.form_options?.strategies ?? []).map((option) => (
                     <option key={option} value={option}>
-                      {option}
+                      {getStrategyLabel(option)}
                     </option>
                   ))}
                 </select>
@@ -562,9 +592,17 @@ export default function ForexBacktestsPage() {
                     onChange={(event) =>
                       setForm((current) => ({ ...current, variation_json: event.target.value }))
                     }
+                    placeholder={'{\n  "min_confidence": [0.45, 0.5, 0.55],\n  "fixed_stop_loss_pips": [8, 10, 12],\n  "fixed_take_profit_pips": [10, 12, 15]\n}'}
                     rows={8}
                     style={{ width: "100%" }}
                   />
+                  <details className="forex-badge" style={{ display: "block" }}>
+                    <summary>Common variation keys</summary>
+                    <div style={{ marginTop: 8 }}>
+                      min_confidence, fixed_stop_loss_pips, fixed_take_profit_pips, min_rr_ratio,
+                      sl_buffer_pips, ema_period, cooldown_minutes
+                    </div>
+                  </details>
                   <div className="forex-controls" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
                     <div>
                       <label>Variation Workers</label>
@@ -668,7 +706,8 @@ export default function ForexBacktestsPage() {
                 <div className="forex-badge">
                   Config
                   <strong>
-                    {selectedJob.days}d {selectedJob.strategy} {selectedJob.parallel ? "Parallel" : "Single"}
+                    {selectedJob.days}d {getStrategyLabel(selectedJob.strategy)}{" "}
+                    {selectedJob.parallel ? "Parallel" : "Single"}
                   </strong>
                 </div>
                 {selectedJob.snapshot_name ? (
@@ -791,7 +830,7 @@ export default function ForexBacktestsPage() {
                     <td>{epicToPair(job.epic)}</td>
                     <td>{job.status}</td>
                     <td>
-                      {job.strategy} · {job.timeframe}
+                      {getStrategyLabel(job.strategy)} · {job.timeframe}
                     </td>
                     <td>{formatDateTime(job.submitted_at)}</td>
                     <td>{job.execution_id ? `#${job.execution_id}` : "-"}</td>
@@ -827,7 +866,23 @@ export default function ForexBacktestsPage() {
                     <td>{execution.id}</td>
                     <td>{formatDateTime(execution.start_time)}</td>
                     <td>{epicToPair(execution.epics_tested?.[0])}</td>
-                    <td>{execution.strategy_name ?? "N/A"}</td>
+                    <td>
+                      <span
+                        style={{
+                          ...getStrategyBadgeStyle(execution.strategy_name),
+                          border: "1px solid",
+                          borderRadius: 999,
+                          display: "inline-flex",
+                          fontSize: 12,
+                          fontWeight: 700,
+                          lineHeight: 1,
+                          padding: "5px 8px",
+                          whiteSpace: "nowrap",
+                        }}
+                      >
+                        {getStrategyLabel(execution.strategy_name)}
+                      </span>
+                    </td>
                     <td>{execution.signal_count}</td>
                     <td>{execution.win_rate.toFixed(1)}%</td>
                     <td>{execution.total_pips.toFixed(1)}</td>

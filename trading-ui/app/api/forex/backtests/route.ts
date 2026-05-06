@@ -196,9 +196,10 @@ export async function GET(request: Request) {
         `
         SELECT DISTINCT strategy_name
         FROM backtest_executions
-        WHERE strategy_name IS NOT NULL
+        WHERE strategy_name = ANY($1::text[])
         ORDER BY strategy_name
-        `
+        `,
+        [[...BACKTEST_STRATEGIES]]
       ),
       forexPool.query(
         `
@@ -237,13 +238,14 @@ export async function GET(request: Request) {
         win_rate: signalCount > 0 ? (winCount / signalCount) * 100 : 0,
       };
     });
+    const filterStrategies = strategyResult.rows.map((row) => row.strategy_name);
 
     return NextResponse.json({
       filters: {
         days,
         strategy,
         pair,
-        strategies: ["All", ...strategyResult.rows.map((row) => row.strategy_name)],
+        strategies: ["All", ...filterStrategies],
         epics: ["All", ...epicResult.rows.map((row) => row.epic)],
       },
       form_options: {

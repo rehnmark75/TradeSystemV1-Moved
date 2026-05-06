@@ -5,6 +5,7 @@ import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
 import ForexNav from "../../_components/ForexNav";
 import EnvironmentToggle from "../../../../components/EnvironmentToggle";
+import { epicToPair, formatDateTime, formatDuration } from "../../../../lib/backtests";
 
 type ExecutionSignal = {
   id: number;
@@ -38,26 +39,6 @@ type ExecutionPayload = {
     win_rate: number;
   };
   signals: ExecutionSignal[];
-};
-
-const formatDateTime = (value: string | null | undefined) => {
-  if (!value) return "N/A";
-  const parsed = new Date(value);
-  if (Number.isNaN(parsed.valueOf())) return value;
-  return parsed.toLocaleString("en-GB", {
-    year: "numeric",
-    month: "short",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-};
-
-const pairFromEpic = (epic: string | null | undefined) => {
-  if (!epic) return "N/A";
-  const parts = epic.split(".");
-  if (parts.length >= 3) return parts[2].slice(0, 6);
-  return epic;
 };
 
 export default function ForexBacktestExecutionPage() {
@@ -123,7 +104,7 @@ export default function ForexBacktestExecutionPage() {
             <div className="metrics-grid">
               <div className="summary-card">
                 Pair
-                <strong>{pairFromEpic(execution.epics_tested?.[0])}</strong>
+                <strong>{epicToPair(execution.epics_tested?.[0])}</strong>
               </div>
               <div className="summary-card">
                 Strategy
@@ -162,7 +143,7 @@ export default function ForexBacktestExecutionPage() {
                     </tr>
                     <tr>
                       <td>Duration</td>
-                      <td>{execution.execution_duration_seconds ?? 0}s</td>
+                      <td>{formatDuration(execution.execution_duration_seconds)}</td>
                     </tr>
                     <tr>
                       <td>Wins / Losses</td>
@@ -225,7 +206,7 @@ export default function ForexBacktestExecutionPage() {
                   {(payload?.signals ?? []).map((signal) => (
                     <tr key={signal.id}>
                       <td>{formatDateTime(signal.signal_timestamp)}</td>
-                      <td>{pairFromEpic(signal.epic)}</td>
+                      <td>{epicToPair(signal.epic)}</td>
                       <td>{signal.signal_type ?? "N/A"}</td>
                       <td>{signal.entry_price ?? "-"}</td>
                       <td>{signal.exit_price ?? "-"}</td>

@@ -3,7 +3,27 @@ export const dynamic = "force-dynamic";
 export const DEFAULT_BACKTEST_DAYS = 14;
 export const DEFAULT_BACKTEST_LIMIT = 20;
 export const BACKTEST_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h"] as const;
-export const BACKTEST_STRATEGIES = ["SMC_SIMPLE"] as const;
+export const BACKTEST_STRATEGIES = [
+  "SMC_SIMPLE",
+  "SMC_MOMENTUM",
+  "MEAN_REVERSION",
+  "IMPULSE_FADE",
+  "RANGE_FADE",
+  "XAU_GOLD",
+] as const;
+
+export type BacktestStrategy = (typeof BACKTEST_STRATEGIES)[number];
+
+export const BACKTEST_STRATEGY_LABELS: Record<BacktestStrategy, string> = {
+  SMC_SIMPLE: "SMC Simple (FX scalp)",
+  SMC_MOMENTUM: "SMC Momentum",
+  MEAN_REVERSION: "Mean Reversion",
+  IMPULSE_FADE: "Impulse Fade",
+  RANGE_FADE: "Range Fade",
+  XAU_GOLD: "XAU Gold (4H/1H/15m)",
+};
+
+export const GOLD_EPIC = "CS.D.CFEGOLD.CEE.IP";
 
 const EPIC_OPTIONS = [
   ["EURUSD", "CS.D.EURUSD.MINI.IP"],
@@ -16,6 +36,7 @@ const EPIC_OPTIONS = [
   ["EURJPY", "CS.D.EURJPY.MINI.IP"],
   ["AUDJPY", "CS.D.AUDJPY.MINI.IP"],
   ["GBPJPY", "CS.D.GBPJPY.MINI.IP"],
+  ["XAUUSD", GOLD_EPIC],
 ] as const;
 
 export function parsePositiveInt(value: string | null, fallback: number) {
@@ -32,6 +53,27 @@ export function epicToPair(epic: string | null | undefined) {
   const parts = epic.split(".");
   if (parts.length >= 3) return parts[2].slice(0, 6);
   return epic;
+}
+
+export function formatDateTime(value: string | null | undefined) {
+  if (!value) return "N/A";
+  const parsed = new Date(value);
+  if (Number.isNaN(parsed.valueOf())) return value;
+  return parsed.toLocaleString("en-GB", {
+    year: "numeric",
+    month: "short",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+export function formatDuration(seconds: number | null | undefined) {
+  if (!seconds || seconds <= 0) return "Pending";
+  if (seconds < 60) return `${Math.round(seconds)}s`;
+  const mins = Math.floor(seconds / 60);
+  const secs = Math.round(seconds % 60);
+  return `${mins}m ${secs}s`;
 }
 
 export function getEpicOptions() {

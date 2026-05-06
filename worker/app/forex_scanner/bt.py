@@ -407,7 +407,7 @@ Supported Pairs:
   EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
 
 Supported Strategies:
-  EMA, MACD, BB, SMC, SMC_STRUCTURE, MOMENTUM, ICHIMOKU, KAMA, ZEROLAG, MEANREV, RANGING, SCALPING, VP (VOLUME_PROFILE)
+  SMC_SIMPLE, SMC_MOMENTUM, MEAN_REVERSION, IMPULSE_FADE, RANGE_FADE, XAU_GOLD
 
 Additional Options:
   --show-signals     Show detailed signal breakdown
@@ -544,11 +544,12 @@ Multi-Strategy Testing (v3.0.0 - Adaptive Strategy Routing):
   --show-regime-breakdown       Show detailed performance by regime
 
 Available Strategies:
-  SMC_SIMPLE      - Primary trend strategy (always enabled)
-  RANGING_MARKET  - Multi-oscillator for ranging markets (ADX < 20)
-  VOLUME_PROFILE  - HVN/POC-based strategy (66.7% Asian session edge)
-  MEAN_REVERSION  - LuxAlgo-based mean reversion
-  BB_SUPERTREND   - Squeeze detection with Supertrend
+  SMC_SIMPLE      - Primary FX trend strategy
+  SMC_MOMENTUM    - SMC momentum continuation strategy
+  MEAN_REVERSION  - Mean reversion strategy
+  IMPULSE_FADE    - Impulse fade strategy
+  RANGE_FADE      - Range fade strategy
+  XAU_GOLD        - Gold strategy
 
 Multi-Strategy Examples:
   # Test Ranging Market strategy in ranging conditions
