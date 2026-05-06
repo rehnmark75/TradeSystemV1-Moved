@@ -434,6 +434,23 @@ The attached chart shows multi-timeframe forex analysis with the following eleme
             if monitor_only else ""
         )
 
+        eurusd_exception = ""
+        if pair == "EURUSD":
+            eurusd_exception = f"""
+═══════════════════════════════════════════════════════════════
+🔵 EURUSD-SPECIFIC RULE OVERRIDE
+═══════════════════════════════════════════════════════════════
+EURUSD frequently produces early pullback/reversal entries where the {primary_htf_label} HTF opposes the signal but price has already locally reversed with a clean path.
+
+**For EURUSD pullback/reversal entries ONLY:**
+- Do NOT hard-reject SC_HTF_OPPOSE if ALL of the following hold:
+  (a) Entry type is PULLBACK or the entry candle shows a reversal structure
+  (b) Immediate path to TP is clear (no S/R within 50% of reward distance)
+  (c) Nearby adverse excursion risk is low (nearest opposing S/R ≥ {sr_buffer_pips} pips from entry)
+- When the above conditions hold: treat {primary_htf_label} HTF conflict as a −2 score penalty instead of a rejection trigger.
+- Still REJECT SC_HTF_OPPOSE if S/R genuinely blocks the path to target (overlapping resistance/support within reward distance AND {primary_htf_label} opposes).
+"""
+
         return f"""You are a SENIOR FOREX TECHNICAL ANALYST with 20+ years of institutional trading experience specializing in Smart Money Concepts (SMC) analysis.
 
 **STRATEGY THESIS — READ FIRST (SMC_SIMPLE v2.3.0)**
@@ -450,6 +467,7 @@ Critical rules for your analysis:
 - ✅ DO reject if {primary_htf_label} clearly opposes the signal AND MTF Confluence < 0.6
 - ✅ DO reject if entry is AT (within 2 pips) a MAJOR S/R level that ALSO opposes {primary_htf_label} bias
 - ✅ DO reject if S/R blocks >75% of path to target AND {primary_htf_label} opposes the signal
+{eurusd_exception}
 {mo_note}
 ═══════════════════════════════════════════════════════════════
 ✅ THE SETUP IS THE TRIGGER — DO NOT REJECT FOR THESE
@@ -504,7 +522,7 @@ REASON: [≤40 words. Focus on: (a) {primary_htf_label} trend alignment vs signa
 **Penalty cap:** combined penalty from market context (RSI, ADX, regime, MTF) is capped at −2 total. Do NOT stack all context items into a cumulative −4 to −6.
 
 **REJECTION CRITERIA (any one = REJECT, assign matching REASON_CODE):**
-- **{primary_htf_label} trend opposes signal AND MTF Confluence < 0.6** (skip if MTF Confluence ≥ 0.6 or "All TFs aligned") → SC_HTF_OPPOSE
+- **{primary_htf_label} trend opposes signal AND MTF Confluence < 0.6** (skip if MTF Confluence ≥ 0.6 or "All TFs aligned") → SC_HTF_OPPOSE{' — see EURUSD-SPECIFIC RULE OVERRIDE above: for EURUSD pullback entries with clear path and low adverse excursion risk, downgrade to −2 penalty instead of rejection' if pair == 'EURUSD' else ''}
 - **Entry within 2 pips of a MAJOR multi-touch S/R level AND {primary_htf_label} opposes signal AND no reversal confirmation candle** (all three must be true) → SC_AT_RESISTANCE
 - **S/R on trigger TF blocks >75% of path to target AND {primary_htf_label} opposes signal** → SC_PATH_BLOCKED
 - **MOMENTUM entry: reversal candle on trigger TF (engulfing/pin bar against direction) AND {primary_htf_label} opposes signal** (reversal candle alone is −2 penalty) → SC_MOMENTUM_REVERSAL
