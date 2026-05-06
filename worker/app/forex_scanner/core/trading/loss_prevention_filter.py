@@ -129,6 +129,10 @@ class LossPreventionFilter:
             'STRATEGY_CONFIG_DATABASE_URL',
             'postgresql://postgres:postgres@postgres:5432/strategy_config'
         )
+        self._forex_db_url = os.getenv(
+            'DATABASE_URL',
+            'postgresql://postgres:postgres@postgres:5432/forex'
+        )
         self._config_set = os.getenv('TRADING_CONFIG_SET', 'live')
         self._trading_env = os.getenv('TRADING_ENVIRONMENT', 'demo')
 
@@ -435,6 +439,8 @@ class LossPreventionFilter:
                 return self._check_day_of_week(cond, signal, signal_timestamp) and self._check_hours(cond, signal, signal_timestamp)
             elif rule_type == 'date_block':
                 return self._check_date_block(cond, signal, signal_timestamp, rule)
+            elif rule_type == 'missed_signal_chase':
+                return self._check_missed_signal_chase(cond, signal)
             else:
                 logger.debug(f"🛡️ LPF: Unknown rule type '{rule_type}' in {rule['rule_name']}")
                 return False
@@ -682,6 +688,112 @@ class LossPreventionFilter:
 
         max_er = float(cond.get('max_efficiency_ratio', 0.30))
         return er < max_er
+
+    def _check_missed_signal_chase(self, cond: Dict, signal: Dict) -> bool:
+        """Block MOMENTUM entries that chase a recently rejected/blocked signal after
+        price has already moved significantly in that direction.
+
+        Condition config fields:
+            epic_contains       : substring to match epic (e.g. 'EURUSD')
+            lookback_hours      : window to search for prior signals (default 2)
+            move_threshold_pips : pips moved from prior entry to trigger block (default 10)
+            pip_scale           : 10000 for majors, 100 for JPY (default 10000)
+            strategy            : strategy to scope the history query (default 'SMC_SIMPLE')
+
+        PULLBACK entries are always exempt — a pullback to the prior area means price
+        already reset, which is exactly the condition we're waiting for.
+        """
+        if not PSYCOPG2_AVAILABLE:
+            return False
+
+        # Pair filter
+        epic = signal.get('epic', '')
+        epic_filter = cond.get('epic_contains', '')
+        if epic_filter and epic_filter not in epic:
+            return False
+
+        # Resolve direction (BULL→BUY, BEAR→SELL)
+        sig_dir = signal.get('signal_type', '').upper()
+        if sig_dir == 'BULL':
+            sig_dir = 'BUY'
+        elif sig_dir == 'BEAR':
+            sig_dir = 'SELL'
+        if sig_dir not in ('BUY', 'SELL'):
+            return False
+
+        # PULLBACK entries self-filter — they already represent a price reset
+        strategy_indicators = signal.get('strategy_indicators', {})
+        tier3 = strategy_indicators.get('tier3_entry', {})
+        entry_type = (tier3.get('entry_type') or signal.get('entry_type', '')).upper()
+        if entry_type == 'PULLBACK':
+            return False
+
+        # New signal's entry price
+        try:
+            new_entry = float(signal.get('entry_price') or signal.get('price') or 0)
+        except (TypeError, ValueError):
+            return False
+        if not new_entry:
+            return False
+
+        # Parameters
+        lookback_hours = int(cond.get('lookback_hours', 2))
+        move_threshold_pips = float(cond.get('move_threshold_pips', 10))
+        pip_scale = float(cond.get('pip_scale', 10000))
+        strategy_filter = cond.get('strategy', 'SMC_SIMPLE')
+        environment = os.getenv('TRADING_ENVIRONMENT', 'demo')
+
+        # alert_history stores BULL/BEAR (not BUY/SELL)
+        alt_dir = 'BULL' if sig_dir == 'BUY' else 'BEAR'
+
+        try:
+            conn = psycopg2.connect(self._forex_db_url)
+            try:
+                with conn.cursor(cursor_factory=RealDictCursor) as cur:
+                    cur.execute("""
+                        SELECT entry_price, price
+                        FROM alert_history
+                        WHERE epic = %s
+                          AND signal_type IN (%s, %s)
+                          AND strategy = %s
+                          AND environment = %s
+                          AND (claude_decision = 'REJECT' OR lpf_would_block = TRUE)
+                          AND created_at >= NOW() - (%s * INTERVAL '1 hour')
+                        ORDER BY created_at DESC
+                        LIMIT 5
+                    """, (epic, sig_dir, alt_dir, strategy_filter, environment, lookback_hours))
+                    rows = cur.fetchall()
+            finally:
+                conn.close()
+        except Exception as e:
+            logger.debug(f"🛡️ LPF missed_signal_chase: DB query failed: {e}")
+            return False
+
+        if not rows:
+            return False
+
+        for row in rows:
+            try:
+                prior_entry = float(row.get('entry_price') or row.get('price') or 0)
+            except (TypeError, ValueError):
+                continue
+            if not prior_entry:
+                continue
+
+            pips_moved = (
+                (new_entry - prior_entry) * pip_scale if sig_dir == 'BUY'
+                else (prior_entry - new_entry) * pip_scale
+            )
+
+            if pips_moved >= move_threshold_pips:
+                logger.info(
+                    f"🛡️ LPF missed_signal_chase: {epic} {sig_dir} | "
+                    f"prior rejected entry {prior_entry:.5f} → new entry {new_entry:.5f} | "
+                    f"{pips_moved:.1f} pips chased (threshold {move_threshold_pips})"
+                )
+                return True
+
+        return False
 
     # ---- Helpers ----
 
