@@ -339,10 +339,16 @@ class OrderExecutor:
                     stop_distance = int(round(price_distance / pip_value))
                     self.logger.info(f"📏 Calculated stop_distance from price levels: {stop_distance} pips (entry={entry_price:.5f}, SL={stop_loss:.5f})")
                 else:
-                    # Fallback to default
-                    stop_distance = self.default_stop_distance
-                    self.logger.warning(f"⚠️ No stop_distance or stop_loss in signal, using default: {stop_distance} pips")
-                    self.logger.debug(f"   Signal keys: {list(signal.keys())}")
+                    # Try risk_pips / stop_loss_pips (used by MEAN_REVERSION, IMPULSE_FADE, etc.)
+                    risk_pips = signal.get('risk_pips') or signal.get('stop_loss_pips')
+                    if risk_pips:
+                        stop_distance = int(round(float(risk_pips)))
+                        self.logger.info(f"📏 Using signal risk_pips as stop_distance: {stop_distance} pips")
+                    else:
+                        # Fallback to default
+                        stop_distance = self.default_stop_distance
+                        self.logger.warning(f"⚠️ No stop_distance or stop_loss in signal, using default: {stop_distance} pips")
+                        self.logger.debug(f"   Signal keys: {list(signal.keys())}")
             else:
                 self.logger.debug(f"📋 Using strategy-provided stop_distance: {stop_distance} pips")
 
@@ -360,9 +366,15 @@ class OrderExecutor:
                     limit_distance = int(round(price_distance / pip_value))
                     self.logger.info(f"📏 Calculated limit_distance from price levels: {limit_distance} pips (entry={entry_price:.5f}, TP={take_profit:.5f})")
                 else:
-                    # Fallback to R:R ratio
-                    limit_distance = int(stop_distance * self.default_risk_reward)
-                    self.logger.warning(f"⚠️ No limit_distance or take_profit in signal, using default R:R: {limit_distance} pips")
+                    # Try reward_pips / take_profit_pips (used by MEAN_REVERSION, IMPULSE_FADE, etc.)
+                    reward_pips = signal.get('reward_pips') or signal.get('take_profit_pips')
+                    if reward_pips:
+                        limit_distance = int(round(float(reward_pips)))
+                        self.logger.info(f"📏 Using signal reward_pips as limit_distance: {limit_distance} pips")
+                    else:
+                        # Fallback to R:R ratio
+                        limit_distance = int(stop_distance * self.default_risk_reward)
+                        self.logger.warning(f"⚠️ No limit_distance or take_profit in signal, using default R:R: {limit_distance} pips")
             else:
                 self.logger.debug(f"📋 Using strategy-provided limit_distance: {limit_distance} pips")
 
