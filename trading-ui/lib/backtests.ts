@@ -76,6 +76,29 @@ export function formatDuration(seconds: number | null | undefined) {
   return `${mins}m ${secs}s`;
 }
 
+export const STRATEGY_METADATA_ENDPOINT: Record<BacktestStrategy, string> = {
+  SMC_SIMPLE: "/trading/api/settings/strategy/smc/metadata",
+  SMC_MOMENTUM: "/trading/api/settings/strategy/smc-momentum/metadata",
+  MEAN_REVERSION: "/trading/api/settings/strategy/mean-reversion/metadata",
+  IMPULSE_FADE: "/trading/api/settings/strategy/impulse-fade/metadata",
+  RANGE_FADE: "/trading/api/settings/strategy/range-fade/metadata",
+  XAU_GOLD: "/trading/api/settings/strategy/xau-gold/metadata",
+};
+
+export function getStrategyLabel(strategyName: string | null | undefined): string {
+  if (!strategyName) return "N/A";
+  return BACKTEST_STRATEGY_LABELS[strategyName as BacktestStrategy] ?? strategyName;
+}
+
+export function getStrategyBadgeStyle(strategyName: string | null | undefined): { background: string; color: string; borderColor: string } {
+  if (strategyName === "XAU_GOLD") return { background: "#fff7ed", color: "#9a3412", borderColor: "#fed7aa" };
+  if (strategyName === "MEAN_REVERSION") return { background: "#ecfdf5", color: "#047857", borderColor: "#a7f3d0" };
+  if (strategyName === "IMPULSE_FADE") return { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" };
+  if (strategyName === "RANGE_FADE") return { background: "#f5f3ff", color: "#6d28d9", borderColor: "#ddd6fe" };
+  if (strategyName?.startsWith("SMC")) return { background: "#f8fafc", color: "#334155", borderColor: "#cbd5e1" };
+  return { background: "#f3f4f6", color: "#4b5563", borderColor: "#d1d5db" };
+}
+
 export function getEpicOptions() {
   return EPIC_OPTIONS.map(([label, value]) => ({ label, value }));
 }
