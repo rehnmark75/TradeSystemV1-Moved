@@ -10,7 +10,7 @@ def build_prompt(signal: Dict, has_chart: bool = True) -> str:
     """
     Vision prompt for IMPULSE_FADE (large 5m candle body exhaustion fade).
 
-    Edge: In the late-US session (18-22 UTC), large-body 5m candles (≥2.2×ATR14) tend
+    Edge: In the late-US session (20-22 UTC), large-body 5m candles (≥2.2×ATR14) tend
     to exhaust rather than continue. Entry fades the impulse at the close of that candle.
     No HTF alignment — purely behavioural (late-session stop-run exhaustion).
     Inverted R:R is allowed and compensated by the high WR thesis.
@@ -66,7 +66,7 @@ The chart shows the 5m timeframe — this is a single-timeframe strategy, so foc
 - {approve_if}
 - Surrounding context shows choppy / ranging price before the spike (no established trend)
 - The impulse candle ran into a visible S/R level, prior high/low, or round number
-- Session context: late-US hours (18-22 UTC) — low-liquidity stop-run environment
+- Session context: late-US hours (20-22 UTC) — low-liquidity stop-run environment
 
 ❌ **REJECT if:**
 - {reject_if}
@@ -85,7 +85,7 @@ The chart shows the 5m timeframe — this is a single-timeframe strategy, so foc
 
 **STRATEGY THESIS — READ FIRST (IMPULSE_FADE v1)**
 IMPULSE_FADE fires when a 5m candle has an unusually large body (≥2.2× ATR14) during the late-US
-session (18-22 UTC). The thesis: large impulsive moves in low-liquidity late-US hours frequently
+session (20-22 UTC). The thesis: large impulsive moves in low-liquidity late-US hours frequently
 exhaust rather than continue — they are often stop-hunts or overextensions that snap back.
 
 Entry is a COUNTER-DIRECTION trade at the close of the impulse candle:
@@ -135,7 +135,7 @@ These ARE the IMPULSE_FADE conditions — not red flags:
 ═══════════════════════════════════════════════════════════════
 • Impulse Body: {fmt(body_pips)} pips  ({fmt(body_multiplier)}× ATR14)
 • ATR14 at signal: {fmt(atr_pips)} pips
-• Session Hour (UTC): {session_hour}:00  (valid window: 18-22 UTC)
+• Session Hour (UTC): {session_hour}:00  (valid window: 20-22 UTC)
 {chart_instruction}
 ═══════════════════════════════════════════════════════════════
 📋 REQUIRED RESPONSE FORMAT

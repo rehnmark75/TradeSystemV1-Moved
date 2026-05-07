@@ -39,7 +39,7 @@ class ImpulseFadeConfig:
     time_stop_candles: int = 36
 
     # Confidence
-    min_confidence: float = 0.50
+    min_confidence: float = 0.58
     max_confidence: float = 0.85
 
     # Cooldown
@@ -172,7 +172,7 @@ class ImpulseFadeConfigService:
         now = datetime.now()
         if (self._config is None
                 or self._last_refresh is None
-                or (now - self._last_refresh).seconds > self._cache_ttl_seconds):
+                or (now - self._last_refresh).total_seconds() > self._cache_ttl_seconds):
             self._config = ImpulseFadeConfig.from_database()
             self._last_refresh = now
         return self._config

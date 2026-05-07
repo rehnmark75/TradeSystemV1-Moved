@@ -11,7 +11,7 @@ import pandas as pd
 import numpy as np
 import logging
 from typing import Any, Dict, List, Optional, Union, Tuple
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 try:
     from .database import DatabaseManager
@@ -884,7 +884,7 @@ class SignalDetector:
                     and ImpulseFadeConfigService.get_instance().get_config().is_pair_enabled(epic)):
                 try:
                     self.logger.debug(f"🔍 [IMPULSE_FADE] Starting detection for {epic}")
-                    if_signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe)
+                    if_signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=datetime.now(timezone.utc))
                     individual_results['impulse_fade'] = if_signal
                     if if_signal:
                         all_signals.append(if_signal)

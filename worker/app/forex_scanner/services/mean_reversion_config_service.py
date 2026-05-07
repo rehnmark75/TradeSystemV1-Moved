@@ -243,7 +243,7 @@ class MeanReversionConfigService:
         now = datetime.now()
         if (self._config is None
                 or self._last_refresh is None
-                or (now - self._last_refresh).seconds > self._cache_ttl_seconds):
+                or (now - self._last_refresh).total_seconds() > self._cache_ttl_seconds):
             self._config = MeanReversionConfig.from_database()
             self._last_refresh = now
         return self._config
