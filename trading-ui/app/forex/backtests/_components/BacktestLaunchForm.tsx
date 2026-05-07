@@ -35,10 +35,10 @@ export default function BacktestLaunchForm({
   onRefreshWorkspace,
 }: Props) {
   return (
-    <div className="panel table-panel">
+    <div className="panel table-panel backtest-launch-form">
       <div className="chart-title">Launch Backtest</div>
 
-      <div className="forex-controls" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+      <div className="backtest-launch-grid">
         <div>
           <label>Pair</label>
           <select value={form.epic} onChange={(e) => onFormChange({ epic: e.target.value })}>
@@ -128,8 +128,8 @@ export default function BacktestLaunchForm({
         </div>
       </div>
 
-      <div className="forex-controls" style={{ gridTemplateColumns: "repeat(3, minmax(0, 1fr))" }}>
-        <label className="forex-badge" style={{ justifyContent: "space-between" }}>
+      <div className="backtest-toggle-grid">
+        <label className="forex-badge backtest-toggle">
           Parallel
           <input
             type="checkbox"
@@ -137,7 +137,7 @@ export default function BacktestLaunchForm({
             onChange={(e) => onFormChange({ parallel: e.target.checked })}
           />
         </label>
-        <label className="forex-badge" style={{ justifyContent: "space-between" }}>
+        <label className="forex-badge backtest-toggle">
           Generate Chart
           <input
             type="checkbox"
@@ -145,7 +145,7 @@ export default function BacktestLaunchForm({
             onChange={(e) => onFormChange({ generate_chart: e.target.checked })}
           />
         </label>
-        <label className="forex-badge" style={{ justifyContent: "space-between" }}>
+        <label className="forex-badge backtest-toggle">
           Pipeline Mode
           <input
             type="checkbox"
@@ -153,7 +153,7 @@ export default function BacktestLaunchForm({
             onChange={(e) => onFormChange({ pipeline_mode: e.target.checked })}
           />
         </label>
-        <label className="forex-badge" style={{ justifyContent: "space-between" }}>
+        <label className="forex-badge backtest-toggle">
           Historical Intelligence
           <input
             type="checkbox"
@@ -164,7 +164,7 @@ export default function BacktestLaunchForm({
       </div>
 
       {form.parallel ? (
-        <div className="forex-controls" style={{ gridTemplateColumns: "repeat(2, minmax(0, 1fr))" }}>
+        <div className="backtest-launch-grid">
           <div>
             <label>Workers</label>
             <input
@@ -188,9 +188,9 @@ export default function BacktestLaunchForm({
         </div>
       ) : null}
 
-      <div className="panel table-panel" style={{ marginTop: 16 }}>
+      <div className="panel table-panel backtest-variation-panel">
         <div className="chart-title">Parameter Variation</div>
-        <label className="forex-badge" style={{ justifyContent: "space-between", marginBottom: 12 }}>
+        <label className="forex-badge backtest-toggle backtest-variation-toggle">
           Enable Variation Run
           <input
             type="checkbox"

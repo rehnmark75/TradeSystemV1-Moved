@@ -2323,6 +2323,120 @@ table {
   margin-bottom: 18px;
 }
 
+.backtest-launch-form {
+  min-width: 0;
+}
+
+.backtest-launch-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(180px, 1fr));
+  gap: 14px;
+  margin-bottom: 16px;
+}
+
+.backtest-launch-grid > div {
+  min-width: 0;
+}
+
+.backtest-toggle-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(136px, max-content));
+  gap: 12px;
+  align-items: center;
+  margin-bottom: 16px;
+}
+
+.backtest-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  min-height: 38px;
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.backtest-launch-form .forex-badge {
+  border-color: rgba(217, 192, 137, 0.24);
+  background: linear-gradient(180deg, rgba(20, 34, 54, 0.98), rgba(10, 22, 38, 0.98));
+  color: #d9c089;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.04),
+    0 8px 18px rgba(2, 8, 18, 0.18);
+}
+
+.backtest-launch-form .forex-badge strong {
+  color: #f2dfbd;
+}
+
+.backtest-toggle:hover {
+  border-color: rgba(240, 217, 181, 0.42);
+  background: linear-gradient(180deg, rgba(28, 45, 68, 0.98), rgba(13, 27, 45, 0.98));
+  color: #f2dfbd;
+}
+
+.backtest-toggle input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  flex: 0 0 14px;
+  padding: 0;
+  margin: 0;
+  accent-color: #d8b57b;
+}
+
+.backtest-variation-panel {
+  margin-top: 16px;
+}
+
+.backtest-variation-toggle {
+  width: 100%;
+  justify-content: space-between;
+  margin-bottom: 12px;
+  border-radius: 12px;
+  white-space: normal;
+}
+
+.backtests-page .alert-history-button {
+  border-color: rgba(217, 192, 137, 0.28);
+  background: linear-gradient(180deg, rgba(17, 31, 49, 0.98), rgba(10, 22, 38, 0.98));
+  color: #e8d8bc;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.06),
+    0 8px 18px rgba(2, 8, 18, 0.22);
+}
+
+.backtests-page .alert-history-button:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: rgba(240, 217, 181, 0.52);
+  background: linear-gradient(180deg, rgba(26, 42, 64, 0.99), rgba(13, 27, 45, 0.99));
+  color: #fff4df;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 0 0 1px rgba(217, 192, 137, 0.1),
+    0 12px 24px rgba(2, 8, 18, 0.26);
+}
+
+.backtests-page .alert-history-button-active {
+  border-color: rgba(240, 217, 181, 0.7);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0.06) 18%, transparent 42%),
+    linear-gradient(180deg, #f6e4c4 0%, #d8b57b 100%);
+  color: #172033;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.36),
+    0 0 0 1px rgba(240, 217, 181, 0.16),
+    0 14px 28px rgba(42, 29, 8, 0.24);
+}
+
+.backtests-page .alert-history-button-active:hover:not(:disabled) {
+  border-color: rgba(255, 238, 204, 0.86);
+  background:
+    linear-gradient(90deg, rgba(255, 255, 255, 0.2), rgba(255, 255, 255, 0.08) 18%, transparent 42%),
+    linear-gradient(180deg, #fff0d0 0%, #dfbf86 100%);
+  color: #111a2d;
+}
+
 .chart-panel {
   display: flex;
   flex-direction: column;
@@ -2619,6 +2733,19 @@ table {
   .table-panel {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
+  }
+
+  .backtest-launch-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .backtest-toggle-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .backtest-toggle {
+    justify-content: space-between;
+    width: 100%;
   }
 
   .forex-table {
