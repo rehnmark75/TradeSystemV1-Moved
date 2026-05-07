@@ -73,6 +73,7 @@ class RangeFadeConfig:
     allow_neutral_htf: bool = False
 
     max_current_range_pips: float = 12.0
+    adx_ceiling: float = 25.0
     min_confidence: float = 0.52
     max_confidence: float = 0.84
 

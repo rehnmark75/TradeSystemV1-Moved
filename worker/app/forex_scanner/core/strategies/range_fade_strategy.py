@@ -194,6 +194,12 @@ class RangeFadeStrategy(StrategyInterface):
             self._reject(epic, "bar_range_too_wide")
             return None
 
+        adx_val = self._get_adx(df)
+        adx_ceil = getattr(cfg, "adx_ceiling", 25.0)
+        if adx_val is not None and adx_val > adx_ceil:
+            self._reject(epic, "adx_ceiling", details={"adx": round(adx_val, 1), "ceiling": adx_ceil})
+            return None
+
         prior_high = high.rolling(cfg.range_lookback_bars).max().shift(1)
         prior_low = low.rolling(cfg.range_lookback_bars).min().shift(1)
         range_high = self._safe_float(prior_high.iloc[-1])
