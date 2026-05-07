@@ -73,6 +73,11 @@ def _apply_config_override(config: ImpulseFadeConfig, overrides: Optional[Dict[s
             else:
                 new_val = value
             setattr(config, key, new_val)
+            # Per-pair DB rows take precedence over the global attribute in get_for_pair(),
+            # so also overwrite the key in every pair's row to ensure --override wins.
+            for pair_row in config._pair_overrides.values():
+                if key in pair_row:
+                    pair_row[key] = new_val
         except Exception as exc:
             logger.warning("IMPULSE_FADE override failed for %s=%r: %s", key, value, exc)
 
