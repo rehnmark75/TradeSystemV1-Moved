@@ -238,14 +238,21 @@ class ImpulseFadeStrategy(StrategyInterface):
             utc_hour = eval_ts.hour
 
             # ── Session gate ─────────────────────────────────────────────
-            start_h = cfg.session_start_hour
-            end_h = cfg.session_end_hour
-            in_session = start_h <= utc_hour <= end_h
+            start_h = cfg.get_pair_session_start_hour(pair_key)
+            end_h = cfg.get_pair_session_end_hour(pair_key)
+            in_window_1 = start_h <= utc_hour <= end_h
+            start_h_2 = cfg.get_pair_session_start_hour_2(pair_key)
+            end_h_2 = cfg.get_pair_session_end_hour_2(pair_key)
+            in_window_2 = (start_h_2 is not None and end_h_2 is not None
+                           and start_h_2 <= utc_hour <= end_h_2)
+            in_session = in_window_1 or in_window_2
             if not in_session:
                 self.logger.debug("[IMPULSE_FADE] %s: outside session (hour=%d)", pair_key, utc_hour)
-                self._reject("SESSION", f"hour={utc_hour} outside {start_h}-{end_h}",
+                win2_str = f" or {start_h_2}-{end_h_2}" if start_h_2 is not None else ""
+                self._reject("SESSION", f"hour={utc_hour} outside {start_h}-{end_h}{win2_str}",
                              pair_key, pair or pair_key, hour_utc=utc_hour,
-                             details={"hour": utc_hour, "session_start": start_h, "session_end": end_h})
+                             details={"hour": utc_hour, "session_start": start_h, "session_end": end_h,
+                                      "session_start_2": start_h_2, "session_end_2": end_h_2})
                 return None
 
             # ── Cooldown check ────────────────────────────────────────────

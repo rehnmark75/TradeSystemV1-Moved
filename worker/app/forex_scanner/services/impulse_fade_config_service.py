@@ -28,6 +28,10 @@ class ImpulseFadeConfig:
     session_start_hour: int = 18
     session_end_hour: int = 22
 
+    # Optional second session window — None means disabled
+    session_start_hour_2: Optional[int] = None
+    session_end_hour_2: Optional[int] = None
+
     # ATR body threshold
     atr_body_multiplier: float = 2.2
     atr_period: int = 14
@@ -93,6 +97,20 @@ class ImpulseFadeConfig:
     def get_pair_cooldown_minutes(self, epic: str) -> int:
         return int(self.get_for_pair(epic, "signal_cooldown_minutes", self.signal_cooldown_minutes))
 
+    def get_pair_session_start_hour(self, epic: str) -> int:
+        return int(self.get_for_pair(epic, "session_start_hour", self.session_start_hour))
+
+    def get_pair_session_end_hour(self, epic: str) -> int:
+        return int(self.get_for_pair(epic, "session_end_hour", self.session_end_hour))
+
+    def get_pair_session_start_hour_2(self, epic: str) -> Optional[int]:
+        v = self.get_for_pair(epic, "session_start_hour_2", self.session_start_hour_2)
+        return int(v) if v is not None else None
+
+    def get_pair_session_end_hour_2(self, epic: str) -> Optional[int]:
+        v = self.get_for_pair(epic, "session_end_hour_2", self.session_end_hour_2)
+        return int(v) if v is not None else None
+
     # ------------------------------------------------------------------
     # DB loader
     # ------------------------------------------------------------------
@@ -135,7 +153,12 @@ class ImpulseFadeConfig:
                         v = float(v)
                     setattr(config, key, v)
 
-            cur.execute("SELECT * FROM impulse_fade_pair_overrides")
+            trading_env = os.getenv("TRADING_ENVIRONMENT", "demo")
+            config_id = 2 if trading_env == "live" else 3
+            cur.execute(
+                "SELECT * FROM impulse_fade_pair_overrides WHERE config_id = %s",
+                (config_id,),
+            )
             config._pair_overrides = {r["epic"]: dict(r) for r in cur.fetchall()}
 
             cur.close()
