@@ -558,6 +558,8 @@ This file controls:
 
 ## 🤖 Agent Configuration
 
+**MANDATORY: Always delegate to a specialist agent BEFORE responding** when the question or task matches any agent domain below. Do NOT answer inline first and then suggest an agent — delegate immediately. This applies to questions ("how does X work?"), analysis requests ("why is Y losing?"), and implementation tasks alike. If multiple agents apply, spawn them in parallel.
+
 **Automatic Agent Usage:**
 
 - **trading-strategy-analyst**: Automatically use this agent for any task involving:
