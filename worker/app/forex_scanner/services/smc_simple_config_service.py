@@ -1172,6 +1172,22 @@ class SMCSimpleConfig:
                 return float(override['scalp_fib_pullback_min'])
         return None
 
+    def get_pair_session_scalp_fib_max(self, epic: str, session: str) -> Optional[float]:
+        """
+        Get session-aware per-pair scalp micro-pullback maximum threshold.
+
+        Reads 'session_fib_max' JSONB from parameter_overrides, e.g.:
+            {"new_york": 1.0, "london": 0.85}
+
+        Falls back to global scalp_fib_pullback_max if not set.
+        """
+        if epic in self._pair_overrides:
+            po = self._pair_overrides[epic].get('parameter_overrides', {})
+            session_fib_max = po.get('session_fib_max')
+            if isinstance(session_fib_max, dict) and session in session_fib_max:
+                return float(session_fib_max[session])
+        return None
+
     def get_pair_scalp_require_rejection_candle(self, epic: str) -> Optional[bool]:
         """
         Get per-pair scalp rejection candle requirement override.

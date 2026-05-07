@@ -5066,6 +5066,18 @@ class SMCSimpleStrategy:
                 pair_override = self._db_config.get_pair_scalp_fib_pullback_min(epic)
                 if pair_override is not None:
                     pair_fib_min = pair_override
+                # v2.31.2: Session-aware fib_max — let deep pullbacks through for
+                # specific pair+session combos validated via rejection outcome analysis
+                try:
+                    ts = df['start_time'].iloc[-1]
+                    if hasattr(ts, 'to_pydatetime'):
+                        ts = ts.to_pydatetime()
+                    session = self._get_current_session(ts)
+                    session_max = self._db_config.get_pair_session_scalp_fib_max(epic, session)
+                    if session_max is not None:
+                        pair_fib_max = session_max
+                except Exception:
+                    pass
 
             if self.debug_logging:
                 self.logger.debug(f"   Micro-pullback ({lookback_bars} bars): high={micro_high:.5f}, low={micro_low:.5f}")
