@@ -15,7 +15,7 @@ import BacktestQueuedJobsTable from "./_components/BacktestQueuedJobsTable";
 import BacktestSummaryCards from "./_components/BacktestSummaryCards";
 
 const INITIAL_FORM: LaunchFormState = {
-  epic: "CS.D.EURUSD.MINI.IP",
+  epic: "CS.D.EURUSD.CEEM.IP",
   days: 14,
   strategy: "SMC_SIMPLE",
   timeframe: "15m",

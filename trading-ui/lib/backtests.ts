@@ -26,7 +26,7 @@ export const BACKTEST_STRATEGY_LABELS: Record<BacktestStrategy, string> = {
 export const GOLD_EPIC = "CS.D.CFEGOLD.CEE.IP";
 
 const EPIC_OPTIONS = [
-  ["EURUSD", "CS.D.EURUSD.MINI.IP"],
+  ["EURUSD", "CS.D.EURUSD.CEEM.IP"],
   ["GBPUSD", "CS.D.GBPUSD.MINI.IP"],
   ["USDJPY", "CS.D.USDJPY.MINI.IP"],
   ["AUDUSD", "CS.D.AUDUSD.MINI.IP"],

@@ -246,7 +246,9 @@ export async function GET(request: Request) {
         strategy,
         pair,
         strategies: ["All", ...filterStrategies],
-        epics: ["All", ...epicResult.rows.map((row) => row.epic)],
+        epics: ["All", ...[...new Set(epicResult.rows.map((row) =>
+          row.epic === "CS.D.EURUSD.MINI.IP" ? "CS.D.EURUSD.CEEM.IP" : row.epic
+        ))].sort()],
       },
       form_options: {
         pairs: getEpicOptions(),
