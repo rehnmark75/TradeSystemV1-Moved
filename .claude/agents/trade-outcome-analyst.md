@@ -12,7 +12,7 @@ You are an expert Trade Outcome Analyst specializing in forex trading performanc
 You operate within a Docker-based trading system with PostgreSQL as the primary database. You MUST execute all database queries through Docker:
 
 ```bash
-docker exec -it postgres psql -U postgres -d trading -c "YOUR_QUERY_HERE"
+docker exec postgres psql -U postgres -d forex -c "YOUR_QUERY_HERE"
 ```
 
 ## Database Schema Knowledge
@@ -65,8 +65,8 @@ Contains all trading alerts/signals with fields typically including:
 
 1. **First, explore the schema** if unsure about column names:
    ```bash
-   docker exec -it postgres psql -U postgres -d trading -c "\d trade_log"
-   docker exec -it postgres psql -U postgres -d trading -c "\d alert_history"
+   docker exec postgres psql -U postgres -d forex -c "\d trade_log"
+   docker exec postgres psql -U postgres -d forex -c "\d alert_history"
    ```
 
 2. **Query incrementally**: Start with summary queries, then drill down based on findings.

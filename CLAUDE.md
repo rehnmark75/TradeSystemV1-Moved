@@ -560,7 +560,13 @@ This file controls:
 
 **MANDATORY: Always delegate to a specialist agent BEFORE responding** when the question or task matches any agent domain below. Do NOT answer inline first and then suggest an agent — delegate immediately. This applies to questions ("how does X work?"), analysis requests ("why is Y losing?"), and implementation tasks alike. If multiple agents apply, spawn them in parallel.
 
+**Database Schema Reference**: All agents that write PostgreSQL queries should `Read` `.claude/agents/db-expert.md` first — it is the single source of truth for table schemas, column names, domain constants, and current pair configuration. Do not duplicate schema knowledge inline; reference that file instead.
+
 **Automatic Agent Usage:**
+
+- **db-expert**: Automatically use this agent for any task involving:
+  - Ad-hoc database queries, schema questions, data exploration, debugging data issues
+  - Keywords: query, database, table, column, SQL, schema, how many, show me, count, alert_history, trade_log, smc_simple_rejections, smc_simple_pair_overrides, loss_prevention_rules, trailing_pair_config
 
 - **trading-strategy-analyst**: Automatically use this agent for any task involving:
   - Strategy performance analysis, backtest result evaluation, trading strategy optimization
@@ -591,6 +597,30 @@ This file controls:
   - Financial database optimization, time series data, market microstructure
   - Keywords: market data, tick data, financial, forex, currency, price, quote, trade, order book, time series, OHLCV
   - File patterns: */market_data/*, */feeds/*, */financial/*, *market*.py, *price*.py, *forex*.py
+
+- **backtest-ablation-engineer**: Automatically use this agent for any task involving:
+  - Running backtests, ablation studies, gate isolation, permissive baseline analysis
+  - Interpreting backtest results with sample-size caution, comparing live vs backtest signals
+  - Keywords: backtest, ablation, bt.py, ablate, baseline, PF, profit factor, signals/month, gate, inverse-ablation, permissive
+  - File patterns: */scripts/ablate_*.py, *bt.py, *backtest_cli.py, *backtest*.py
+
+- **lpf-engineer**: Automatically use this agent for any task involving:
+  - Adding, removing, tuning, or auditing Loss Prevention Filter rules
+  - Understanding why specific trades were blocked by LPF, checking LPF coverage
+  - Keywords: LPF, loss prevention, penalty, rule, block, category A, category B, category C, condition_config, lpf_engineer
+  - File patterns: *loss_prevention*.py, *lpf*.py
+
+- **trailing-stop-engineer**: Automatically use this agent for any task involving:
+  - Modifying trailing stop stages, debugging trailing behavior, checking live vs backtest trailing config parity
+  - Scalp vs non-scalp trailing, break-even triggers, stage lock points, partial close
+  - Keywords: trailing, breakeven, break-even, stage1, stage2, stage3, lock, SL moved, trailing config, PAIR_TRAILING_CONFIGS, SCALP_TRAILING_CONFIGS
+  - File patterns: *trailing*.py, *config_trailing*.py, dev-app/config.py
+
+- **strategy-lifecycle-manager**: Automatically use this agent for any task involving:
+  - Promoting a strategy from monitor-only to demo or live trading
+  - Checking promotion gates, wiring new strategies into DB, pair enablement policy decisions
+  - Keywords: monitor-only, launch, promote, gate, pair enablement, is_traded, is_enabled, demo to live, strategy launch, forward gate
+  - File patterns: */migrations/*.sql, *pair_overrides*.sql
 
 ## 📈 System Status
 
