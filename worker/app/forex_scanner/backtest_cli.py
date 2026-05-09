@@ -392,6 +392,16 @@ Signal Display Format:
                  'Does NOT affect live trading configuration.'
         )
 
+        parser.add_argument(
+            '--pair-override',
+            action='append',
+            metavar='PAIR:PARAM=VALUE',
+            help='Override strategy parameter for a specific pair only (can be used multiple times). '
+                 'PAIR is a short name (EURUSD) or full epic. '
+                 'Example: --pair-override EURUSD:min_confidence=0.65 --pair-override GBPUSD:scalp_sl_pips=8. '
+                 'Takes precedence over --override for that pair.'
+        )
+
         # Snapshot support for persistent parameter configurations
         parser.add_argument(
             '--snapshot',
@@ -552,6 +562,78 @@ Signal Display Format:
         )
 
         return parser
+
+    # Short pair name → full epic (used for --pair-override CLI syntax)
+    _PAIR_EPIC_MAP = {
+        'EURUSD': 'CS.D.EURUSD.CEEM.IP',
+        'GBPUSD': 'CS.D.GBPUSD.MINI.IP',
+        'USDJPY': 'CS.D.USDJPY.MINI.IP',
+        'AUDUSD': 'CS.D.AUDUSD.MINI.IP',
+        'USDCHF': 'CS.D.USDCHF.MINI.IP',
+        'USDCAD': 'CS.D.USDCAD.MINI.IP',
+        'NZDUSD': 'CS.D.NZDUSD.MINI.IP',
+        'EURJPY': 'CS.D.EURJPY.MINI.IP',
+        'AUDJPY': 'CS.D.AUDJPY.MINI.IP',
+        'GBPJPY': 'CS.D.GBPJPY.MINI.IP',
+        'EURGBP': 'CS.D.EURGBP.MINI.IP',
+        'XAUUSD': 'CS.D.CFEGOLD.CEE.IP',
+    }
+
+    def _resolve_epic(self, pair_or_epic: str) -> str:
+        """Resolve short pair name (EURUSD) or full epic to canonical epic string."""
+        upper = pair_or_epic.upper()
+        if upper in self._PAIR_EPIC_MAP:
+            return self._PAIR_EPIC_MAP[upper]
+        return pair_or_epic  # Already a full epic
+
+    def _parse_pair_overrides(self, pair_override_args) -> dict:
+        """Parse --pair-override PAIR:PARAM=VALUE arguments.
+
+        Returns:
+            Dict mapping full epic string to flat param dict, or None.
+            e.g. {'CS.D.EURUSD.CEEM.IP': {'min_confidence': 0.65}}
+        """
+        if not pair_override_args:
+            return None
+
+        result = {}
+        for item in pair_override_args:
+            if ':' not in item:
+                print(f"⚠️ Invalid --pair-override format '{item}' - expected PAIR:PARAM=VALUE, skipping")
+                continue
+
+            pair_part, param_part = item.split(':', 1)
+            epic = self._resolve_epic(pair_part.strip())
+
+            if '=' not in param_part:
+                print(f"⚠️ Invalid --pair-override format '{item}' - expected PARAM=VALUE after colon, skipping")
+                continue
+
+            key, value = param_part.split('=', 1)
+            key = key.strip()
+            value = value.strip()
+
+            try:
+                if value.lower() in ('true', 'false'):
+                    typed_value = value.lower() == 'true'
+                elif '.' in value:
+                    typed_value = float(value)
+                else:
+                    typed_value = int(value)
+            except ValueError:
+                typed_value = value
+
+            if epic not in result:
+                result[epic] = {}
+            result[epic][key] = typed_value
+
+        if result:
+            print(f"🎯 Per-pair overrides parsed for {len(result)} pair(s):")
+            for epic, params in result.items():
+                for k, v in params.items():
+                    print(f"   - {epic}: {k}={v} ({type(v).__name__})")
+
+        return result if result else None
 
     def _parse_overrides(self, override_args) -> dict:
         """
@@ -990,6 +1072,18 @@ Signal Display Format:
                     print(f"   (merged with {len(inline_overrides)} inline overrides)")
                 else:
                     config_override = inline_overrides
+
+            # Parse per-pair overrides and store under reserved key '_pair_overrides'
+            pair_overrides = self._parse_pair_overrides(getattr(args, 'pair_override', None))
+            if pair_overrides:
+                if config_override is None:
+                    config_override = {}
+                existing = config_override.get('_pair_overrides', {})
+                for epic, params in pair_overrides.items():
+                    if epic not in existing:
+                        existing[epic] = {}
+                    existing[epic].update(params)
+                config_override['_pair_overrides'] = existing
 
             # Handle scalp mode with VSL emulation
             if getattr(args, 'scalp', False):

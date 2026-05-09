@@ -922,6 +922,14 @@ class SMCSimpleStrategy:
             self._configure_scalp_mode()
 
         self.logger.info(f"   Total overrides applied: {overrides_applied}")
+
+        # Per-pair test overrides: inject into config service so get_for_pair() picks them up
+        if '_pair_overrides' in self._config_override and self._using_database_config:
+            raw = self._config_override['_pair_overrides']
+            if isinstance(raw, dict) and raw and hasattr(self, '_config_service') and self._config_service:
+                self._config_service.inject_backtest_pair_overrides(raw)
+                self.logger.info(f"   [PAIR-OVERRIDE] Injected per-pair test overrides for {len(raw)} pair(s)")
+
         self.logger.info("=" * 60)
 
     def _load_scalp_mode_config(self, config):

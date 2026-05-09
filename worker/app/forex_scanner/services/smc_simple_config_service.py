@@ -1756,6 +1756,9 @@ class SMCSimpleConfigService:
         self._cache_timestamp: Optional[datetime] = None
         self._last_known_good: Optional[SMCSimpleConfig] = None
 
+        # Backtest-only per-pair overrides (survive cache refreshes)
+        self._backtest_pair_overrides: Dict[str, Dict[str, Any]] = {}
+
         # Load initial configuration
         self._load_initial_config()
 
@@ -1797,6 +1800,37 @@ class SMCSimpleConfigService:
             self._cache_timestamp = datetime.now()
             logger.info("Using default SMC Simple config")
 
+    def inject_backtest_pair_overrides(self, pair_overrides: Dict[str, Dict[str, Any]]) -> None:
+        """Inject per-pair test overrides for backtesting.
+
+        Values are stored on the service instance so they survive TTL-based cache
+        refreshes during long backtest runs. They are also applied immediately to the
+        active cached config so that strategy._db_config (which references the same
+        SMCSimpleConfig object) picks them up without waiting for a get_config() call.
+
+        Args:
+            pair_overrides: Dict mapping full epic string to a flat dict of params,
+                e.g. {'CS.D.EURUSD.CEEM.IP': {'min_confidence': 0.65, 'scalp_sl_pips': 8}}
+        """
+        with self._lock:
+            for epic, overrides in pair_overrides.items():
+                if epic not in self._backtest_pair_overrides:
+                    self._backtest_pair_overrides[epic] = {}
+                self._backtest_pair_overrides[epic].update(overrides)
+
+            # Apply immediately to the active cached config (in-place — strategy._db_config
+            # holds a reference to the same object, so it sees the update instantly)
+            if self._cached_config is not None:
+                for epic, overrides in self._backtest_pair_overrides.items():
+                    if epic not in self._cached_config._pair_overrides:
+                        self._cached_config._pair_overrides[epic] = {'parameter_overrides': {}}
+                    self._cached_config._pair_overrides[epic].update(overrides)
+
+            logger.info(
+                f"🧪 Injected backtest pair overrides for {len(pair_overrides)} pair(s): "
+                + ", ".join(f"{e}={list(v.keys())}" for e, v in pair_overrides.items())
+            )
+
     def get_config(self, force_refresh: bool = False) -> SMCSimpleConfig:
         """
         Get current configuration, refreshing from DB if needed.
@@ -1822,6 +1856,13 @@ class SMCSimpleConfigService:
 
             if self._cached_config is None:
                 raise RuntimeError("No configuration available - database required")
+
+            # Merge backtest pair overrides into cached config (survives cache refreshes)
+            if self._backtest_pair_overrides:
+                for epic, overrides in self._backtest_pair_overrides.items():
+                    if epic not in self._cached_config._pair_overrides:
+                        self._cached_config._pair_overrides[epic] = {'parameter_overrides': {}}
+                    self._cached_config._pair_overrides[epic].update(overrides)
 
             return self._cached_config
 

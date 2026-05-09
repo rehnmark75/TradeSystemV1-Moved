@@ -106,6 +106,13 @@ def main():
                 processed_args.append(args[i])
                 print(f"🧪 Override: {args[i]}")
 
+            # Handle --pair-override flags (PAIR:PARAM=VALUE, can be used multiple times)
+            elif arg == "--pair-override" and i + 1 < len(args):
+                processed_args.append(arg)
+                i += 1
+                processed_args.append(args[i])
+                print(f"🎯 Pair override: {args[i]}")
+
             # Handle --snapshot flag for loading saved parameter configs
             elif arg == "--snapshot" and i + 1 < len(args):
                 processed_args.append(arg)
