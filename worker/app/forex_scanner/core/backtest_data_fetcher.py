@@ -328,10 +328,48 @@ _BACKTEST_EPIC_ALIASES: dict = {
 # Reverse map: historical epic -> live epic (used to translate results back if needed)
 _BACKTEST_EPIC_ALIASES_REVERSE: dict = {v: k for k, v in _BACKTEST_EPIC_ALIASES.items()}
 
+# Coverage cache: aliased epic -> max(start_time) in ig_candles_backtest.
+# Populated once by _load_backtest_epic_coverage() on first BacktestDataFetcher init.
+# If a backtest start date falls after the alias coverage end, the original epic is
+# used instead (e.g. CEE.IP has live-streamed data in ig_candles_backtest from Jan 2026).
+_BACKTEST_EPIC_COVERAGE: dict = {}
 
-def _resolve_backtest_epic(epic: str) -> str:
-    """Return the historical epic to use for ig_candles_backtest lookups."""
-    return _BACKTEST_EPIC_ALIASES.get(epic, epic)
+
+def _load_backtest_epic_coverage(db_manager) -> None:
+    """Populate _BACKTEST_EPIC_COVERAGE from ig_candles_backtest (runs once per process)."""
+    global _BACKTEST_EPIC_COVERAGE
+    if _BACKTEST_EPIC_COVERAGE:
+        return
+    try:
+        aliases = list(_BACKTEST_EPIC_ALIASES.values())
+        placeholders = ', '.join(f"'{a}'" for a in aliases)
+        df = db_manager.execute_query(
+            f"SELECT epic, MAX(start_time) AS max_t FROM ig_candles_backtest "
+            f"WHERE epic IN ({placeholders}) GROUP BY epic"
+        )
+        for _, row in df.iterrows():
+            _BACKTEST_EPIC_COVERAGE[row['epic']] = row['max_t']
+    except Exception:
+        pass  # Coverage unknown — alias always used (safe fallback)
+
+
+def _resolve_backtest_epic(epic: str, backtest_start: datetime = None) -> str:
+    """Return the historical epic to use for ig_candles_backtest lookups.
+
+    If the aliased epic's data doesn't reach backtest_start, fall back to the
+    original epic (which may have more-recent data streamed into ig_candles_backtest).
+    """
+    alias = _BACKTEST_EPIC_ALIASES.get(epic)
+    if alias is None:
+        return epic
+    if backtest_start and alias in _BACKTEST_EPIC_COVERAGE:
+        coverage_end = _BACKTEST_EPIC_COVERAGE[alias]
+        # Make both tz-naive for comparison
+        start_naive = backtest_start.replace(tzinfo=None) if hasattr(backtest_start, 'tzinfo') else backtest_start
+        end_naive = coverage_end.replace(tzinfo=None) if hasattr(coverage_end, 'tzinfo') else coverage_end
+        if start_naive > end_naive:
+            return epic  # original epic has newer data in ig_candles_backtest
+    return alias
 
 
 class BacktestDataFetcher(DataFetcher):
@@ -399,7 +437,9 @@ class BacktestDataFetcher(DataFetcher):
 
             # Translate live epics to their historical aliases in ig_candles_backtest.
             # e.g. CS.D.CFEGOLD.CEE.IP -> CS.D.CFEGOLD.KAGGLE.IP (Dukascopy backfill).
-            cache_epics = [_resolve_backtest_epic(e) for e in epics] if epics else epics
+            # Pass start_date so coverage-limited aliases fall back to the original epic.
+            _load_backtest_epic_coverage(db_manager)
+            cache_epics = [_resolve_backtest_epic(e, start_date) for e in epics] if epics else epics
 
             # XAU/Gold needs 880h (~37 days) lookback for EMA200 + ATR-percentile warmup.
             # Use the larger of 168h (standard 7-day warmup) and 880h when gold is present.
@@ -611,7 +651,7 @@ class BacktestDataFetcher(DataFetcher):
             if hasattr(self, 'current_backtest_time') and self.current_backtest_time:
                 # Resolve epic alias: live epics (e.g. CEE gold) map to their historical
                 # ig_candles_backtest counterpart (e.g. KAGGLE gold) for all data lookups.
-                hist_epic = _resolve_backtest_epic(epic)
+                hist_epic = _resolve_backtest_epic(epic, getattr(self, 'backtest_start_date', None))
 
                 # PERFORMANCE FIX: Check resampled cache first to avoid expensive re-resampling
                 # Key uses hist_epic so alias and non-alias calls share the same cache entry.
@@ -881,7 +921,7 @@ class BacktestDataFetcher(DataFetcher):
                 end_utc = tz_manager.get_current_utc_time()
 
             # Resolve live epic to its historical alias for all cache/DB lookups.
-            hist_epic = _resolve_backtest_epic(epic)
+            hist_epic = _resolve_backtest_epic(epic, getattr(self, 'backtest_start_date', None))
             if hist_epic != epic:
                 self.logger.debug(f"🔀 Epic alias: {epic} -> {hist_epic} for backtest data lookup")
 

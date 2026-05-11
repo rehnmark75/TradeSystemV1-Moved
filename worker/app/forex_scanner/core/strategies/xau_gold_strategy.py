@@ -156,6 +156,10 @@ class XAUGoldStrategy(StrategyInterface):
         # BOS state persistence: keyed by epic, value = BOS dict with 'ts' key
         # Allows pullback detection in scans after BOS fires
         self._last_bos: Dict[str, Dict[str, Any]] = {}
+        # BOS dedup: keyed by epic, value = set of (direction, from_price, to_price) tuples
+        # that have already produced a signal. Prevents re-signaling the same structural break
+        # on every scan until a genuinely new BOS bar appears.
+        self._signaled_bos_keys: Dict[str, set] = {}
         self._scan_count: int = 0
         self._rej_counts: Dict[str, int] = {}
         self._rej_last_log: datetime = datetime.now(timezone.utc)
@@ -290,9 +294,20 @@ class XAUGoldStrategy(StrategyInterface):
         # Tier 2: BOS on 1H aligned with bias — detect fresh OR use cached state
         fresh_bos = self._detect_bos(df_trigger, bias)
         if fresh_bos is not None:
-            # Store fresh BOS with simulation time for persistence across scans
-            fresh_bos["ts"] = current_time
-            self._last_bos[epic] = fresh_bos
+            # Dedup: once a BOS has generated a signal, don't treat it as "fresh"
+            # again on re-discovery within bos_search_bars. This prevents clusters of
+            # duplicate signals from a single structural break across consecutive scans.
+            bos_key = (
+                fresh_bos["direction"],
+                round(float(fresh_bos["from_price"]), 3),
+                round(float(fresh_bos["to_price"]), 3),
+            )
+            if bos_key in self._signaled_bos_keys.get(epic, set()):
+                fresh_bos = None  # already signaled this break — treat as cached only
+            else:
+                # Genuinely new break — store with simulation time
+                fresh_bos["ts"] = current_time
+                self._last_bos[epic] = fresh_bos
 
         # Use cached BOS if within expiry window (default 48h)
         bos_expiry_hours = cfg.bos_expiry_hours
@@ -300,8 +315,9 @@ class XAUGoldStrategy(StrategyInterface):
         if cached is not None:
             age_hours = (current_time - cached["ts"]).total_seconds() / 3600
             if age_hours > bos_expiry_hours or cached.get("direction") != bias:
-                # Expired or bias flipped — discard
+                # Expired or bias flipped — discard cached BOS and signaled key history
                 self._last_bos.pop(epic, None)
+                self._signaled_bos_keys.pop(epic, None)
                 cached = None
 
         bos = fresh_bos or cached
@@ -400,6 +416,14 @@ class XAUGoldStrategy(StrategyInterface):
                 "rr_ratio": float(rr),
             },
         }
+
+        # Record this BOS as signaled so re-discovery within bos_search_bars doesn't re-fire
+        _signaled_bos_key = (
+            bos["direction"],
+            round(float(bos["from_price"]), 3),
+            round(float(bos["to_price"]), 3),
+        )
+        self._signaled_bos_keys.setdefault(epic, set()).add(_signaled_bos_key)
 
         # Clear stored BOS after signal fires — require fresh BOS for next entry
         self._last_bos.pop(epic, None)
@@ -570,22 +594,21 @@ class XAUGoldStrategy(StrategyInterface):
         for i in range(len(scan_df) - 1, -1, -1):
             bar = scan_df.iloc[i]
             price = float(bar["close"])
-            # Also allow the bar's high/low to touch the zone (not just close)
-            bar_lo = float(bar.get("low", price))
-            bar_hi = float(bar.get("high", price))
-            if bar_hi >= lo and bar_lo <= hi:
-                # Compute depth from close
-                depth = (to_p - price) / leg if bias == "bullish" else (price - to_p) / (-leg)
-                depth = max(0.0, depth)  # clip to non-negative
-                # Untested: no bar prior to this one has been in the zone
-                prior = scan_df.iloc[max(0, i - 10) : i]
-                untested = not ((prior["low"] <= hi) & (prior["high"] >= lo)).any() if len(prior) > 0 else True
-                entry_age_bars = len(scan_df) - 1 - i
-                return {
-                    "fib_depth": float(depth),
-                    "untested": bool(untested),
-                    "entry_index": int(i),
-                    "entry_age_bars": int(entry_age_bars),
+            # Require close inside the fib zone — wick-only touches are excluded
+            # to avoid entering on false breakdowns that immediately reverse.
+            if not (lo <= price <= hi):
+                continue
+            # Depth is bounded within [fib_min, fib_max] because close is inside the zone
+            depth = (to_p - price) / leg if bias == "bullish" else (price - to_p) / (-leg)
+            # Untested: no bar prior to this one has been in the zone
+            prior = scan_df.iloc[max(0, i - 10) : i]
+            untested = not ((prior["low"] <= hi) & (prior["high"] >= lo)).any() if len(prior) > 0 else True
+            entry_age_bars = len(scan_df) - 1 - i
+            return {
+                "fib_depth": float(depth),
+                "untested": bool(untested),
+                "entry_index": int(i),
+                "entry_age_bars": int(entry_age_bars),
                     "entry_price": float(price),
                     "zone_low": float(lo),
                     "zone_high": float(hi),
