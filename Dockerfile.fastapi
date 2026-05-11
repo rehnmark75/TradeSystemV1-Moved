@@ -4,7 +4,7 @@ ARG APP_DIR=dev-app
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y git
+RUN apt-get update && apt-get install -y git docker-cli && rm -rf /var/lib/apt/lists/*
 
 # Copy your app code
 COPY ${APP_DIR}/ /app/
@@ -17,4 +17,3 @@ RUN pip install --no-cache-dir \
 
 # Run your FastAPI app
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
-

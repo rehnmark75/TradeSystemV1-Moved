@@ -89,6 +89,10 @@ class XAUGoldConfig:
     rollover_start_hour: int = 21
     rollover_end_hour: int = 22
     asian_allowed: bool = False
+    buy_session_gate_enabled: bool = True
+    buy_session_start_hour_utc: int = 11
+    buy_session_end_hour_utc: int = 14
+    buy_session_adaptive_override_enabled: bool = True
 
     # Structure
     bos_displacement_atr_mult: float = 1.2
@@ -98,6 +102,31 @@ class XAUGoldConfig:
     bos_search_bars: int = 24
     entry_check_bars: int = 12
     require_ob_or_fvg: bool = True
+
+    # 5m event-playbook scanner (v2 candidate layer)
+    enable_event_playbooks: bool = True
+    event_min_confidence: float = 0.74
+    event_cooldown_minutes: int = 180
+    event_range_lookback_bars: int = 24
+    event_micro_break_lookback_bars: int = 12
+    event_min_body_atr: float = 0.35
+    event_displacement_body_atr: float = 0.90
+    event_sweep_min_pips: float = 20.0
+    event_max_recent_range_pips: float = 220.0
+    event_max_ema_distance_pips: float = 220.0
+
+    # Rolling adaptive scoring by direction + playbook
+    adaptive_playbook_scoring_enabled: bool = True
+    adaptive_lookback_days: int = 30
+    adaptive_min_trades: int = 8
+    adaptive_score_bonus: float = 0.03
+    adaptive_score_penalty: float = 0.05
+    adaptive_bonus_pf: float = 1.80
+    adaptive_bonus_expectancy_pips: float = 10.0
+    adaptive_penalty_pf: float = 1.00
+    adaptive_penalty_expectancy_pips: float = 0.0
+    adaptive_block_pf: float = 0.80
+    adaptive_block_expectancy_pips: float = -10.0
 
     # Limits
     signal_cooldown_minutes: int = 180

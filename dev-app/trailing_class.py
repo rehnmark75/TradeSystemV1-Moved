@@ -21,7 +21,7 @@ from typing import List, Optional, Dict, Tuple
 from datetime import datetime, timedelta
 from enum import Enum
 
-from services.models import TradeLog, IGCandle
+from services.models import TradeLog, IGCandle, AlertHistory
 from sqlalchemy.orm import Session
 from utils import get_point_value, convert_price_to_points, calculate_move_points
 
@@ -100,6 +100,14 @@ class TrailingConfig:
     # Partial close trigger (ATR-adaptive in v3.2.0)
     partial_close_trigger_points: int = 13  # Profit level to trigger partial close
 
+    # Early-failure stop tightening. If a trade has not made enough favourable
+    # progress after N five-minute bars, tighten the original stop instead of
+    # letting weak starts run all the way to full SL.
+    early_failure_stop_enabled: bool = False
+    early_failure_check_bars: int = 0
+    early_failure_min_mfe_pips: int = 0
+    early_failure_stop_pips: int = 0
+
     # EMA Exit compatibility (disabled by default for progressive trailing)
     enable_ema_exit: bool = False
 
@@ -161,6 +169,10 @@ class TrailingConfig:
             stage3_min_distance=pair_config['stage3_min_distance'],
             min_trail_distance=pair_config['min_trail_distance'],
             break_even_trigger_points=pair_config['break_even_trigger_points'],
+            early_failure_stop_enabled=bool(pair_config.get('early_failure_stop_enabled', False)),
+            early_failure_check_bars=int(pair_config.get('early_failure_check_bars') or 0),
+            early_failure_min_mfe_pips=int(pair_config.get('early_failure_min_mfe_pips') or 0),
+            early_failure_stop_pips=int(pair_config.get('early_failure_stop_pips') or 0),
             # Keep other defaults for non-stage-specific settings
             initial_trigger_points=7,
             max_trail_distance=50,
@@ -1445,6 +1457,23 @@ class EnhancedTradeProcessor:
         except Exception as e:
             self.logger.error(f"[SAFE DISTANCE ERROR] Trade {trade.id}: {e}")
             return self.config.min_trail_distance
+
+    def _get_trade_strategy_name(self, trade: TradeLog, db: Optional[Session] = None) -> str:
+        """Resolve strategy for per-strategy trailing config lookup."""
+        direct_strategy = getattr(trade, 'strategy', None)
+        if direct_strategy:
+            return str(direct_strategy).upper()
+        if db is not None and getattr(trade, 'alert_id', None):
+            try:
+                alert = db.query(AlertHistory).filter(AlertHistory.id == trade.alert_id).first()
+                if alert and getattr(alert, 'strategy', None):
+                    return str(alert.strategy).upper()
+            except Exception as e:
+                self.logger.debug(f"Strategy lookup skipped for trade {trade.id}: {e}")
+        symbol = (getattr(trade, 'symbol', '') or '').upper()
+        if 'CFEGOLD' in symbol or 'XAU' in symbol or 'GOLD' in symbol:
+            return 'XAU_GOLD'
+        return 'DEFAULT'
     
     def validate_stop_level(self, trade: TradeLog, current_price: float, proposed_stop: float) -> bool:
         """Validate that the proposed stop level is safe - SYNCHRONIZED WITH TRAILING STRATEGY"""
@@ -1500,6 +1529,160 @@ class EnhancedTradeProcessor:
         except Exception as e:
             self.logger.error(f"[STOP VALIDATION ERROR] Trade {trade.id}: {e}")
             return False
+
+    def _calculate_live_mfe_points(
+        self,
+        trade: TradeLog,
+        current_price: float,
+        db: Session,
+        timeframe: int = 5,
+    ) -> float:
+        """Calculate MFE from stored candles since entry, including current tick."""
+        try:
+            point_value = get_point_value(trade.symbol)
+            direction = trade.direction.upper()
+            opened_at = getattr(trade, 'timestamp', None)
+
+            if direction == "BUY":
+                current_mfe = (current_price - trade.entry_price) / point_value
+            else:
+                current_mfe = (trade.entry_price - current_price) / point_value
+
+            max_mfe = max(0.0, current_mfe)
+            if not opened_at:
+                return max_mfe
+
+            candles = (
+                db.query(IGCandle)
+                .filter(
+                    IGCandle.epic == trade.symbol,
+                    IGCandle.timeframe == timeframe,
+                    IGCandle.start_time >= opened_at,
+                )
+                .order_by(IGCandle.start_time.asc())
+                .all()
+            )
+            for candle in candles:
+                if direction == "BUY":
+                    fav = (float(candle.high) - trade.entry_price) / point_value
+                else:
+                    fav = (trade.entry_price - float(candle.low)) / point_value
+                max_mfe = max(max_mfe, fav)
+
+            return max(0.0, max_mfe)
+        except Exception as e:
+            self.logger.warning(f"⚠️ [EARLY FAILURE] Trade {trade.id}: MFE calculation failed ({e})")
+            return 0.0
+
+    def apply_early_failure_stop(
+        self,
+        trade: TradeLog,
+        current_price: float,
+        profit_points: int,
+        db: Session,
+    ) -> Optional[bool]:
+        """Tighten weak-start trades to configured early-failure stop."""
+        try:
+            if not getattr(self.config, 'early_failure_stop_enabled', False):
+                return False
+
+            if (
+                getattr(trade, 'early_be_executed', False)
+                or getattr(trade, 'moved_to_breakeven', False)
+                or getattr(trade, 'moved_to_stage1', False)
+                or getattr(trade, 'moved_to_stage2', False)
+            ):
+                return False
+
+            check_bars = int(getattr(self.config, 'early_failure_check_bars', 0) or 0)
+            min_mfe = float(getattr(self.config, 'early_failure_min_mfe_pips', 0) or 0)
+            stop_pips = float(getattr(self.config, 'early_failure_stop_pips', 0) or 0)
+            if check_bars <= 0 or min_mfe <= 0 or stop_pips <= 0:
+                return False
+
+            opened_at = getattr(trade, 'timestamp', None)
+            if not opened_at:
+                return False
+
+            minutes_open = (datetime.utcnow() - opened_at).total_seconds() / 60
+            required_minutes = check_bars * 5
+            if minutes_open < required_minutes:
+                return False
+
+            mfe_points = self._calculate_live_mfe_points(trade, current_price, db, timeframe=5)
+            if mfe_points >= min_mfe:
+                return False
+
+            point_value = get_point_value(trade.symbol)
+            direction = trade.direction.upper()
+            if direction == "BUY":
+                early_failure_stop = trade.entry_price - (stop_pips * point_value)
+                current_stop = trade.sl_price or 0.0
+                if current_stop and current_stop >= early_failure_stop:
+                    return False
+                is_stop_still_valid = early_failure_stop < current_price
+                direction_stop = "increase"
+            else:
+                early_failure_stop = trade.entry_price + (stop_pips * point_value)
+                current_stop = trade.sl_price or 0.0
+                if current_stop and current_stop <= early_failure_stop:
+                    return False
+                is_stop_still_valid = early_failure_stop > current_price
+                direction_stop = "decrease"
+
+            if not is_stop_still_valid:
+                self.logger.info(
+                    f"⏭️ [EARLY FAILURE SKIP] Trade {trade.id}: price already beyond "
+                    f"early-failure stop (profit={profit_points}pts, stop={early_failure_stop:.5f})"
+                )
+                return False
+
+            if not self.validate_stop_level(trade, current_price, early_failure_stop):
+                self.logger.info(
+                    f"⏭️ [EARLY FAILURE SKIP] Trade {trade.id}: stop {early_failure_stop:.5f} "
+                    f"does not satisfy broker distance at current {current_price:.5f}"
+                )
+                return False
+
+            adjustment_distance = abs(early_failure_stop - current_stop)
+            adjustment_points = max(1, round(adjustment_distance / point_value))
+            self.logger.info(
+                f"🛑 [EARLY FAILURE STOP] Trade {trade.id} {trade.symbol}: "
+                f"open={minutes_open:.0f}m, MFE={mfe_points:.1f}pts < {min_mfe:.1f}pts, "
+                f"tightening SL to -{stop_pips:.0f}pts ({early_failure_stop:.5f})"
+            )
+
+            result = self._send_stop_adjustment(
+                trade, adjustment_points, direction_stop, 0,
+                new_stop_level=early_failure_stop,
+            )
+
+            if isinstance(result, dict) and result.get("status") == "updated":
+                sent_payload = result.get("sentPayload", {})
+                ig_actual_stop = sent_payload.get("stopLevel")
+                trade.sl_price = (
+                    normalize_ig_stop_for_db(float(ig_actual_stop), trade.symbol)
+                    if ig_actual_stop else early_failure_stop
+                )
+                trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
+                trade.last_trigger_price = current_price
+                trade.trigger_time = datetime.utcnow()
+                try:
+                    db.commit()
+                    self.logger.info(
+                        f"✅ [EARLY FAILURE SUCCESS] Trade {trade.id}: SL tightened to {trade.sl_price:.5f}"
+                    )
+                    return True
+                except Exception as commit_error:
+                    db.rollback()
+                    self.logger.error(f"❌ [EARLY FAILURE COMMIT FAILED] Trade {trade.id}: {commit_error}")
+                    return None
+
+            self.logger.warning(f"⚠️ [EARLY FAILURE FAILED] Trade {trade.id}: Adjustment returned {result}")
+            return None
+        except Exception as e:
+            self.logger.error(f"❌ [EARLY FAILURE ERROR] Trade {trade.id}: {e}", exc_info=True)
+            return None
 
     def calculate_safe_stop_level(self, trade: TradeLog, current_price: float) -> float:
         """Calculate a safe stop level that respects IG's minimum distance - ENHANCED"""
@@ -1566,7 +1749,7 @@ class EnhancedTradeProcessor:
             pair_cfg = get_trailing_config_for_epic(
                 trade.symbol,
                 is_scalp_trade=bool(getattr(trade, 'is_scalp_trade', False)),
-                strategy=(getattr(trade, 'strategy', None) or 'DEFAULT'),
+                strategy=self._get_trade_strategy_name(trade, db),
             ) or {}
             trigger_pips = pair_cfg.get('early_breakeven_trigger_points') or GUARANTEED_PROFIT_LOCK_TRIGGER
             minimum_pips = pair_cfg.get('early_breakeven_buffer_points')
@@ -1667,7 +1850,7 @@ class EnhancedTradeProcessor:
             trailing_config = get_trailing_config_for_epic(
                 trade.symbol,
                 is_scalp_trade=getattr(trade, 'is_scalp_trade', False),
-                strategy=(getattr(trade, 'strategy', None) or 'DEFAULT'),
+                strategy=self._get_trade_strategy_name(trade, db),
             )
 
             # v3.2.0: Use self.config for break-even trigger (ATR-adaptive)
@@ -1708,6 +1891,20 @@ class EnhancedTradeProcessor:
                 self.logger.info(f"📊 [PROFIT] Trade {trade.id} {trade.symbol} SELL: "
                             f"entry={trade.entry_price:.5f}, current={current_price:.5f}, "
                             f"profit={profit_points}pts, trigger={break_even_trigger_points}pts")
+
+            # --- STEP -1: Early-Failure Stop Tightening ---
+            # If a trade has not made enough favorable progress after the
+            # configured number of 5m bars, tighten the original stop so weak
+            # starts do not run all the way to full SL.
+            early_failure_result = self.apply_early_failure_stop(
+                trade=trade,
+                current_price=current_price,
+                profit_points=profit_points,
+                db=db,
+            )
+            if early_failure_result is None:
+                self.logger.error(f"❌ [PROCESS ABORT] Trade {trade.id}: Early-failure stop failed with error")
+                return False
 
             # --- STEP 0: Early Break-Even (Risk Elimination) ---
             # v3.2.0: Use ATR-adaptive early BE trigger from self.config

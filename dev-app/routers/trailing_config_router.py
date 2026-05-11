@@ -45,6 +45,10 @@ EDITABLE_FIELDS = (
     "stage3_min_distance",
     "min_trail_distance",
     "break_even_trigger_points",
+    "early_failure_stop_enabled",
+    "early_failure_check_bars",
+    "early_failure_min_mfe_pips",
+    "early_failure_stop_pips",
     "enable_partial_close",
     "partial_close_trigger_points",
     "partial_close_size",
@@ -115,6 +119,10 @@ class TrailingConfigUpsert(BaseModel):
     stage3_min_distance: Optional[int] = None
     min_trail_distance: Optional[int] = None
     break_even_trigger_points: Optional[int] = None
+    early_failure_stop_enabled: Optional[bool] = None
+    early_failure_check_bars: Optional[int] = None
+    early_failure_min_mfe_pips: Optional[int] = None
+    early_failure_stop_pips: Optional[int] = None
     enable_partial_close: Optional[bool] = None
     partial_close_trigger_points: Optional[int] = None
     partial_close_size: Optional[float] = None

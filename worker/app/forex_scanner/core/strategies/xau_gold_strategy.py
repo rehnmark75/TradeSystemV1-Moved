@@ -160,6 +160,7 @@ class XAUGoldStrategy(StrategyInterface):
         # that have already produced a signal. Prevents re-signaling the same structural break
         # on every scan until a genuinely new BOS bar appears.
         self._signaled_bos_keys: Dict[str, set] = {}
+        self._adaptive_cache: Dict[Tuple[str, str, int], Tuple[datetime, Optional[Dict[str, Any]]]] = {}
         self._scan_count: int = 0
         self._rej_counts: Dict[str, int] = {}
         self._rej_last_log: datetime = datetime.now(timezone.utc)
@@ -216,6 +217,7 @@ class XAUGoldStrategy(StrategyInterface):
         df_trigger: Optional[pd.DataFrame] = None,
         df_4h: Optional[pd.DataFrame] = None,
         df_entry: Optional[pd.DataFrame] = None,
+        df_5m: Optional[pd.DataFrame] = None,
         epic: str = "",
         pair: str = "",
         **kwargs,
@@ -241,15 +243,23 @@ class XAUGoldStrategy(StrategyInterface):
             self._reject(epic, "insufficient_entry_data", f"bars={0 if df_entry is None else len(df_entry)}")
             return None
 
-        # Derive simulation time from trigger data (works in both live and backtest).
+        # Derive simulation time from the fastest available scan frame (works in
+        # both live and backtest). XAU event gates are intraday/session-sensitive,
+        # so using the 1H trigger timestamp can misclassify 5m/15m signals near
+        # session boundaries.
         # DataFetcher returns start_time as a column (RangeIndex), not as the DataFrame index,
         # so we check the 'start_time' column first, then fall back to the DatetimeIndex,
         # then to wall-clock time as a last resort.
         ts_raw = None
-        if "start_time" in df_trigger.columns and len(df_trigger) > 0:
-            ts_raw = df_trigger["start_time"].iloc[-1]
-        elif isinstance(df_trigger.index, pd.DatetimeIndex) and len(df_trigger) > 0:
-            ts_raw = df_trigger.index[-1]
+        for time_df in (df_5m, df_entry, df_trigger):
+            if time_df is None or len(time_df) == 0:
+                continue
+            if "start_time" in time_df.columns:
+                ts_raw = time_df["start_time"].iloc[-1]
+                break
+            if isinstance(time_df.index, pd.DatetimeIndex):
+                ts_raw = time_df.index[-1]
+                break
 
         if ts_raw is not None:
             ts = pd.Timestamp(ts_raw)
@@ -274,6 +284,18 @@ class XAUGoldStrategy(StrategyInterface):
         # Enrich timeframes with indicators if missing
         df_4h = self._enrich_htf(df_4h)
         df_trigger = self._enrich_trigger(df_trigger)
+
+        if cfg.enable_event_playbooks and df_5m is not None and len(df_5m) >= 220:
+            event_signal = self._detect_event_playbook_signal(
+                df_5m=df_5m,
+                df_4h=df_4h,
+                df_trigger=df_trigger,
+                epic=epic,
+                pair=pair,
+                current_time=current_time,
+            )
+            if event_signal is not None:
+                return event_signal
 
         # Tier 1: HTF bias
         bias = self._htf_bias(df_4h)
@@ -373,6 +395,25 @@ class XAUGoldStrategy(StrategyInterface):
 
         entry_price = float(df_entry["close"].iloc[-1])
         direction = "BUY" if bias == "bullish" else "SELL"
+        adaptive = self._adaptive_decision(direction, "strict_bos_pullback", current_time)
+        if adaptive.get("blocked"):
+            self._reject(
+                epic,
+                "adaptive_playbook_blocked",
+                adaptive.get("reason", "strict_bos_pullback"),
+            )
+            return None
+        if direction == "BUY" and not self._buy_session_allowed(
+            current_time,
+            adaptive=adaptive,
+        ):
+            self._reject(
+                epic,
+                "buy_session_blocked",
+                f"hour_utc={current_time.hour}",
+            )
+            return None
+        confidence = max(0.0, min(max_conf, confidence + float(adaptive.get("score_delta", 0.0))))
 
         signal = {
             "signal": direction,
@@ -414,6 +455,7 @@ class XAUGoldStrategy(StrategyInterface):
                 "rsi_14": rsi_val,
                 "atr_pct": float(atr_pct),
                 "rr_ratio": float(rr),
+                "adaptive_playbook": adaptive,
             },
         }
 
@@ -468,6 +510,17 @@ class XAUGoldStrategy(StrategyInterface):
             df["macd_hist"] = m["hist"]
         return df
 
+    def _enrich_event_frame(self, df: pd.DataFrame) -> pd.DataFrame:
+        df = df.copy()
+        df = _ensure_col(df, "ema_21", _ema(df["close"], 21))
+        df = _ensure_col(df, "ema_50", _ema(df["close"], 50))
+        df = _ensure_col(df, "ema_200", _ema(df["close"], 200))
+        df = _ensure_col(df, "atr_14", _atr(df, 14))
+        df = _ensure_col(df, "rsi_14", _rsi(df["close"], 14))
+        body = (df["close"] - df["open"]).abs()
+        df["body_atr"] = body / df["atr_14"].replace(0, np.nan)
+        return df
+
     def _htf_bias(self, df: pd.DataFrame) -> Optional[str]:
         c = self.config
         fast = df[f"ema_{c.ema_fast_period}"].iloc[-1]
@@ -480,6 +533,276 @@ class XAUGoldStrategy(StrategyInterface):
         if fast < slow and (slow - fast) > min_gap:
             return "bearish"
         return None
+
+    def _detect_event_playbook_signal(
+        self,
+        df_5m: pd.DataFrame,
+        df_4h: pd.DataFrame,
+        df_trigger: pd.DataFrame,
+        epic: str,
+        pair: str,
+        current_time: datetime,
+    ) -> Optional[Dict[str, Any]]:
+        """5m event-playbook layer for XAU.
+
+        The original XAU_GOLD setup is a narrow 4H/1H/15m continuation pattern.
+        This layer lets the 5-minute scanner surface more gold-specific events,
+        then scores HTF context and path-risk instead of hard-blocking them.
+        """
+        cfg = self.config
+        df = self._enrich_event_frame(df_5m)
+        if len(df) < 220:
+            return None
+
+        i = len(df) - 1
+        row = df.iloc[-1]
+        prev = df.iloc[-2]
+        pip = cfg.get_pip_size(epic)
+        if pip <= 0:
+            return None
+
+        range_n = min(int(cfg.event_range_lookback_bars), len(df) - 2)
+        micro_n = min(int(cfg.event_micro_break_lookback_bars), len(df) - 2)
+        if range_n < 6 or micro_n < 4:
+            return None
+
+        prior_range = df.iloc[-range_n - 1 : -1]
+        prior_micro = df.iloc[-micro_n - 1 : -1]
+        range_high = float(prior_range["high"].max())
+        range_low = float(prior_range["low"].min())
+        micro_high = float(prior_micro["high"].max())
+        micro_low = float(prior_micro["low"].min())
+        recent_range_pips = (range_high - range_low) / pip
+        body_atr = float(row.get("body_atr") or 0.0)
+        rsi_val = float(row.get("rsi_14") or 50.0)
+        close = float(row["close"])
+
+        candidates: List[Dict[str, Any]] = []
+
+        if close > range_high and body_atr >= cfg.event_min_body_atr:
+            candidates.append({
+                "setup": "range_break_2h",
+                "direction": "BUY",
+                "base": 0.56,
+                "trigger_level": range_high,
+                "event_strength": body_atr,
+            })
+        if close < range_low and body_atr >= cfg.event_min_body_atr:
+            candidates.append({
+                "setup": "range_break_2h",
+                "direction": "SELL",
+                "base": 0.56,
+                "trigger_level": range_low,
+                "event_strength": body_atr,
+            })
+
+        sweep_min = cfg.event_sweep_min_pips * pip
+        candle_range = max(float(row["high"] - row["low"]), 1e-9)
+        upper_reject = float(row["high"] - row["close"]) / candle_range
+        lower_reject = float(row["close"] - row["low"]) / candle_range
+        if row["high"] > range_high + sweep_min and close < range_high and upper_reject >= 0.45:
+            candidates.append({
+                "setup": "sweep_reversal_2h",
+                "direction": "SELL",
+                "base": 0.58,
+                "trigger_level": range_high,
+                "event_strength": upper_reject,
+            })
+        if row["low"] < range_low - sweep_min and close > range_low and lower_reject >= 0.45:
+            candidates.append({
+                "setup": "sweep_reversal_2h",
+                "direction": "BUY",
+                "base": 0.58,
+                "trigger_level": range_low,
+                "event_strength": lower_reject,
+            })
+
+        bull_stack = row["ema_21"] > row["ema_50"] > row["ema_200"]
+        bear_stack = row["ema_21"] < row["ema_50"] < row["ema_200"]
+        if bull_stack and prev["low"] <= prev["ema_21"] and close > row["ema_21"] and rsi_val < 70:
+            candidates.append({
+                "setup": "ema21_pullback_5m",
+                "direction": "BUY",
+                "base": 0.55,
+                "trigger_level": float(row["ema_21"]),
+                "event_strength": (close - float(row["ema_21"])) / pip,
+            })
+        if bear_stack and prev["high"] >= prev["ema_21"] and close < row["ema_21"] and rsi_val > 30:
+            candidates.append({
+                "setup": "ema21_pullback_5m",
+                "direction": "SELL",
+                "base": 0.55,
+                "trigger_level": float(row["ema_21"]),
+                "event_strength": (float(row["ema_21"]) - close) / pip,
+            })
+
+        if bull_stack and row["close"] > row["open"] and body_atr >= cfg.event_displacement_body_atr and close > micro_high:
+            candidates.append({
+                "setup": "displacement_5m",
+                "direction": "BUY",
+                "base": 0.57,
+                "trigger_level": micro_high,
+                "event_strength": body_atr,
+            })
+        if bear_stack and row["close"] < row["open"] and body_atr >= cfg.event_displacement_body_atr and close < micro_low:
+            candidates.append({
+                "setup": "displacement_5m",
+                "direction": "SELL",
+                "base": 0.57,
+                "trigger_level": micro_low,
+                "event_strength": body_atr,
+            })
+
+        if not candidates:
+            return None
+
+        htf_bias = self._htf_bias(df_4h)
+        regime, adx_val, atr_pct = self._regime(df_4h, df_trigger)
+        ema_distance_pips = abs(close - float(row["ema_21"])) / pip
+
+        scored = []
+        filtered_candidates = 0
+        for cand in candidates:
+            direction = cand["direction"]
+            adaptive = self._adaptive_decision(direction, cand["setup"], current_time)
+            if adaptive.get("blocked"):
+                filtered_candidates += 1
+                continue
+            if direction == "BUY" and not self._buy_session_allowed(
+                current_time,
+                adaptive=adaptive,
+            ):
+                filtered_candidates += 1
+                continue
+
+            score = float(cand["base"])
+            aligned = (direction == "BUY" and htf_bias == "bullish") or (
+                direction == "SELL" and htf_bias == "bearish"
+            )
+            if aligned:
+                score += 0.08
+            elif htf_bias is not None and cand["setup"] != "sweep_reversal_2h":
+                score -= 0.08
+
+            if regime == "trending":
+                score += 0.04
+            elif cand["setup"] in {"sweep_reversal_2h", "range_break_2h"} and regime == "neutral":
+                score += 0.02
+
+            if recent_range_pips <= cfg.event_max_recent_range_pips:
+                score += 0.05
+            else:
+                score -= min(0.10, (recent_range_pips - cfg.event_max_recent_range_pips) / 1000.0)
+
+            if ema_distance_pips <= cfg.event_max_ema_distance_pips:
+                score += 0.03
+            else:
+                score -= min(0.10, (ema_distance_pips - cfg.event_max_ema_distance_pips) / 1000.0)
+
+            if direction == "BUY" and rsi_val > 76:
+                score -= 0.07
+            if direction == "SELL" and rsi_val < 24:
+                score -= 0.07
+
+            hour_utc = current_time.hour
+            if 5 <= hour_utc <= 16:
+                score += 0.02
+
+            score += float(adaptive.get("score_delta", 0.0))
+
+            cand = {
+                **cand,
+                "score": min(max(score, 0.0), cfg.max_confidence),
+                "adaptive": adaptive,
+            }
+            scored.append(cand)
+
+        if not scored:
+            self._reject(
+                epic,
+                "event_adaptive_filtered",
+                f"filtered={filtered_candidates} candidates={len(candidates)}",
+            )
+            return None
+
+        best = max(scored, key=lambda c: c["score"])
+        if best["score"] < cfg.event_min_confidence:
+            self._reject(
+                epic,
+                "event_low_confidence",
+                f"{best['setup']} {best['score']:.3f} < {cfg.event_min_confidence:.3f}",
+            )
+            return None
+
+        sl_pips, tp_pips = self._sl_tp(df_trigger, epic)
+        direction = best["direction"]
+        if direction == "BUY" and not self._buy_session_allowed(current_time):
+            self._reject(
+                epic,
+                "buy_session_blocked",
+                f"{best['setup']} hour_utc={current_time.hour}",
+            )
+            return None
+
+        signal = {
+            "signal": direction,
+            "signal_type": direction.lower(),
+            "strategy": self.strategy_name,
+            "epic": epic,
+            "pair": pair or "XAUUSD",
+            "entry_price": close,
+            "stop_loss_pips": float(sl_pips),
+            "take_profit_pips": float(tp_pips),
+            "risk_pips": float(sl_pips),
+            "reward_pips": float(tp_pips),
+            "stop_distance": int(round(float(sl_pips) / 5.0)),
+            "limit_distance": int(round(float(tp_pips) / 5.0)),
+            "confidence_score": float(best["score"]),
+            "confidence": float(best["score"]),
+            "signal_timestamp": current_time.isoformat(),
+            "timestamp": current_time,
+            "version": self.config.version,
+            "market_regime_detected": regime,
+            "market_regime": regime,
+            "adx_value": float(adx_val),
+            "volatility_state": "expansion" if atr_pct >= cfg.atr_expansion_pct else "normal",
+            "monitor_only": cfg.is_monitor_only(epic),
+            "strategy_indicators": {
+                "xau_playbook": best["setup"],
+                "xau_event_layer": True,
+                "htf_bias": htf_bias,
+                "htf_aligned": (direction == "BUY" and htf_bias == "bullish") or (
+                    direction == "SELL" and htf_bias == "bearish"
+                ),
+                "trigger_level": best.get("trigger_level"),
+                "event_strength": best.get("event_strength"),
+                "event_score": best["score"],
+                "body_atr": body_atr,
+                "rsi_14": rsi_val,
+                "recent_range_pips": recent_range_pips,
+                "ema21_distance_pips": ema_distance_pips,
+                "atr_pct": float(atr_pct),
+                "rr_ratio": float(tp_pips / sl_pips) if sl_pips else 0.0,
+                "adaptive_playbook": best.get("adaptive"),
+            },
+        }
+
+        self._set_cooldown_minutes(epic, current_time, int(cfg.event_cooldown_minutes))
+        self.logger.info(
+            f"✅ [XAU_GOLD:event] {epic} {direction} {best['setup']} @ {close:.2f} "
+            f"SL={sl_pips:.1f}p TP={tp_pips:.1f}p conf={best['score']:.2f} regime={regime}"
+        )
+
+        if getattr(self, 'LPF_ENABLED', True):
+            try:
+                try:
+                    from .lpf_gate import apply_lpf_gate
+                except ImportError:
+                    from forex_scanner.core.strategies.lpf_gate import apply_lpf_gate
+                signal = apply_lpf_gate(signal, self.logger)
+            except Exception as _lpf_exc:
+                self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
+        return signal
 
     def _regime(
         self, df_htf: pd.DataFrame, df_trigger: pd.DataFrame
@@ -728,8 +1051,188 @@ class XAUGoldStrategy(StrategyInterface):
 
     def _set_cooldown(self, epic: str, current_time: Optional[datetime] = None) -> None:
         minutes = self.config.get_pair_cooldown_minutes(epic)
+        self._set_cooldown_minutes(epic, current_time, minutes)
+
+    def _set_cooldown_minutes(
+        self,
+        epic: str,
+        current_time: Optional[datetime],
+        minutes: int,
+    ) -> None:
         now = current_time or datetime.now(timezone.utc)
         self._cooldowns[epic] = now + timedelta(minutes=minutes)
+
+    def _adaptive_decision(
+        self,
+        direction: str,
+        setup: str,
+        current_time: datetime,
+    ) -> Dict[str, Any]:
+        cfg = self.config
+        result: Dict[str, Any] = {
+            "enabled": bool(cfg.adaptive_playbook_scoring_enabled),
+            "direction": direction,
+            "setup": setup,
+            "sample": 0,
+            "score_delta": 0.0,
+            "blocked": False,
+            "buy_override": False,
+        }
+        if not cfg.adaptive_playbook_scoring_enabled:
+            return result
+
+        stats = self._get_adaptive_stats(direction, setup, current_time)
+        if not stats:
+            result["reason"] = "no_history"
+            return result
+
+        result.update(stats)
+        if int(stats.get("sample", 0)) < int(cfg.adaptive_min_trades):
+            result["reason"] = "insufficient_sample"
+            return result
+
+        pf = float(stats.get("profit_factor") or 0.0)
+        expectancy = float(stats.get("expectancy_pips") or 0.0)
+
+        if pf <= cfg.adaptive_block_pf and expectancy <= cfg.adaptive_block_expectancy_pips:
+            result["blocked"] = True
+            result["reason"] = f"pf={pf:.2f} expectancy={expectancy:.1f}"
+            return result
+
+        if pf <= cfg.adaptive_penalty_pf or expectancy <= cfg.adaptive_penalty_expectancy_pips:
+            result["score_delta"] = -float(cfg.adaptive_score_penalty)
+            result["reason"] = f"penalty pf={pf:.2f} expectancy={expectancy:.1f}"
+        elif pf >= cfg.adaptive_bonus_pf and expectancy >= cfg.adaptive_bonus_expectancy_pips:
+            result["score_delta"] = float(cfg.adaptive_score_bonus)
+            result["buy_override"] = True
+            result["reason"] = f"bonus pf={pf:.2f} expectancy={expectancy:.1f}"
+        else:
+            result["reason"] = f"neutral pf={pf:.2f} expectancy={expectancy:.1f}"
+
+        return result
+
+    def _get_adaptive_stats(
+        self,
+        direction: str,
+        setup: str,
+        current_time: datetime,
+    ) -> Optional[Dict[str, Any]]:
+        if self.db_manager is None:
+            return None
+
+        direction_key = "BULL" if direction == "BUY" else "BEAR"
+        bucket = int(current_time.timestamp() // 900)
+        cache_key = (direction_key, setup, bucket)
+        cached = self._adaptive_cache.get(cache_key)
+        if cached is not None:
+            return cached[1]
+
+        start_time = current_time - timedelta(days=int(self.config.adaptive_lookback_days))
+        params = {
+            "direction": direction_key,
+            "setup": setup,
+            "start_time": start_time.replace(tzinfo=None),
+            "end_time": current_time.replace(tzinfo=None),
+        }
+
+        query = """
+            WITH outcome_rows AS (
+                SELECT
+                    signal_type,
+                    COALESCE(NULLIF(indicator_values->>'xau_playbook', ''), 'strict_bos_pullback') AS setup,
+                    signal_timestamp AS outcome_time,
+                    trade_result,
+                    COALESCE(pips_gained, 0) AS pips_gained
+                FROM backtest_signals
+                WHERE strategy_name = 'XAU_GOLD'
+                  AND epic = 'CS.D.CFEGOLD.CEE.IP'
+                  AND trade_result IN ('win', 'loss', 'breakeven')
+
+                UNION ALL
+
+                SELECT
+                    CASE
+                        WHEN UPPER(ah.signal_type) IN ('BUY', 'LONG', 'BULL') THEN 'BULL'
+                        WHEN UPPER(ah.signal_type) IN ('SELL', 'SHORT', 'BEAR') THEN 'BEAR'
+                        ELSE UPPER(ah.signal_type)
+                    END AS signal_type,
+                    COALESCE(NULLIF(ah.strategy_indicators::jsonb->>'xau_playbook', ''), 'strict_bos_pullback') AS setup,
+                    COALESCE(t.closed_at, t.pnl_calculated_at, t.updated_at, t.timestamp) AS outcome_time,
+                    CASE
+                        WHEN COALESCE(t.pips_gained, 0) > 0 THEN 'win'
+                        WHEN COALESCE(t.pips_gained, 0) < 0 THEN 'loss'
+                        ELSE 'breakeven'
+                    END AS trade_result,
+                    COALESCE(t.pips_gained, 0) AS pips_gained
+                FROM trade_log t
+                JOIN alert_history ah ON ah.id = t.alert_id
+                WHERE ah.strategy = 'XAU_GOLD'
+                  AND ah.epic = 'CS.D.CFEGOLD.CEE.IP'
+                  AND t.pips_gained IS NOT NULL
+            )
+            SELECT
+                COUNT(*)::int AS sample,
+                SUM(CASE WHEN trade_result = 'win' THEN 1 ELSE 0 END)::int AS wins,
+                AVG(COALESCE(pips_gained, 0))::float AS expectancy_pips,
+                COALESCE(SUM(CASE WHEN COALESCE(pips_gained, 0) > 0 THEN pips_gained ELSE 0 END), 0)::float AS gross_profit,
+                ABS(COALESCE(SUM(CASE WHEN COALESCE(pips_gained, 0) < 0 THEN pips_gained ELSE 0 END), 0))::float AS gross_loss
+            FROM outcome_rows
+            WHERE signal_type = :direction
+              AND setup = :setup
+              AND outcome_time >= :start_time
+              AND outcome_time < :end_time
+        """
+
+        try:
+            df = self.db_manager.execute_query(query, params)
+            if df.empty:
+                stats = None
+            else:
+                row = df.iloc[0]
+                sample = int(row.get("sample") or 0)
+                gross_profit = float(row.get("gross_profit") or 0.0)
+                gross_loss = float(row.get("gross_loss") or 0.0)
+                if sample <= 0:
+                    stats = None
+                else:
+                    stats = {
+                        "sample": sample,
+                        "wins": int(row.get("wins") or 0),
+                        "win_rate": float(row.get("wins") or 0) / sample,
+                        "expectancy_pips": float(row.get("expectancy_pips") or 0.0),
+                        "profit_factor": 99.0 if gross_loss <= 0 and gross_profit > 0 else (
+                            gross_profit / gross_loss if gross_loss > 0 else 0.0
+                        ),
+                    }
+        except Exception as exc:
+            self.logger.debug("XAU adaptive stats unavailable: %s", exc)
+            stats = None
+
+        if len(self._adaptive_cache) > 512:
+            self._adaptive_cache.clear()
+        self._adaptive_cache[cache_key] = (current_time, stats)
+        return stats
+
+    def _buy_session_allowed(
+        self,
+        current_time: datetime,
+        adaptive: Optional[Dict[str, Any]] = None,
+    ) -> bool:
+        c = self.config
+        if not c.buy_session_gate_enabled:
+            return True
+        if (
+            c.buy_session_adaptive_override_enabled
+            and adaptive
+            and adaptive.get("buy_override")
+        ):
+            return True
+        start = int(c.buy_session_start_hour_utc)
+        end = int(c.buy_session_end_hour_utc)
+        hour = current_time.hour
+        if start <= end:
+            return start <= hour < end
+        return hour >= start or hour < end
 
     # ---- rejection --------------------------------------------------------
 

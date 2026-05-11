@@ -14,7 +14,13 @@ type OverrideRow = {
 };
 
 type EvaluateResponse =
-  | { fired: true; signal: Record<string, unknown>; trade_request: TradeRequest }
+  | {
+      fired: true;
+      signal: Record<string, unknown>;
+      trade_request: TradeRequest;
+      forced?: boolean;
+      original_rejection_reason?: string;
+    }
   | { fired: false; rejection_reason: string; debug?: string };
 
 type TradeRequest = {
@@ -43,6 +49,8 @@ export default function ManualTriggerPanel({ epic, strategy }: ManualTriggerPane
   const isDemoMode = environment === "demo";
 
   const [rows, setRows] = useState<OverrideRow[]>([]);
+  const [forceTrade, setForceTrade] = useState(false);
+  const [manualDirection, setManualDirection] = useState<"BUY" | "SELL">("BUY");
   const [evaluating, setEvaluating] = useState(false);
   const [result, setResult] = useState<EvaluateResponse | null>(null);
   const [evalError, setEvalError] = useState<string | null>(null);
@@ -99,7 +107,13 @@ export default function ManualTriggerPanel({ epic, strategy }: ManualTriggerPane
       {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ epic, strategy, config_override: configOverride }),
+        body: JSON.stringify({
+          epic,
+          strategy,
+          config_override: configOverride,
+          force_trade: forceTrade,
+          manual_direction: manualDirection,
+        }),
         timeoutMs: 100_000,
       }
     );
@@ -176,6 +190,30 @@ export default function ManualTriggerPanel({ epic, strategy }: ManualTriggerPane
             Switch to demo environment to enable this feature.
           </span>
         )}
+      </div>
+
+      {/* ── Force Trade ──────────────────────────────────────────────── */}
+      <div className="manual-trigger-force">
+        <label className="trigger-checkbox-label">
+          <input
+            type="checkbox"
+            checked={forceTrade}
+            disabled={!isDemoMode}
+            onChange={(e) => setForceTrade(e.target.checked)}
+          />
+          <span>Create trade even when strategy has no signal</span>
+        </label>
+        <select
+          value={manualDirection}
+          disabled={!isDemoMode || !forceTrade}
+          onChange={(e) => setManualDirection(e.target.value as "BUY" | "SELL")}
+        >
+          <option value="BUY">BUY</option>
+          <option value="SELL">SELL</option>
+        </select>
+        <span className="manual-trigger-hint">
+          Uses 15/30 pips unless overridden below.
+        </span>
       </div>
 
       {/* ── Parameter Overrides ───────────────────────────────────────── */}
@@ -288,7 +326,7 @@ export default function ManualTriggerPanel({ epic, strategy }: ManualTriggerPane
           <div className="trigger-result-header">
             <div className="trigger-result-icon">✓</div>
             <div className="trigger-result-title">
-              Signal Detected —{" "}
+              {result.forced ? "Manual Override" : "Signal Detected"} —{" "}
               <strong>
                 {String(
                   result.signal.signal_type ||
@@ -298,6 +336,12 @@ export default function ManualTriggerPanel({ epic, strategy }: ManualTriggerPane
               </strong>
             </div>
           </div>
+
+          {result.forced && result.original_rejection_reason && (
+            <div className="trigger-result-reason">
+              Strategy rejection: {result.original_rejection_reason}
+            </div>
+          )}
 
           <div className="trigger-signal-grid">
             {renderSignalRow(
@@ -330,6 +374,10 @@ export default function ManualTriggerPanel({ epic, strategy }: ManualTriggerPane
             )}
             {renderSignalRow("Strategy", result.signal.strategy)}
             {renderSignalRow("Regime", result.signal.market_regime)}
+            {renderSignalRow(
+              "SL/TP source",
+              result.signal.sl_tp_source || result.signal.manual_override_reason
+            )}
           </div>
 
           {/* Place trade */}

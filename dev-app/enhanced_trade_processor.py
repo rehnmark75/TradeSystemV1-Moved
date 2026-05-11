@@ -115,7 +115,7 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 self.logger.debug(f"⚡ [SCALP CONFIG] Trade {trade.id}: Loading scalp-specific trailing config")
 
             # Get pair-specific static config with scalp flag and per-strategy override
-            strategy_name = (getattr(trade, 'strategy', None) or 'DEFAULT').upper()
+            strategy_name = self._get_trade_strategy_name(trade, db)
             pair_config = get_trailing_config_for_epic(
                 trade.symbol, is_scalp_trade=is_scalp, strategy=strategy_name,
             )
@@ -246,6 +246,22 @@ class CombinedTradeProcessor(EnhancedTradeProcessor):
                 stage3_min_distance=pair_config.get('stage3_min_distance', self.default_config.stage3_min_distance),
                 min_trail_distance=pair_config.get('min_trail_distance', self.default_config.min_trail_distance),
                 break_even_trigger_points=pair_config.get('break_even_trigger_points', self.default_config.break_even_trigger_points),
+                early_failure_stop_enabled=bool(pair_config.get(
+                    'early_failure_stop_enabled',
+                    getattr(self.default_config, 'early_failure_stop_enabled', False),
+                )),
+                early_failure_check_bars=int(pair_config.get(
+                    'early_failure_check_bars',
+                    getattr(self.default_config, 'early_failure_check_bars', 0),
+                ) or 0),
+                early_failure_min_mfe_pips=int(pair_config.get(
+                    'early_failure_min_mfe_pips',
+                    getattr(self.default_config, 'early_failure_min_mfe_pips', 0),
+                ) or 0),
+                early_failure_stop_pips=int(pair_config.get(
+                    'early_failure_stop_pips',
+                    getattr(self.default_config, 'early_failure_stop_pips', 0),
+                ) or 0),
                 initial_trigger_points=pair_config.get('early_breakeven_trigger_points',
                                                       self.default_config.initial_trigger_points),
                 partial_close_trigger_points=pair_config.get('partial_close_trigger_points',

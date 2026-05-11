@@ -272,6 +272,8 @@ class BacktestOrderLogger:
                     trade_result = 'loss'
                 elif trade_result == 'winner':
                     trade_result = 'win'
+                elif trade_result in {'no_data', 'no_future_data', 'timeout'}:
+                    trade_result = 'breakeven'
 
             # Truncate exit_reason to fit VARCHAR(30) column
             if exit_reason and len(exit_reason) > 30:
@@ -406,6 +408,46 @@ class BacktestOrderLogger:
         # Extract nested indicator data
         if 'indicators' in signal and isinstance(signal['indicators'], dict):
             indicator_values.update(signal['indicators'])
+
+        strategy_indicators = signal.get('strategy_indicators')
+        if isinstance(strategy_indicators, dict):
+            strategy_fields = [
+                'xau_playbook',
+                'xau_event_layer',
+                'htf_bias',
+                'htf_aligned',
+                'trigger_level',
+                'event_strength',
+                'event_score',
+                'body_atr',
+                'rsi_14',
+                'recent_range_pips',
+                'ema21_distance_pips',
+                'atr_pct',
+                'rr_ratio',
+                'bias',
+                'bos_displacement_atr',
+                'fib_depth',
+                'entry_age_bars',
+                'fvg_confluence',
+                'adaptive_playbook',
+            ]
+            compact_strategy = {}
+            for field in strategy_fields:
+                if field not in strategy_indicators:
+                    continue
+                value = strategy_indicators[field]
+                if value is None:
+                    compact_strategy[field] = None
+                    continue
+                try:
+                    compact_strategy[field] = float(value)
+                except (ValueError, TypeError):
+                    compact_strategy[field] = value
+
+            if compact_strategy:
+                indicator_values.update(compact_strategy)
+                indicator_values['strategy'] = compact_strategy
 
         return indicator_values
 

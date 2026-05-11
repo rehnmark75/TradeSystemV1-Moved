@@ -633,10 +633,16 @@ class SignalDetector:
                 self.logger.info(f"⚠️ [XAU_GOLD] Insufficient {entry_tf} data for {epic}: {0 if df_entry is None else len(df_entry)} bars")
                 return None
 
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe='5m', lookback_hours=72
+            )
+            df_5m = self._filter_incomplete_candles(df_5m, '5m')
+
             signal = self.xau_gold_strategy.detect_signal(
                 df_trigger=df_trigger,
                 df_4h=df_4h,
                 df_entry=df_entry,
+                df_5m=df_5m,
                 epic=epic,
                 pair=pair,
             )
@@ -1753,5 +1759,4 @@ class SignalDetector:
         except Exception as e:
             self.logger.error(f"❌ Error detecting impulse-fade signals for {epic}: {e}")
             return None
-
 

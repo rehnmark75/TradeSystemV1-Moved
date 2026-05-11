@@ -9590,6 +9590,33 @@ table {
   gap: 14px;
 }
 
+.manual-trigger-force {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  padding: 10px 12px;
+  border-radius: 7px;
+  background: rgba(245, 158, 11, 0.06);
+  border: 1px solid rgba(245, 158, 11, 0.22);
+}
+
+.trigger-checkbox-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.84rem;
+  color: var(--ink);
+}
+
+.trigger-checkbox-label input {
+  margin: 0;
+}
+
+.manual-trigger-force select {
+  min-width: 82px;
+}
+
 .trigger-evaluate-btn {
   min-width: 160px;
 }

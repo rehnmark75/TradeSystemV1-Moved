@@ -372,6 +372,8 @@ async def ig_place_order(
     rr = body.risk_reward or 2.0
 
     symbol = EPIC_MAP.get(epic.upper())
+    if not symbol and epic.startswith("CS.D."):
+        symbol = epic
     if not symbol:
         raise HTTPException(status_code=404, detail=f"No mapping found for epic: {epic}")
 

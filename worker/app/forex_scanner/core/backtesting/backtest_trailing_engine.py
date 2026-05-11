@@ -47,6 +47,8 @@ _TRAILING_OVERRIDE_KEYS = frozenset({
     'stage2_trigger_points', 'stage2_lock_points',
     'stage3_trigger_points', 'stage3_atr_multiplier', 'stage3_min_distance',
     'min_trail_distance', 'break_even_trigger_points',
+    'early_failure_stop_enabled', 'early_failure_check_bars',
+    'early_failure_min_mfe_pips', 'early_failure_stop_pips',
     'spread_pips', 'slippage_pips',
 })
 
@@ -325,6 +327,10 @@ class BacktestTrailingEngine:
         s2_lock       = float(cfg.get('stage2_lock_points', 15))
         s3_trig       = float(cfg.get('stage3_trigger_points', 35))
         s3_atr_mult   = float(cfg.get('stage3_atr_multiplier', 2.0))
+        early_failure_enabled = _as_bool(cfg.get('early_failure_stop_enabled', False))
+        early_failure_check_bars = int(cfg.get('early_failure_check_bars', 0) or 0)
+        early_failure_min_mfe = float(cfg.get('early_failure_min_mfe_pips', 0) or 0)
+        early_failure_stop = float(cfg.get('early_failure_stop_pips', 0) or 0)
 
         # State
         early_be_done = be_done = s1_done = s2_done = s3_active = False
@@ -367,6 +373,24 @@ class BacktestTrailingEngine:
 
             best_profit = max(best_profit, profit_pts)
             worst_loss  = max(worst_loss,  loss_pts)
+
+            if (
+                early_failure_enabled
+                and not (early_be_done or be_done or s1_done or s2_done or s3_active)
+                and early_failure_check_bars > 0
+                and early_failure_stop > 0
+                and bar_idx + 1 >= early_failure_check_bars
+                and best_profit < early_failure_min_mfe
+            ):
+                new_sl = (fill_price - early_failure_stop * point_value if is_long
+                          else fill_price + early_failure_stop * point_value)
+                current_sl = _advance_sl(current_sl, new_sl, is_long)
+                if (is_long and low <= current_sl) or (not is_long and high >= current_sl):
+                    exit_pnl = -early_failure_stop
+                    exit_reason = 'EARLY_FAILURE_STOP'
+                    exit_bar = bar_idx
+                    trade_closed = True
+                    break
 
             # Stage transitions — only move SL forward (never widen)
             if not early_be_done and profit_pts >= early_be_trig:
@@ -452,6 +476,14 @@ class BacktestTrailingEngine:
 def _advance_sl(current_sl: float, new_sl: float, is_long: bool) -> float:
     """Move SL only in the favourable direction — never widen it."""
     return max(current_sl, new_sl) if is_long else min(current_sl, new_sl)
+
+
+def _as_bool(value: Any) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        return value.strip().lower() in ('1', 'true', 'yes', 'on')
+    return bool(value)
 
 
 def _classify_outcome(exit_reason: str, exit_pnl: float) -> str:

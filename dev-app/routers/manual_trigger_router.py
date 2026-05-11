@@ -22,6 +22,8 @@ class EvaluateRequest(BaseModel):
     strategy: str = "SMC_SIMPLE"
     config_override: Dict[str, Any] = {}
     spread_pips: float = 1.5
+    force_trade: bool = False
+    manual_direction: str = "BUY"
 
 
 @router.post("/evaluate")
@@ -45,6 +47,9 @@ def manual_evaluate(body: EvaluateRequest):
         "--config-override", json.dumps(body.config_override),
         "--spread-pips", str(body.spread_pips),
     ]
+    if body.force_trade:
+        cmd.append("--force-trade")
+        cmd.extend(["--manual-direction", body.manual_direction.upper()])
 
     try:
         result = subprocess.run(
