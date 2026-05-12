@@ -1584,6 +1584,23 @@ class AlertHistoryManager:
                 'lpf_penalty': signal.get('lpf_penalty'),
                 'lpf_would_block': signal.get('lpf_would_block', False),
 
+                # Adaptive Bucket Gate
+                'adaptive_bucket_gate_state': signal.get('adaptive_bucket_gate_state'),
+                'adaptive_bucket_gate_bucket': signal.get('adaptive_bucket_gate_bucket'),
+                'adaptive_bucket_gate_win_rate': signal.get('adaptive_bucket_gate_win_rate'),
+                'adaptive_bucket_gate_trades': signal.get('adaptive_bucket_gate_trades'),
+                'adaptive_bucket_gate_expectancy_pips': signal.get('adaptive_bucket_gate_expectancy_pips'),
+                'adaptive_bucket_gate_would_block': signal.get('adaptive_bucket_gate_would_block', False),
+                'adaptive_bucket_gate_reason': signal.get('adaptive_bucket_gate_reason'),
+                'adaptive_bucket_gate_probe': signal.get('adaptive_bucket_gate_probe', False),
+
+                # Direction Quality Gate
+                'direction_quality_gate_state': signal.get('direction_quality_gate_state'),
+                'direction_quality_gate_mode': signal.get('direction_quality_gate_mode'),
+                'direction_quality_gate_reason': signal.get('direction_quality_gate_reason'),
+                'direction_quality_gate_details': signal.get('direction_quality_gate_details'),
+                'direction_quality_gate_would_block': signal.get('direction_quality_gate_would_block', False),
+
                 # Sweep Protection Filter (v2.42.0)
                 'sweep_score': signal.get('sweep_score'),
                 'sweep_conditions': signal.get('sweep_conditions'),

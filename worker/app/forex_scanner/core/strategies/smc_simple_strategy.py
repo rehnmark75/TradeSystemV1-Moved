@@ -4194,6 +4194,40 @@ class SMCSimpleStrategy:
                     )
                     return None
 
+            # Direction quality gate — asymmetric EURUSD quality profile.
+            # Runs in backtest and live because it only uses current signal
+            # indicators/session, not future trade outcomes.
+            try:
+                try:
+                    from .direction_quality_gate import apply_direction_quality_gate
+                except ImportError:
+                    from forex_scanner.core.strategies.direction_quality_gate import apply_direction_quality_gate
+                signal = apply_direction_quality_gate(
+                    signal,
+                    getattr(self, '_db_config', None),
+                    self.logger,
+                    signal_timestamp=candle_dt,
+                )
+                if signal is None:
+                    self._track_rejection(
+                        stage='DIRECTION_QUALITY_GATE',
+                        reason='Blocked by direction quality gate',
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context={
+                            'rsi': locals().get('rsi_value'),
+                            'macd_histogram': locals().get('macd_histogram'),
+                            'ema_21': signal.get('ema_21') if signal else None,
+                            'ema_50': signal.get('ema_50') if signal else None,
+                            **self._collect_market_context(df_trigger, df_4h, entry_df, pip_value, direction=direction)
+                        }
+                    )
+                    return None
+            except Exception as quality_exc:
+                self.logger.warning("Direction quality gate error (letting signal through): %s", quality_exc)
+
             # ================================================================
             # SCALP SIGNAL QUALIFICATION (v2.21.0)
             # Run momentum confirmation filters on scalp signals
@@ -4286,6 +4320,37 @@ class SMCSimpleStrategy:
                     # v2.38.0: Restore original filter states after processing this signal
                     for attr_name, original_value in _original_filter_states.items():
                         setattr(self._signal_qualifier, attr_name, original_value)
+
+            # Adaptive bucket gate — live-only dynamic guardrail. It can pause
+            # weak coarse buckets (for example EURUSD BULL) and reopen them via
+            # timed probes; backtests use the replay analysis script instead.
+            try:
+                try:
+                    from .adaptive_bucket_gate import apply_adaptive_bucket_gate
+                except ImportError:
+                    from forex_scanner.core.strategies.adaptive_bucket_gate import apply_adaptive_bucket_gate
+                signal = apply_adaptive_bucket_gate(
+                    signal,
+                    getattr(self, '_db_config', None),
+                    self.logger,
+                    backtest_mode=self._backtest_mode,
+                    environment=_TRADING_ENVIRONMENT,
+                )
+                if signal is None:
+                    self._track_rejection(
+                        stage='ADAPTIVE_BUCKET_GATE',
+                        reason='Blocked by adaptive bucket gate',
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=self._collect_market_context(
+                            df_trigger, df_4h, entry_df, pip_value, direction=direction
+                        )
+                    )
+                    return None
+            except Exception as gate_exc:
+                self.logger.warning("Adaptive bucket gate error (letting signal through): %s", gate_exc)
 
             # v2.31.1: Track signal passed all filters for backtest stats
             self._track_signal_passed()

@@ -186,6 +186,39 @@ class SMCSimpleConfig:
     rolling_perf_very_low_wr_penalty: float = 0.10  # Add when WR is very low
     rolling_perf_high_wr_bonus: float = 0.02    # Subtract from min_confidence when WR is high
 
+    # ADAPTIVE BUCKET GATE (live guardrail, opt-in)
+    # Learns from recent closed SMC_SIMPLE trades by coarse bucket. Buckets can
+    # pause after weak recent performance, then reopen through timed probes.
+    adaptive_bucket_gate_enabled: bool = False
+    adaptive_bucket_gate_mode: str = 'MONITORING'  # MONITORING or ACTIVE
+    adaptive_bucket_gate_bucket_mode: str = 'direction'  # direction, direction_session, direction_regime
+    adaptive_bucket_gate_window: int = 12
+    adaptive_bucket_gate_min_trades: int = 8
+    adaptive_bucket_gate_min_win_rate: float = 0.45
+    adaptive_bucket_gate_min_expectancy_pips: float = -0.25
+    adaptive_bucket_gate_min_pip_samples: int = 4
+    adaptive_bucket_gate_pause_hours: float = 48.0
+    adaptive_bucket_gate_probe_after_hours: float = 12.0
+    adaptive_bucket_gate_exploration_rate: float = 0.02
+    adaptive_bucket_gate_max_confidence: Optional[float] = None
+    adaptive_bucket_gate_cache_ttl_seconds: int = 300
+
+    # DIRECTION QUALITY GATE (opt-in, runs in backtest and live)
+    direction_quality_gate_enabled: bool = False
+    direction_quality_gate_mode: str = 'MONITORING'
+    direction_quality_gate_target_epics: str = 'CS.D.EURUSD.CEEM.IP'
+    direction_quality_bull_block_start_hour: int = 15
+    direction_quality_bull_block_end_hour: int = 18
+    direction_quality_bull_min_confidence: Optional[float] = 0.60
+    direction_quality_bull_rsi_min: float = 50.0
+    direction_quality_bull_rsi_max: float = 70.0
+    direction_quality_bull_require_ema21_gt_ema50: bool = True
+    direction_quality_bull_macd_mode: str = 'pullback'
+    direction_quality_bear_block_start_hour: Optional[int] = 14
+    direction_quality_bear_block_end_hour: Optional[int] = 17
+    direction_quality_bear_macd_mode: str = 'aligned_or_evening'
+    direction_quality_bear_evening_start_hour: int = 19
+
     # SESSION FILTER
     session_filter_enabled: bool = True
     london_session_start: dt_time = field(default_factory=lambda: dt_time(7, 0))
@@ -2039,6 +2072,30 @@ class SMCSimpleConfigService:
             'rolling_perf_high_wr_threshold',
             'rolling_perf_low_wr_penalty', 'rolling_perf_very_low_wr_penalty',
             'rolling_perf_high_wr_bonus',
+            # ADAPTIVE BUCKET GATE (live guardrail, opt-in)
+            'adaptive_bucket_gate_enabled', 'adaptive_bucket_gate_mode',
+            'adaptive_bucket_gate_bucket_mode', 'adaptive_bucket_gate_window',
+            'adaptive_bucket_gate_min_trades', 'adaptive_bucket_gate_min_win_rate',
+            'adaptive_bucket_gate_min_expectancy_pips',
+            'adaptive_bucket_gate_min_pip_samples',
+            'adaptive_bucket_gate_pause_hours',
+            'adaptive_bucket_gate_probe_after_hours',
+            'adaptive_bucket_gate_exploration_rate',
+            'adaptive_bucket_gate_max_confidence',
+            'adaptive_bucket_gate_cache_ttl_seconds',
+            # DIRECTION QUALITY GATE (opt-in, runs in backtest and live)
+            'direction_quality_gate_enabled', 'direction_quality_gate_mode',
+            'direction_quality_gate_target_epics',
+            'direction_quality_bull_block_start_hour',
+            'direction_quality_bull_block_end_hour',
+            'direction_quality_bull_min_confidence',
+            'direction_quality_bull_rsi_min', 'direction_quality_bull_rsi_max',
+            'direction_quality_bull_require_ema21_gt_ema50',
+            'direction_quality_bull_macd_mode',
+            'direction_quality_bear_block_start_hour',
+            'direction_quality_bear_block_end_hour',
+            'direction_quality_bear_macd_mode',
+            'direction_quality_bear_evening_start_hour',
             # CONTINUATION ENTRY (v5.0.0)
             'continuation_entry_enabled',
             'continuation_entry_min_adx', 'continuation_entry_min_efficiency',
@@ -2072,6 +2129,15 @@ class SMCSimpleConfigService:
             'rsi_divergence_lookback',
             # Continuation entry int fields
             'continuation_entry_max_bars_since_break',
+            # Adaptive bucket gate int fields
+            'adaptive_bucket_gate_window', 'adaptive_bucket_gate_min_trades',
+            'adaptive_bucket_gate_min_pip_samples',
+            'adaptive_bucket_gate_cache_ttl_seconds',
+            'direction_quality_bull_block_start_hour',
+            'direction_quality_bull_block_end_hour',
+            'direction_quality_bear_block_start_hour',
+            'direction_quality_bear_block_end_hour',
+            'direction_quality_bear_evening_start_hour',
         }
 
         for attr_name in direct_mappings:
