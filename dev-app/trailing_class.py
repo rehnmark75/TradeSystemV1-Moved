@@ -1676,10 +1676,13 @@ class EnhancedTradeProcessor:
                 except Exception as commit_error:
                     db.rollback()
                     self.logger.error(f"❌ [EARLY FAILURE COMMIT FAILED] Trade {trade.id}: {commit_error}")
-                    return None
+                    return False
 
-            self.logger.warning(f"⚠️ [EARLY FAILURE FAILED] Trade {trade.id}: Adjustment returned {result}")
-            return None
+            if isinstance(result, dict) and result.get("status") == "closed":
+                self.logger.warning(f"⚠️ [EARLY FAILURE] Trade {trade.id}: position already closed, aborting")
+                return None
+            self.logger.warning(f"⚠️ [EARLY FAILURE FAILED] Trade {trade.id}: Adjustment returned {result}, continuing normal trailing")
+            return False
         except Exception as e:
             self.logger.error(f"❌ [EARLY FAILURE ERROR] Trade {trade.id}: {e}", exc_info=True)
             return None
