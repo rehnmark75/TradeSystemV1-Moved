@@ -21,14 +21,17 @@ type NumericField =
   | "stage3_min_distance"
   | "min_trail_distance"
   | "break_even_trigger_points"
+  | "early_failure_check_bars"
+  | "early_failure_min_mfe_pips"
+  | "early_failure_stop_pips"
   | "partial_close_trigger_points"
   | "partial_close_size";
 
-type BoolField = "enable_partial_close";
+type BoolField = "enable_partial_close" | "early_failure_stop_enabled";
 
 type AnyField = NumericField | BoolField;
 
-type StageFilter = "all" | "early" | "stage1" | "stage2" | "stage3" | "partials";
+type StageFilter = "all" | "early" | "stage1" | "stage2" | "stage3" | "failure" | "partials";
 
 const FIELD_GROUPS: Array<{
   id: StageFilter;
@@ -60,6 +63,16 @@ const FIELD_GROUPS: Array<{
     label: "Partials",
     fields: ["break_even_trigger_points", "enable_partial_close", "partial_close_trigger_points", "partial_close_size"],
   },
+  {
+    id: "failure",
+    label: "Early Failure",
+    fields: [
+      "early_failure_stop_enabled",
+      "early_failure_check_bars",
+      "early_failure_min_mfe_pips",
+      "early_failure_stop_pips",
+    ],
+  },
 ];
 
 const NUMERIC_FIELDS: NumericField[] = [
@@ -74,11 +87,14 @@ const NUMERIC_FIELDS: NumericField[] = [
   "stage3_min_distance",
   "min_trail_distance",
   "break_even_trigger_points",
+  "early_failure_check_bars",
+  "early_failure_min_mfe_pips",
+  "early_failure_stop_pips",
   "partial_close_trigger_points",
   "partial_close_size",
 ];
 
-const BOOL_FIELDS: BoolField[] = ["enable_partial_close"];
+const BOOL_FIELDS: BoolField[] = ["enable_partial_close", "early_failure_stop_enabled"];
 
 const FIELD_LABELS: Record<AnyField, string> = {
   early_breakeven_trigger_points: "Early BE trigger (pips)",
@@ -92,6 +108,10 @@ const FIELD_LABELS: Record<AnyField, string> = {
   stage3_min_distance: "Stage 3 min distance (pips)",
   min_trail_distance: "Min trail distance (pips)",
   break_even_trigger_points: "BE trigger (pips)",
+  early_failure_stop_enabled: "Early failure enabled",
+  early_failure_check_bars: "Failure check bars",
+  early_failure_min_mfe_pips: "Required MFE (pips)",
+  early_failure_stop_pips: "Failure stop (pips)",
   enable_partial_close: "Partial close enabled",
   partial_close_trigger_points: "Partial close trigger (pips)",
   partial_close_size: "Partial close size (0.0-1.0)",
@@ -229,16 +249,6 @@ export default function TrailingSettingsPage() {
     [visibleGroups]
   );
 
-  const numericVisibleFields = useMemo(
-    () => visibleFields.filter((field): field is NumericField => NUMERIC_FIELDS.includes(field as NumericField)),
-    [visibleFields]
-  );
-
-  const boolVisibleFields = useMemo(
-    () => visibleFields.filter((field): field is BoolField => BOOL_FIELDS.includes(field as BoolField)),
-    [visibleFields]
-  );
-
   const filteredRows = useMemo(() => {
     const needle = query.trim().toLowerCase();
     return rows.filter((row) => {
@@ -337,7 +347,7 @@ export default function TrailingSettingsPage() {
       </div>
 
       <div className="trailing-stage-tabs" aria-label="Trailing stage columns">
-        {(["all", "early", "stage1", "stage2", "stage3", "partials"] as StageFilter[]).map((stage) => (
+        {(["all", "early", "stage1", "stage2", "stage3", "failure", "partials"] as StageFilter[]).map((stage) => (
           <button
             key={stage}
             type="button"
@@ -398,12 +408,7 @@ export default function TrailingSettingsPage() {
                 <th className="trailing-action-head" rowSpan={2}>State</th>
               </tr>
               <tr>
-                {numericVisibleFields.map((f) => (
-                  <th key={f} title={FIELD_LABELS[f]} className="trailing-field-head">
-                    {FIELD_LABELS[f]}
-                  </th>
-                ))}
-                {boolVisibleFields.map((f) => (
+                {visibleFields.map((f) => (
                   <th key={f} title={FIELD_LABELS[f]} className="trailing-field-head">
                     {FIELD_LABELS[f]}
                   </th>
@@ -432,9 +437,24 @@ export default function TrailingSettingsPage() {
                         </em>
                       ) : null}
                     </td>
-                    {numericVisibleFields.map((f) => {
+                    {visibleFields.map((f) => {
                       const val = getCell(row, f);
                       const isChanged = drafts[key] && f in drafts[key];
+                      if (BOOL_FIELDS.includes(f as BoolField)) {
+                        return (
+                          <td key={f} className={`trailing-bool-cell ${isChanged ? "changed-cell" : ""}`}>
+                            <label className="trailing-mini-toggle">
+                              <input
+                                type="checkbox"
+                                checked={Boolean(val)}
+                                onChange={(e) => onEdit(row, f, e.target.checked)}
+                                aria-label={`${compactEpic(row.epic)} ${FIELD_LABELS[f]}`}
+                              />
+                              <span />
+                            </label>
+                          </td>
+                        );
+                      }
                       return (
                         <td key={f} className={isChanged ? "changed-cell" : ""}>
                           <input
@@ -444,22 +464,6 @@ export default function TrailingSettingsPage() {
                             onChange={(e) => onEdit(row, f, e.target.value)}
                             aria-label={`${compactEpic(row.epic)} ${FIELD_LABELS[f]}`}
                           />
-                        </td>
-                      );
-                    })}
-                    {boolVisibleFields.map((f) => {
-                      const val = getCell(row, f);
-                      return (
-                        <td key={f} className="trailing-bool-cell">
-                          <label className="trailing-mini-toggle">
-                            <input
-                              type="checkbox"
-                              checked={Boolean(val)}
-                              onChange={(e) => onEdit(row, f, e.target.checked)}
-                              aria-label={`${compactEpic(row.epic)} ${FIELD_LABELS[f]}`}
-                            />
-                            <span />
-                          </label>
                         </td>
                       );
                     })}

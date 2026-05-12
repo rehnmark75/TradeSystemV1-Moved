@@ -22,6 +22,7 @@ from .range_fade_strategy import (
     create_range_fade_strategy,
     create_eurusd_range_fade_strategy,  # back-compat alias
 )
+from .smc_momentum_strategy import SMCMomentumStrategy
 from .signal_result import SignalResult
 from .strategy_registry import (
     StrategyRegistry,
@@ -46,6 +47,7 @@ __all__ = [
     'EURUSDRangeFadeStrategy',  # back-compat alias
     'create_range_fade_strategy',
     'create_eurusd_range_fade_strategy',  # back-compat alias
+    'SMCMomentumStrategy',
 
     # Registry
     'StrategyRegistry',

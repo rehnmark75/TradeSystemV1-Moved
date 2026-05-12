@@ -31,6 +31,10 @@ export interface TrailingConfigRow {
   stage3_min_distance: number | null;
   min_trail_distance: number | null;
   break_even_trigger_points: number | null;
+  early_failure_stop_enabled: boolean | null;
+  early_failure_check_bars: number | null;
+  early_failure_min_mfe_pips: number | null;
+  early_failure_stop_pips: number | null;
   enable_partial_close: boolean | null;
   partial_close_trigger_points: number | null;
   partial_close_size: number | null;

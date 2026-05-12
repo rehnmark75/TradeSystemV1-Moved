@@ -297,6 +297,18 @@ def _auto_register_smc_simple():
 _auto_register_smc_simple()
 
 
+def _auto_register_smc_momentum():
+    """Import SMC_MOMENTUM so its @register_strategy decorator fires for direct registry users."""
+    try:
+        from . import smc_momentum_strategy  # noqa: F401
+        logger.debug("✅ Auto-registered SMC_MOMENTUM strategy")
+    except ImportError as e:
+        logger.warning(f"⚠️ Could not auto-register SMC_MOMENTUM: {e}")
+
+
+_auto_register_smc_momentum()
+
+
 # All strategies self-register via @register_strategy decorator when their
 # modules are imported. core/strategies/__init__.py imports every active
 # strategy module, which fires the decorators — no explicit auto-register

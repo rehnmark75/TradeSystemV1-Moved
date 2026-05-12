@@ -18,9 +18,9 @@ import numpy as np
 import pandas as pd
 
 try:
-    from forex_scanner.core.strategies.strategy_registry import register_strategy, StrategyInterface
-except ImportError:
     from .strategy_registry import register_strategy, StrategyInterface
+except ImportError:
+    from forex_scanner.core.strategies.strategy_registry import register_strategy, StrategyInterface
 
 try:
     from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
@@ -423,6 +423,8 @@ class SMCMomentumStrategy(StrategyInterface):
             "strategy": "SMC_MOMENTUM",
             "epic": epic,
             "pair": pair,
+            "monitor_only": self.config.is_monitor_only(epic),
+            "is_traded": self.config.is_traded(epic),
             "entry_price": entry_price,
             "risk_pips": round(sl_pips, 1),
             "reward_pips": round(tp_pips, 1),
@@ -440,6 +442,8 @@ class SMCMomentumStrategy(StrategyInterface):
                 "wick_pct": sweep.wick_pct,
                 "is_double_sweep": sweep.is_double_sweep,
                 "htf_bias": bias,
+                "monitor_only": self.config.is_monitor_only(epic),
+                "is_traded": self.config.is_traded(epic),
             },
         }
 

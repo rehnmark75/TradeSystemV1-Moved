@@ -584,11 +584,12 @@ class TradeValidator:
             self.logger.info(f"⏭️ Skipping Claude for {_epic_log} ({_strat}, signal monitor_only=true) — saves API cost")
             return True, "Claude skipped (signal monitor_only)", None
 
-        # Skip Claude for disabled pairs and monitor-only pairs (saves API cost).
-        # SMC-only: other strategies enforce their own enabled/monitor flags upstream.
+        # Skip Claude for disabled SMC_SIMPLE pairs and monitor-only SMC_SIMPLE pairs.
+        # Other strategies enforce their own enabled/monitor flags upstream or on the
+        # emitted signal.
         _epic_check = signal.get('epic', '')
         _strategy_name = str(signal.get('strategy', '')).upper()
-        if _epic_check and _strategy_name.startswith('SMC'):
+        if _epic_check and _strategy_name == 'SMC_SIMPLE':
             try:
                 from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
                 _smc_cfg = get_smc_simple_config()

@@ -356,6 +356,7 @@ class ImpulseFadeStrategy(StrategyInterface):
                 "risk_pips": sl_pips,
                 "reward_pips": tp_pips,
                 "confidence": round(confidence, 3),
+                "confidence_score": round(confidence, 3),
                 "timeframe": "5m",
                 "pair": pair or pair_key,
                 "epic": epic or pair_key,

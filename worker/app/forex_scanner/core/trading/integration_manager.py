@@ -369,14 +369,14 @@ class IntegrationManager:
                 for sig in signals:
                     epic = sig.get('epic', '')
                     strat = str(sig.get('strategy', '')).upper()
-                    is_smc = strat.startswith('SMC')
+                    is_smc_simple = strat == 'SMC_SIMPLE'
                     skip_reason = None
                     # Strategy-level monitor_only flag (set by strategy itself; covers any strategy)
                     if sig.get('monitor_only', False):
                         skip_reason = 'signal_monitor_only'
-                    elif is_smc and epic and not smc_cfg.is_pair_enabled(epic):
+                    elif is_smc_simple and epic and not smc_cfg.is_pair_enabled(epic):
                         skip_reason = 'pair_not_enabled'
-                    elif is_smc and epic:
+                    elif is_smc_simple and epic:
                         pair_overrides = smc_cfg._pair_overrides.get(epic, {})
                         if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
                             skip_reason = 'monitor_only'

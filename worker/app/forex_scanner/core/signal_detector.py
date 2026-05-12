@@ -172,6 +172,22 @@ class SignalDetector:
         registry = StrategyRegistry.get_instance()
         strategy_class = registry._strategies.get(key)
         if strategy_class is None:
+            module_map = {
+                'SMC_MOMENTUM': 'smc_momentum_strategy',
+                'MEAN_REVERSION': 'mean_reversion_strategy',
+                'RANGE_FADE': 'range_fade_strategy',
+                'XAU_GOLD': 'xau_gold_strategy',
+                'IMPULSE_FADE': 'impulse_fade_strategy',
+            }
+            module_name = module_map.get(key)
+            if module_name:
+                try:
+                    import importlib
+                    importlib.import_module(f'.strategies.{module_name}', package=__package__)
+                    strategy_class = registry._strategies.get(key)
+                except Exception as e:
+                    self.logger.debug(f"Strategy auto-import failed for {key}: {e}")
+        if strategy_class is None:
             self.logger.warning(f"⚠️ Strategy not registered in StrategyRegistry: {key}")
             return None
 
@@ -1759,4 +1775,3 @@ class SignalDetector:
         except Exception as e:
             self.logger.error(f"❌ Error detecting impulse-fade signals for {epic}: {e}")
             return None
-
