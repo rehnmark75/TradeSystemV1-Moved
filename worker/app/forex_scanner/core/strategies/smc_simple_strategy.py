@@ -4352,6 +4352,38 @@ class SMCSimpleStrategy:
             except Exception as gate_exc:
                 self.logger.warning("Adaptive bucket gate error (letting signal through): %s", gate_exc)
 
+            # Epic regime health gate — outcome-based regime detector. In
+            # MONITORING mode it annotates signals with favorable/neutral/
+            # unfavorable based on recent stored outcomes; ACTIVE mode can
+            # block when recent realized edge turns unfavorable.
+            try:
+                try:
+                    from .epic_regime_health_gate import apply_epic_regime_health_gate
+                except ImportError:
+                    from forex_scanner.core.strategies.epic_regime_health_gate import apply_epic_regime_health_gate
+                signal = apply_epic_regime_health_gate(
+                    signal,
+                    getattr(self, '_db_config', None),
+                    self.logger,
+                    signal_timestamp=candle_dt,
+                    backtest_mode=self._backtest_mode,
+                )
+                if signal is None:
+                    self._track_rejection(
+                        stage='EPIC_REGIME_HEALTH_GATE',
+                        reason='Blocked by epic regime health gate',
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=self._collect_market_context(
+                            df_trigger, df_4h, entry_df, pip_value, direction=direction
+                        )
+                    )
+                    return None
+            except Exception as health_exc:
+                self.logger.warning("Epic regime health gate error (letting signal through): %s", health_exc)
+
             # v2.31.1: Track signal passed all filters for backtest stats
             self._track_signal_passed()
 
