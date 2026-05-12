@@ -113,9 +113,11 @@ class BacktestScanner:
 
         # Core configuration
         self.db_manager = db_manager
-        base_epics = backtest_config.get('epics', None) or self._smc_cfg.get_effective_enabled_pairs()
+        requested_epics = backtest_config.get('epics', None)
+        base_epics = requested_epics or self._smc_cfg.get_effective_enabled_pairs()
 
-        # Inject XAU_GOLD epics if available (mirrors live scanner logic)
+        # Inject XAU_GOLD epics only for XAU/GOLD backtests. Single-epic or
+        # SMC_SIMPLE FX tests must remain scoped to the requested pair.
         try:
             from services.xau_gold_config_service import get_xau_gold_config
         except ImportError:
@@ -125,7 +127,12 @@ class BacktestScanner:
                 get_xau_gold_config = None
 
         gold_epics: List[str] = []
-        if get_xau_gold_config is not None:
+        strategy_upper = (self.strategy_name or '').upper()
+        include_xau_epics = (
+            requested_epics is None
+            and ('XAU' in strategy_upper or 'GOLD' in strategy_upper)
+        )
+        if include_xau_epics and get_xau_gold_config is not None:
             try:
                 xau_cfg = get_xau_gold_config()
                 gold_epics = [e for e in xau_cfg.enabled_pairs if e not in base_epics]
@@ -230,9 +237,19 @@ class BacktestScanner:
         # Scalp flag — when True the engine selects SCALP_TRAILING_CONFIGS and runs
         # full progressive trailing (old code used fixed SL/TP, which was wrong).
         # bt.py --scalp puts scalp_mode_enabled=True into config_override (not backtest_config).
+        # Live SMC_SIMPLE orders also infer this from the DB config in order_executor.py;
+        # keep backtests aligned so --timeframe 5m matches demo/live exit handling.
+        smc_config_scalp_enabled = False
+        if 'SMC_SIMPLE' in self.strategy_name.upper() or self.strategy_name.upper() == 'SMC':
+            try:
+                smc_config_scalp_enabled = bool(getattr(get_smc_simple_config(), 'scalp_mode_enabled', False))
+            except Exception as exc:
+                self.logger.debug(f"SMC scalp mode config lookup failed; using explicit override only: {exc}")
+
         self._use_scalping_mode = (
             'SCALPING' in self.strategy_name.upper()
             or bool(self._config_override and self._config_override.get('scalp_mode_enabled'))
+            or smc_config_scalp_enabled
         )
 
         if BACKTEST_USE_LEGACY_SIMULATOR:

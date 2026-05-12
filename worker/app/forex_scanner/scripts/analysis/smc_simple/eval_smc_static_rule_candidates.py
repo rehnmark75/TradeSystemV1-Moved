@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate simple SMC_SIMPLE EURUSD rule candidates across stored executions.
+"""Evaluate simple SMC_SIMPLE rule candidates across stored executions.
 
 The purpose is anti-overfit screening. A rule must be explainable and improve
 multiple backtest windows before it is worth promoting into strategy config.
@@ -189,6 +189,47 @@ def build_rules() -> List[Rule]:
     return rules
 
 
+def build_pair_rules(epic: str) -> List[Rule]:
+    """Return broad, explainable pair-specific candidates.
+
+    These are intentionally coarse guardrails derived from repeated buckets, not
+    exact-fit thresholds. Keep them here for validation across executions before
+    promoting anything into DB config.
+    """
+    rules = build_rules()
+    if "EURJPY" not in epic.upper():
+        return rules
+
+    def bull_quality(s: Signal) -> bool:
+        if s.direction != "BULL":
+            return True
+        if 18 <= s.hour <= 19:
+            return False
+        if s.rsi is not None and s.rsi < 50:
+            return False
+        if s.macd_hist is not None and s.macd_hist <= 0:
+            return False
+        return True
+
+    def bear_quality(s: Signal) -> bool:
+        if s.direction != "BEAR":
+            return True
+        if s.hour == 9:
+            return False
+        if s.macd_hist is not None and s.macd_hist < 0:
+            return False
+        return True
+
+    rules.extend(
+        [
+            Rule("eurjpy_bull_hour18_19_rsi50_macd_pos", bull_quality),
+            Rule("eurjpy_bear_no_h09_macd_nonneg", bear_quality),
+            Rule("eurjpy_combined_direction_quality", lambda s: bull_quality(s) and bear_quality(s)),
+        ]
+    )
+    return rules
+
+
 def summarize(signals: Iterable[Signal]) -> Stats:
     stats = Stats()
     for signal in signals:
@@ -225,7 +266,7 @@ def main() -> int:
     print()
 
     scored = []
-    for rule in build_rules():
+    for rule in build_pair_rules(args.epic):
         per_exec = []
         valid = True
         for execution_id, exec_signals in sorted(by_execution.items()):
