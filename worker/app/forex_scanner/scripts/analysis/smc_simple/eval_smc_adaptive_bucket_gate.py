@@ -10,7 +10,7 @@ The goal is to test dynamic gating before changing live strategy logic:
 
 Run inside task-worker:
 
-    docker exec -i task-worker python /app/forex_scanner/scripts/eval_smc_adaptive_bucket_gate.py \
+    docker exec -i task-worker python /app/forex_scanner/scripts/analysis/smc_simple/eval_smc_adaptive_bucket_gate.py \
         --execution-id 6516 --epic CS.D.EURUSD.CEEM.IP
 """
 

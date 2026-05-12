@@ -7,7 +7,7 @@ then replayed through the adaptive bucket gate evaluator.
 
 Run inside task-worker:
 
-    docker exec -i task-worker python /app/forex_scanner/scripts/run_smc_eurusd_quality_sweep.py --days 30
+    docker exec -i task-worker python /app/forex_scanner/scripts/analysis/smc_simple/run_smc_eurusd_quality_sweep.py --days 30
 """
 
 from __future__ import annotations
@@ -32,7 +32,7 @@ DEFAULT_DSN = os.getenv(
 )
 DEFAULT_EPIC = "CS.D.EURUSD.CEEM.IP"
 BACKTEST_CLI = Path("/app/forex_scanner/backtest_cli.py")
-ADAPTIVE_EVAL = Path("/app/forex_scanner/scripts/eval_smc_adaptive_bucket_gate.py")
+ADAPTIVE_EVAL = Path("/app/forex_scanner/scripts/analysis/smc_simple/eval_smc_adaptive_bucket_gate.py")
 
 
 @dataclass
