@@ -217,6 +217,7 @@ Target Performance (v2.1.0):
 """
 
 import os
+import json
 import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Any
@@ -1286,6 +1287,9 @@ class SMCSimpleStrategy:
             rsi_buy_max = self._db_config.get_for_pair(epic, 'scalp_entry_rsi_buy_max')
             if rsi_buy_max is not None:
                 self.scalp_entry_rsi_buy_max = float(rsi_buy_max)
+            min_ema_distance = self._db_config.get_for_pair(epic, 'scalp_min_ema_distance_pips')
+            if min_ema_distance is not None:
+                self.scalp_min_ema_distance_pips = float(min_ema_distance)
 
         # Log if using per-pair overrides
         pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '')
@@ -1783,6 +1787,40 @@ class SMCSimpleStrategy:
             if param_name in overrides:
                 return overrides[param_name]
         return default_value
+
+    def _get_pair_confidence_block_ranges(self, epic: str) -> List[Tuple[float, float]]:
+        """Return per-pair confidence dead zones from parameter_overrides."""
+        raw_ranges = self._get_pair_param(epic, 'scalp_confidence_block_ranges', None)
+        if not raw_ranges:
+            return []
+
+        ranges: List[Tuple[float, float]] = []
+        if isinstance(raw_ranges, str):
+            try:
+                raw_ranges = json.loads(raw_ranges)
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid scalp_confidence_block_ranges for {epic}: {raw_ranges}")
+                return []
+
+        if not isinstance(raw_ranges, list):
+            self.logger.warning(f"Invalid scalp_confidence_block_ranges for {epic}: {raw_ranges}")
+            return []
+
+        for item in raw_ranges:
+            if not isinstance(item, (list, tuple)) or len(item) != 2:
+                self.logger.warning(f"Invalid confidence block range for {epic}: {item}")
+                continue
+            try:
+                low = float(item[0])
+                high = float(item[1])
+            except (TypeError, ValueError):
+                self.logger.warning(f"Invalid confidence block range for {epic}: {item}")
+                continue
+            if low > high:
+                low, high = high, low
+            ranges.append((low, high))
+
+        return ranges
 
     def detect_signal(
         self,
@@ -3217,6 +3255,62 @@ class SMCSimpleStrategy:
             # ================================================================
             # v2.2.0: Calculate ATR and volume ratio BEFORE confidence for new scoring
             atr = self._calculate_atr(df_trigger)
+            atr_pips_for_quality = atr / pip_value if atr and pip_value else None
+
+            if self.scalp_mode_enabled and atr_pips_for_quality is not None:
+                min_atr_pips = self._get_pair_param(epic, 'scalp_min_atr_pips', None)
+                max_atr_pips = self._get_pair_param(epic, 'scalp_max_atr_pips', None)
+                try:
+                    min_atr_pips = float(min_atr_pips) if min_atr_pips is not None else None
+                    max_atr_pips = float(max_atr_pips) if max_atr_pips is not None else None
+                except (TypeError, ValueError):
+                    self.logger.warning(
+                        f"Invalid scalp ATR quality bounds for {epic}: "
+                        f"min={min_atr_pips}, max={max_atr_pips}"
+                    )
+                    min_atr_pips = None
+                    max_atr_pips = None
+
+                atr_too_low = min_atr_pips is not None and atr_pips_for_quality < min_atr_pips
+                atr_too_high = max_atr_pips is not None and atr_pips_for_quality > max_atr_pips
+                if atr_too_low or atr_too_high:
+                    if atr_too_low:
+                        reason = f"ATR {atr_pips_for_quality:.1f}p below scalp quality floor {min_atr_pips:.1f}p"
+                    else:
+                        reason = f"ATR {atr_pips_for_quality:.1f}p above scalp quality cap {max_atr_pips:.1f}p"
+                    self.logger.info(f"\n❌ {reason}")
+                    risk_result = {
+                        'entry_price': entry_price,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'risk_pips': risk_pips,
+                        'reward_pips': reward_pips,
+                        'rr_ratio': rr_ratio,
+                    }
+                    context = self._collect_market_context(
+                        df_trigger,
+                        df_4h,
+                        df_entry,
+                        pip_value,
+                        ema_result=ema_result,
+                        swing_result=swing_result,
+                        pullback_result=pullback_result,
+                        risk_result=risk_result,
+                        direction=direction,
+                    )
+                    context['atr_pips'] = atr_pips_for_quality
+                    context['scalp_min_atr_pips'] = min_atr_pips
+                    context['scalp_max_atr_pips'] = max_atr_pips
+                    self._track_rejection(
+                        stage='SCALP_ATR_QUALITY',
+                        reason=reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=context
+                    )
+                    return None
 
             # Volume ratio (current volume vs SMA) - needed for gradient volume scoring
             volume_ratio = 1.0
@@ -3456,6 +3550,48 @@ class SMCSimpleStrategy:
                     context=context
                 )
                 return None
+
+            # Pair-specific confidence dead zones.
+            # Some epics have profitable low/high confidence areas but lose in
+            # middle bands where the score is ambiguous rather than decisive.
+            for block_min, block_max in self._get_pair_confidence_block_ranges(epic):
+                if round(block_min, 4) <= round(confidence, 4) <= round(block_max, 4):
+                    reason = (
+                        f"Confidence {confidence*100:.0f}% in blocked quality band "
+                        f"({block_min*100:.0f}-{block_max*100:.0f}%)"
+                    )
+                    self.logger.info(f"\n❌ {reason}")
+                    risk_result = {
+                        'entry_price': entry_price,
+                        'stop_loss': stop_loss,
+                        'take_profit': take_profit,
+                        'risk_pips': risk_pips,
+                        'reward_pips': reward_pips,
+                        'rr_ratio': rr_ratio,
+                    }
+                    context = self._collect_market_context(
+                        df_trigger,
+                        df_4h,
+                        df_entry,
+                        pip_value,
+                        ema_result=ema_result,
+                        swing_result=swing_result,
+                        pullback_result=pullback_result,
+                        risk_result=risk_result,
+                        direction=direction,
+                    )
+                    context['confidence_score'] = confidence
+                    context['confidence_block_range'] = [block_min, block_max]
+                    self._track_rejection(
+                        stage='CONFIDENCE_QUALITY_BAND',
+                        reason=reason,
+                        epic=epic,
+                        pair=pair,
+                        candle_timestamp=candle_timestamp,
+                        direction=direction,
+                        context=context
+                    )
+                    return None
 
             # ================================================================
             # v2.9.0: CONFIDENCE CAP CHECK (Paradox: higher confidence = worse)

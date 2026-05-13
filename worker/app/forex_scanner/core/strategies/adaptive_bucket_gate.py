@@ -104,18 +104,22 @@ def _load_closed_bucket_trades(
     epic = str(signal.get("epic", ""))
     direction = str(signal.get("signal_type") or signal.get("direction") or "").upper()
     cache_ttl = int(_cfg(config, "adaptive_bucket_gate_cache_ttl_seconds", 300, epic))
+    live_since = _cfg(config, "adaptive_bucket_gate_live_since", None, epic)
     now = datetime.utcnow()
-    cache_key = f"{environment}:{bucket_mode}:{epic}:{direction}:{window}"
+    cache_key = f"{environment}:{bucket_mode}:{epic}:{direction}:{window}:{live_since or ''}"
     cached = _cache.get(cache_key)
     if cached and (now - cached[0]).total_seconds() < cache_ttl:
         return cached[1]
 
     where_extra = ""
     params: List[Any] = [epic, "SMC_SIMPLE", direction, environment, environment]
+    if live_since not in (None, ""):
+        where_extra += " AND t.closed_at >= %s "
+        params.append(live_since)
 
     if bucket_mode == "direction_session":
         session = _session_from_signal(signal, now)
-        where_extra = """
+        where_extra += """
           AND lower(coalesce(
               nullif(a.market_session, ''),
               CASE
@@ -128,7 +132,7 @@ def _load_closed_bucket_trades(
         params.append(session)
     elif bucket_mode == "direction_regime":
         regime = str(signal.get("market_regime_detected") or signal.get("market_regime") or "").lower()
-        where_extra = "AND lower(coalesce(a.market_regime_detected, a.market_regime, '')) = %s"
+        where_extra += "AND lower(coalesce(a.market_regime_detected, a.market_regime, '')) = %s"
         params.append(regime)
 
     params.append(window)
@@ -161,6 +165,88 @@ def _load_closed_bucket_trades(
             conn.close()
     except Exception as exc:
         logger.warning("[AdaptiveBucketGate] trade query failed: %s", exc)
+        rows = []
+
+    _cache[cache_key] = (now, rows)
+    return rows
+
+
+def _load_seed_bucket_trades(
+    signal: Dict[str, Any],
+    config: Any,
+    bucket_mode: str,
+    window: int,
+) -> List[Dict[str, Any]]:
+    """Load historical backtest outcomes for bootstrapping live bucket state."""
+    epic = str(signal.get("epic", ""))
+    direction = str(signal.get("signal_type") or signal.get("direction") or "").upper()
+    execution_id = _cfg(config, "adaptive_bucket_gate_seed_execution_id", None, epic)
+    if execution_id in (None, "", 0, "0"):
+        return []
+
+    strategy_name = str(_cfg(config, "adaptive_bucket_gate_seed_strategy_name", "SMC_SIMPLE", epic))
+    cache_ttl = int(_cfg(config, "adaptive_bucket_gate_cache_ttl_seconds", 300, epic))
+    now = datetime.utcnow()
+    cache_key = f"seed:{execution_id}:{strategy_name}:{bucket_mode}:{epic}:{direction}:{window}"
+    cached = _cache.get(cache_key)
+    if cached and (now - cached[0]).total_seconds() < cache_ttl:
+        return cached[1]
+
+    where_extra = ""
+    params: List[Any] = [int(execution_id), epic, strategy_name, direction]
+
+    if bucket_mode == "direction_session":
+        session = _session_from_signal(signal, now)
+        where_extra = """
+          AND (
+              CASE
+                  WHEN extract(hour from signal_timestamp) BETWEEN 7 AND 11 THEN 'european'
+                  WHEN extract(hour from signal_timestamp) BETWEEN 12 AND 21 THEN 'american'
+                  ELSE 'asian'
+              END
+          ) = %s
+        """
+        params.append(session)
+    elif bucket_mode == "direction_regime":
+        regime = str(signal.get("market_regime_detected") or signal.get("market_regime") or "").lower()
+        where_extra = """
+          AND lower(coalesce(
+              market_intelligence->>'market_regime_detected',
+              market_intelligence->>'market_regime',
+              indicator_values->>'market_regime_detected',
+              indicator_values->>'market_regime',
+              ''
+          )) = %s
+        """
+        params.append(regime)
+
+    params.append(window)
+    query = f"""
+        SELECT
+            signal_timestamp AS closed_at,
+            pips_gained,
+            NULL::numeric AS profit_loss
+        FROM backtest_signals
+        WHERE execution_id = %s
+          AND epic = %s
+          AND strategy_name = %s
+          AND signal_type = %s
+          AND pips_gained IS NOT NULL
+          {where_extra}
+        ORDER BY signal_timestamp DESC
+        LIMIT %s
+    """
+
+    try:
+        conn = psycopg2.connect(_dsn())
+        try:
+            with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                cur.execute(query, params)
+                rows = [dict(row) for row in cur.fetchall()]
+        finally:
+            conn.close()
+    except Exception as exc:
+        logger.warning("[AdaptiveBucketGate] seed backtest query failed: %s", exc)
         rows = []
 
     _cache[cache_key] = (now, rows)
@@ -229,7 +315,16 @@ def apply_adaptive_bucket_gate(
     key = _bucket_key(signal, bucket_mode, now)
     state = _states.setdefault(key, BucketState())
 
-    rows = _load_closed_bucket_trades(signal, config, bucket_mode, window, env)
+    live_rows = _load_closed_bucket_trades(signal, config, bucket_mode, window, env)
+    rows = live_rows
+    stats_source = "live"
+    if len(live_rows) < min_trades:
+        seed_window = int(_cfg(config, "adaptive_bucket_gate_seed_window", window, epic))
+        seed_rows = _load_seed_bucket_trades(signal, config, bucket_mode, seed_window)
+        if seed_rows:
+            rows = (live_rows + seed_rows)[:max(window, len(live_rows))]
+            stats_source = "live_seed_backtest" if live_rows else "seed_backtest"
+
     n, win_rate, expectancy, pip_samples = _evaluate_rows(rows)
 
     poor_win_rate = n >= min_trades and win_rate < min_wr
@@ -259,6 +354,7 @@ def apply_adaptive_bucket_gate(
     signal["adaptive_bucket_gate_win_rate"] = win_rate
     signal["adaptive_bucket_gate_trades"] = n
     signal["adaptive_bucket_gate_expectancy_pips"] = expectancy
+    signal["adaptive_bucket_gate_stats_source"] = stats_source
 
     confidence = signal.get("confidence_score", signal.get("confidence"))
     if max_confidence is not None and confidence is not None and float(confidence) > max_confidence:
