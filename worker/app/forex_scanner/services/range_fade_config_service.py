@@ -71,23 +71,47 @@ class RangeFadeConfig:
     htf_ema_period: int = 50
     htf_slope_bars: int = 3
     allow_neutral_htf: bool = False
+    allowed_directions: str = ""  # comma-separated BUY/SELL list; blank allows both
 
     max_current_range_pips: float = 12.0
     adx_ceiling: float = 25.0
+    buy_adx_ceiling: Optional[float] = None
+    sell_adx_ceiling: Optional[float] = None
+    min_macd_histogram_pips: float = 0.0
     min_confidence: float = 0.52
     max_confidence: float = 0.84
 
     fixed_stop_loss_pips: float = 8.0
     fixed_take_profit_pips: float = 12.0
+    dynamic_sl_tp_enabled: bool = False
+    dynamic_sl_band_width_sl_mult: float = 0.55
+    dynamic_sl_band_width_tp_mult: float = 0.85
+    dynamic_sl_min_pips: float = 5.0
+    dynamic_sl_max_pips: float = 9.0
+    dynamic_tp_min_pips: float = 8.0
+    dynamic_tp_max_pips: float = 15.0
     signal_cooldown_minutes: int = 30
 
     london_start_hour_utc: int = 6
     new_york_end_hour_utc: int = 18
     blocked_hours_utc: str = ""  # comma-separated hours to block, e.g. "7,8,15,16,18"
+    buy_blocked_hours_utc: str = ""
+    sell_blocked_hours_utc: str = ""
+    buy_start_hour_utc: Optional[int] = None
+    buy_end_hour_utc: Optional[int] = None
+    sell_start_hour_utc: Optional[int] = None
+    sell_end_hour_utc: Optional[int] = None
+    buy_allowed_hours_utc: str = ""
+    sell_allowed_hours_utc: str = ""
+    buy_allowed_htf_biases: str = ""
+    sell_allowed_htf_biases: str = ""
 
     pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    backtest_overrides: Dict[str, Any] = field(default_factory=dict)
 
     def _override(self, epic: str, key: str, default: Any) -> Any:
+        if key in self.backtest_overrides and self.backtest_overrides[key] is not None:
+            return self.backtest_overrides[key]
         row = self.pair_overrides.get(epic, {})
         if key in row and row[key] is not None:
             return row[key]
@@ -123,18 +147,78 @@ class RangeFadeConfig:
     def get_pair_rsi_overbought(self, epic: str) -> int:
         return int(self._override(epic, "rsi_overbought", self.rsi_overbought))
 
-    def get_pair_blocked_hours(self, epic: str) -> set:
-        raw = self._override(epic, "blocked_hours_utc", self.blocked_hours_utc)
+    def get_pair_bb_mult(self, epic: str) -> float:
+        return float(self._override(epic, "bb_mult", self.bb_mult))
+
+    def get_pair_range_lookback_bars(self, epic: str) -> int:
+        return int(self._override(epic, "range_lookback_bars", self.range_lookback_bars))
+
+    def get_pair_range_proximity_pips(self, epic: str) -> float:
+        return float(self._override(epic, "range_proximity_pips", self.range_proximity_pips))
+
+    def get_pair_min_band_width_pips(self, epic: str) -> float:
+        return float(self._override(epic, "min_band_width_pips", self.min_band_width_pips))
+
+    def get_pair_max_band_width_pips(self, epic: str) -> float:
+        return float(self._override(epic, "max_band_width_pips", self.max_band_width_pips))
+
+    def get_pair_max_current_range_pips(self, epic: str) -> float:
+        return float(self._override(epic, "max_current_range_pips", self.max_current_range_pips))
+
+    def get_pair_min_macd_histogram_pips(self, epic: str) -> float:
+        return float(self._override(epic, "min_macd_histogram_pips", self.min_macd_histogram_pips))
+
+    def get_pair_adx_ceiling(self, epic: str, direction: str) -> float:
+        direction_key = f"{direction.lower()}_adx_ceiling"
+        direction_value = self._override(epic, direction_key, getattr(self, direction_key, None))
+        if direction_value not in (None, ""):
+            return float(direction_value)
+        return float(self._override(epic, "adx_ceiling", self.adx_ceiling))
+
+    def get_pair_blocked_hours(self, epic: str, direction: str = "") -> set:
+        key = f"{direction.lower()}_blocked_hours_utc" if direction else "blocked_hours_utc"
+        default = getattr(self, key, self.blocked_hours_utc)
+        raw = self._override(epic, key, default)
         if not raw:
             return set()
         return {int(h.strip()) for h in str(raw).split(",") if h.strip().isdigit()}
 
+    def is_direction_allowed(self, epic: str, direction: str) -> bool:
+        raw = self._override(epic, "allowed_directions", self.allowed_directions)
+        if not raw:
+            return True
+        allowed = {part.strip().upper() for part in str(raw).split(",") if part.strip()}
+        return direction.upper() in allowed
+
     def is_session_allowed(self, hour_utc: int, epic: str = "") -> bool:
-        if not (self.london_start_hour_utc <= hour_utc <= self.new_york_end_hour_utc):
+        start_hour = int(self._override(epic, "london_start_hour_utc", self.london_start_hour_utc))
+        end_hour = int(self._override(epic, "new_york_end_hour_utc", self.new_york_end_hour_utc))
+        if not (start_hour <= hour_utc <= end_hour):
             return False
         if epic and hour_utc in self.get_pair_blocked_hours(epic):
             return False
         return True
+
+    def is_direction_session_allowed(self, hour_utc: int, epic: str, direction: str) -> bool:
+        direction_lower = direction.lower()
+        allowed_hours_raw = self._override(epic, f"{direction_lower}_allowed_hours_utc", "")
+        if allowed_hours_raw:
+            allowed_hours = {int(h.strip()) for h in str(allowed_hours_raw).split(",") if h.strip().isdigit()}
+            return hour_utc in allowed_hours
+        start_default = self._override(epic, "london_start_hour_utc", self.london_start_hour_utc)
+        end_default = self._override(epic, "new_york_end_hour_utc", self.new_york_end_hour_utc)
+        start_hour = int(self._override(epic, f"{direction_lower}_start_hour_utc", start_default))
+        end_hour = int(self._override(epic, f"{direction_lower}_end_hour_utc", end_default))
+        if not (start_hour <= hour_utc <= end_hour):
+            return False
+        blocked = self.get_pair_blocked_hours(epic) | self.get_pair_blocked_hours(epic, direction)
+        return hour_utc not in blocked
+
+    def is_htf_bias_allowed(self, epic: str, direction: str, htf_bias: str) -> bool:
+        default = "bullish,neutral" if direction.upper() == "BUY" else "bearish,neutral"
+        raw = self._override(epic, f"{direction.lower()}_allowed_htf_biases", default)
+        allowed = {part.strip().lower() for part in str(raw).split(",") if part.strip()}
+        return htf_bias.lower() in allowed
 
 
 def build_range_fade_config(profile: Optional[str] = None) -> RangeFadeConfig:

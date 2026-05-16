@@ -58,6 +58,7 @@ def apply_config_overrides(
     """Apply backtest override values to the strategy config in place."""
     if not overrides:
         return cfg
+    applied: Dict[str, Any] = {}
     for key, value in overrides.items():
         if not hasattr(cfg, key):
             continue
@@ -74,8 +75,11 @@ def apply_config_overrides(
             else:
                 new_val = value
             setattr(cfg, key, new_val)
+            applied[key] = new_val
         except Exception as exc:
             logger.warning("RANGE_FADE override failed for %s=%r: %s", key, value, exc)
+    if applied and hasattr(cfg, "backtest_overrides"):
+        cfg.backtest_overrides.update(applied)
     return cfg
 
 
@@ -167,12 +171,14 @@ class RangeFadeStrategy(StrategyInterface):
         high = df["high"].astype(float)
         low = df["low"].astype(float)
 
+        bb_mult = cfg.get_pair_bb_mult(epic)
         ma = close.rolling(cfg.bb_period).mean()
         sd = close.rolling(cfg.bb_period).std()
-        upper = ma + cfg.bb_mult * sd
-        lower = ma - cfg.bb_mult * sd
+        upper = ma + bb_mult * sd
+        lower = ma - bb_mult * sd
         rsi = self._rsi(close, cfg.rsi_period)
         atr = self._atr(df, 14)
+        _, _, macd_histogram = self._macd(close)
 
         latest_close = float(close.iloc[-1])
         latest_upper = self._safe_float(upper.iloc[-1])
@@ -180,30 +186,45 @@ class RangeFadeStrategy(StrategyInterface):
         latest_mid = self._safe_float(ma.iloc[-1])
         latest_rsi = self._safe_float(rsi.iloc[-1])
         latest_atr = self._safe_float(atr.iloc[-1])
+        latest_macd_histogram = self._safe_float(macd_histogram.iloc[-1])
         latest_bar_range = self._safe_float((high.iloc[-1] - low.iloc[-1]))
-        if None in (latest_upper, latest_lower, latest_mid, latest_rsi, latest_atr, latest_bar_range):
+        if None in (latest_upper, latest_lower, latest_mid, latest_rsi, latest_atr, latest_macd_histogram, latest_bar_range):
             self._reject(epic, "indicator_nan")
             return None
         rsi_oversold = cfg.get_pair_rsi_oversold(epic)
         rsi_overbought = cfg.get_pair_rsi_overbought(epic)
+        range_proximity_pips = cfg.get_pair_range_proximity_pips(epic)
+        min_band_width_pips = cfg.get_pair_min_band_width_pips(epic)
+        max_band_width_pips = cfg.get_pair_max_band_width_pips(epic)
+        max_current_range_pips = cfg.get_pair_max_current_range_pips(epic)
+        min_macd_histogram_pips = cfg.get_pair_min_macd_histogram_pips(epic)
+        range_lookback_bars = cfg.get_pair_range_lookback_bars(epic)
 
         pip = 0.01 if "JPY" in epic.upper() else 0.0001
+        macd_histogram_pips = abs(latest_macd_histogram) / pip
+        if macd_histogram_pips < min_macd_histogram_pips:
+            self._reject(
+                epic,
+                "macd_histogram_too_low",
+                details={
+                    "macd_histogram_pips": round(macd_histogram_pips, 2),
+                    "minimum": min_macd_histogram_pips,
+                },
+            )
+            return None
+
         band_width_pips = (latest_upper - latest_lower) / pip
-        if band_width_pips < cfg.min_band_width_pips or band_width_pips > cfg.max_band_width_pips:
+        if band_width_pips < min_band_width_pips or band_width_pips > max_band_width_pips:
             self._reject(epic, "band_width_out_of_range")
             return None
-        if latest_bar_range / pip > cfg.max_current_range_pips:
+        if latest_bar_range / pip > max_current_range_pips:
             self._reject(epic, "bar_range_too_wide")
             return None
 
         adx_val = self._get_adx(df)
-        adx_ceil = getattr(cfg, "adx_ceiling", 25.0)
-        if adx_val is not None and adx_val > adx_ceil:
-            self._reject(epic, "adx_ceiling", details={"adx": round(adx_val, 1), "ceiling": adx_ceil})
-            return None
 
-        prior_high = high.rolling(cfg.range_lookback_bars).max().shift(1)
-        prior_low = low.rolling(cfg.range_lookback_bars).min().shift(1)
+        prior_high = high.rolling(range_lookback_bars).max().shift(1)
+        prior_low = low.rolling(range_lookback_bars).min().shift(1)
         range_high = self._safe_float(prior_high.iloc[-1])
         range_low = self._safe_float(prior_low.iloc[-1])
         if range_high is None or range_low is None:
@@ -226,34 +247,48 @@ class RangeFadeStrategy(StrategyInterface):
         if (
             latest_close <= latest_lower
             and latest_rsi <= rsi_oversold
-            and distance_to_low_pips <= cfg.range_proximity_pips
-            and htf_bias in ("bullish", "neutral")
+            and distance_to_low_pips <= range_proximity_pips
+            and cfg.is_htf_bias_allowed(epic, "BUY", htf_bias)
         ):
             direction = "BUY"
             rsi_extremity = max(0.0, rsi_oversold - latest_rsi) / max(rsi_oversold, 1)
             band_penetration = max(0.0, latest_lower - latest_close) / max(latest_atr, 1e-6)
-            range_proximity = max(0.0, cfg.range_proximity_pips - distance_to_low_pips) / max(cfg.range_proximity_pips, 1e-6)
+            range_proximity = max(0.0, range_proximity_pips - distance_to_low_pips) / max(range_proximity_pips, 1e-6)
         elif (
             latest_close >= latest_upper
             and latest_rsi >= rsi_overbought
-            and distance_to_high_pips <= cfg.range_proximity_pips
-            and htf_bias in ("bearish", "neutral")
+            and distance_to_high_pips <= range_proximity_pips
+            and cfg.is_htf_bias_allowed(epic, "SELL", htf_bias)
         ):
             direction = "SELL"
             rsi_extremity = max(0.0, latest_rsi - rsi_overbought) / max(100 - rsi_overbought, 1)
             band_penetration = max(0.0, latest_close - latest_upper) / max(latest_atr, 1e-6)
-            range_proximity = max(0.0, cfg.range_proximity_pips - distance_to_high_pips) / max(cfg.range_proximity_pips, 1e-6)
+            range_proximity = max(0.0, range_proximity_pips - distance_to_high_pips) / max(range_proximity_pips, 1e-6)
 
         if direction is None:
             self._reject(epic, "no_trigger")
+            return None
+        if not cfg.is_direction_allowed(epic, direction):
+            self._reject(epic, "direction_blocked", direction=direction)
+            return None
+        if not cfg.is_direction_session_allowed(now.hour, epic, direction):
+            self._reject(epic, "direction_session_blocked", direction=direction)
+            return None
+        adx_ceil = cfg.get_pair_adx_ceiling(epic, direction)
+        if adx_val is not None and adx_ceil > 0 and adx_val > adx_ceil:
+            self._reject(
+                epic,
+                "adx_ceiling",
+                direction=direction,
+                details={"adx": round(adx_val, 1), "ceiling": adx_ceil},
+            )
             return None
 
         score = min(1.0, 0.45 * rsi_extremity + 0.35 * min(1.0, band_penetration) + 0.20 * range_proximity)
         confidence = round(cfg.min_confidence + score * (cfg.max_confidence - cfg.min_confidence), 3)
 
         pip_size = 0.01 if "JPY" in pair.upper() else 0.0001
-        sl_pips = cfg.get_pair_fixed_stop_loss_pips(epic)
-        tp_pips = cfg.get_pair_fixed_take_profit_pips(epic)
+        sl_pips, tp_pips = self._resolve_sl_tp_pips(cfg, epic, band_width_pips)
         sl_distance = sl_pips * pip_size
         tp_distance = tp_pips * pip_size
         if direction == "SELL":
@@ -286,7 +321,7 @@ class RangeFadeStrategy(StrategyInterface):
             "market_regime": "range_fade",
             "regime": "range_fade",
             "monitor_only": cfg.is_pair_monitor_only(epic),
-            "adx": self._get_adx(df),
+            "adx": adx_val,
             "adx_htf": self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None,
             "rsi": latest_rsi,
             "strategy_indicators": {
@@ -294,6 +329,12 @@ class RangeFadeStrategy(StrategyInterface):
                 "bb_lower": latest_lower,
                 "bb_mid": latest_mid,
                 "band_width_pips": round(band_width_pips, 2),
+                "bb_mult": bb_mult,
+                "macd_histogram_pips": round(macd_histogram_pips, 2),
+                "min_macd_histogram_pips": min_macd_histogram_pips,
+                "adx_ceiling": adx_ceil,
+                "dynamic_sl_tp_enabled": cfg.dynamic_sl_tp_enabled,
+                "allowed_directions": cfg._override(epic, "allowed_directions", cfg.allowed_directions),
                 "rsi": latest_rsi,
                 "rsi_oversold": rsi_oversold,
                 "rsi_overbought": rsi_overbought,
@@ -327,6 +368,24 @@ class RangeFadeStrategy(StrategyInterface):
             except Exception as _lpf_exc:
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
         return signal
+
+    def _resolve_sl_tp_pips(
+        self,
+        cfg: RangeFadeConfig,
+        epic: str,
+        band_width_pips: float,
+    ) -> tuple[float, float]:
+        if not cfg.dynamic_sl_tp_enabled:
+            return (
+                cfg.get_pair_fixed_stop_loss_pips(epic),
+                cfg.get_pair_fixed_take_profit_pips(epic),
+            )
+
+        sl_raw = band_width_pips * cfg.dynamic_sl_band_width_sl_mult
+        tp_raw = band_width_pips * cfg.dynamic_sl_band_width_tp_mult
+        sl_pips = min(max(sl_raw, cfg.dynamic_sl_min_pips), cfg.dynamic_sl_max_pips)
+        tp_pips = min(max(tp_raw, cfg.dynamic_tp_min_pips), cfg.dynamic_tp_max_pips)
+        return round(float(sl_pips), 2), round(float(tp_pips), 2)
 
     def _get_htf_bias(self, df_1h: Optional[pd.DataFrame]) -> Optional[str]:
         if df_1h is None or len(df_1h) < self.config.htf_ema_period + self.config.htf_slope_bars + 5:
@@ -381,6 +440,12 @@ class RangeFadeStrategy(StrategyInterface):
             axis=1,
         ).max(axis=1)
         return tr.ewm(alpha=1.0 / period, adjust=False).mean()
+
+    @staticmethod
+    def _macd(close: pd.Series) -> tuple[pd.Series, pd.Series, pd.Series]:
+        macd_line = close.ewm(span=12, adjust=False).mean() - close.ewm(span=26, adjust=False).mean()
+        macd_signal = macd_line.ewm(span=9, adjust=False).mean()
+        return macd_line, macd_signal, macd_line - macd_signal
 
     def _get_adx(self, df: Optional[pd.DataFrame]) -> Optional[float]:
         if df is None or len(df) < 20:
