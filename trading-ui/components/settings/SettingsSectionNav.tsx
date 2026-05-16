@@ -65,6 +65,12 @@ const NAV_GROUPS: SettingsNavGroup[] = [
         description: "Ratio ladders and progression tuning for managed exits.",
         eyebrow: "Ratios",
       },
+      {
+        href: "/settings/daily-pnl-gate",
+        label: "Daily PnL Gate",
+        description: "Profit lock-in and loss stop to block new orders once daily limits are hit.",
+        eyebrow: "Circuit Breaker",
+      },
     ],
   },
 ];

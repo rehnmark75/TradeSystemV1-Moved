@@ -340,6 +340,101 @@ def check_trade_cooldown(epic: str, db: Session) -> dict:
             "message": f"Cooldown check failed, allowing trade: {str(e)}"
         }
 
+
+_STRATEGY_CONFIG_DB_URL = os.getenv(
+    'STRATEGY_CONFIG_DATABASE_URL',
+    'postgresql://postgres:postgres@postgres:5432/strategy_config',
+)
+
+def check_daily_pnl_limit(
+    db: Session,
+    environment: str,
+    epic: str = None,
+    direction: str = None,
+    alert_id: int = None,
+    trigger_source: str = None,
+) -> dict:
+    """
+    Check whether today's realized PnL has crossed the configured profit or loss limit.
+    Reads config from strategy_config.daily_pnl_gate_config (hot-reloadable, no cache).
+    On any error, fails open (allows the trade) to avoid blocking on transient DB issues.
+
+    Returns:
+        dict with keys: allowed (bool), message (str), daily_pnl_sek (float), limit_hit (str|None)
+    """
+    try:
+        import psycopg2
+        from psycopg2.extras import RealDictCursor
+        with psycopg2.connect(_STRATEGY_CONFIG_DB_URL) as sc_conn:
+            with sc_conn.cursor(cursor_factory=RealDictCursor) as cur:
+                cur.execute(
+                    "SELECT is_enabled, profit_limit_sek, loss_limit_sek "
+                    "FROM daily_pnl_gate_config WHERE environment = %s",
+                    (environment,),
+                )
+                row = cur.fetchone()
+
+        if not row or not row['is_enabled']:
+            return {"allowed": True, "message": "Daily PnL gate disabled", "daily_pnl_sek": None, "limit_hit": None}
+
+        profit_limit = float(row['profit_limit_sek'])
+        loss_limit = float(row['loss_limit_sek'])
+
+        from sqlalchemy import text
+        result = db.execute(
+            text(
+                "SELECT COALESCE(SUM(profit_loss), 0) AS total "
+                "FROM trade_log "
+                "WHERE status = 'closed' "
+                "  AND environment = :env "
+                "  AND profit_loss IS NOT NULL "
+                "  AND DATE(closed_at) = CURRENT_DATE"
+            ),
+            {"env": environment},
+        )
+        daily_pnl = float(result.scalar())
+
+        if daily_pnl >= profit_limit:
+            limit_hit = "profit"
+            msg = (
+                f"Daily profit limit reached: today={daily_pnl:+.2f} SEK "
+                f"(limit +{profit_limit:.2f} SEK)"
+            )
+        elif daily_pnl <= loss_limit:
+            limit_hit = "loss"
+            msg = (
+                f"Daily loss limit reached: today={daily_pnl:+.2f} SEK "
+                f"(limit {loss_limit:.2f} SEK)"
+            )
+        else:
+            logger.info(
+                f"✅ PnL gate OK: env={environment} today={daily_pnl:+.2f} SEK "
+                f"(profit limit +{profit_limit:.2f}, loss limit {loss_limit:.2f})"
+            )
+            return {"allowed": True, "message": f"Within daily PnL limits: {daily_pnl:+.2f} SEK", "daily_pnl_sek": daily_pnl, "limit_hit": None}
+
+        logger.warning(f"🛑 PnL gate BLOCK: env={environment} {msg} epic={epic} dir={direction}")
+
+        try:
+            with psycopg2.connect(_STRATEGY_CONFIG_DB_URL) as sc_conn:
+                with sc_conn.cursor() as cur:
+                    cur.execute(
+                        "INSERT INTO daily_pnl_gate_blocks "
+                        "(environment, limit_hit, daily_pnl_sek, profit_limit_sek, loss_limit_sek, epic, direction, alert_id, trigger_source) "
+                        "VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
+                        (environment, limit_hit, daily_pnl, profit_limit, loss_limit, epic, direction, alert_id, trigger_source),
+                    )
+                sc_conn.commit()
+        except Exception as log_err:
+            logger.warning(f"Failed to write PnL gate block log: {log_err}")
+
+        return {"allowed": False, "message": msg, "daily_pnl_sek": daily_pnl, "limit_hit": limit_hit}
+
+    except Exception as e:
+        logger.warning(f"Daily PnL gate check failed, allowing trade: {e}")
+        return {"allowed": True, "message": f"PnL gate check failed, allowing trade: {e}", "daily_pnl_sek": None, "limit_hit": None}
+
+
 @router.post("/place-order")
 async def ig_place_order(
     body: TradeRequest,
@@ -409,6 +504,24 @@ async def ig_place_order(
         )
     else:
         logger.info(f"✅ Cooldown check passed: {cooldown_result['message']}")
+
+    # Check daily PnL limits (profit lock-in / loss stop)
+    pnl_gate = check_daily_pnl_limit(
+        db, trading_environment,
+        epic=epic, direction=direction,
+        alert_id=alert_id, trigger_source=trigger_source,
+    )
+    if not pnl_gate["allowed"]:
+        raise HTTPException(
+            status_code=423,  # Locked — distinct from 429 cooldown
+            detail={
+                "error": "Daily PnL limit reached",
+                "message": pnl_gate["message"],
+                "daily_pnl_sek": pnl_gate["daily_pnl_sek"],
+                "limit_hit": pnl_gate["limit_hit"],
+                "epic": epic,
+            },
+        )
 
     try:
         # Check for existing position with error handling
