@@ -203,11 +203,6 @@ class IntelligentForexScanner:
         
         # Initialize signal detector
         self.signal_detector = self._initialize_signal_detector(db_manager, user_timezone)
-        data_fetcher = getattr(self.signal_detector, 'data_fetcher', None)
-        if data_fetcher:
-            data_fetcher.cache_enabled = True
-            data_fetcher._cache_timeout = max(getattr(data_fetcher, '_cache_timeout', 0), 900)
-            self.logger.info("📦 DataFetcher scan cache enabled (15-minute TTL)")
 
         # Initialize deduplication manager FIRST (shared with SignalProcessor)
         # Get dedup setting from database - NO FALLBACK

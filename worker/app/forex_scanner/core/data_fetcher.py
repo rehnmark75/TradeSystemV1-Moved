@@ -76,7 +76,7 @@ class DataFetcher:
 
         # Cache for recently fetched data
         self._data_cache = {}
-        self._cache_timeout = 900  # 15 minutes
+        self._cache_timeout = 150  # 2.5 minutes
         self._indicator_cache = {}
 
     def _load_fallback_config(self):

@@ -1363,7 +1363,8 @@ class SignalDetector:
         try:
             cache_key = (epic, pair)
             cached = self._routing_cache.get(cache_key)
-            if cached and (datetime.now() - cached['timestamp']).total_seconds() < self._routing_cache_ttl_seconds:
+            now = datetime.now(timezone.utc)
+            if cached and (now - cached['timestamp']).total_seconds() < self._routing_cache_ttl_seconds:
                 return dict(cached['result'])
 
             # Fetch 1h data for regime detection (same as backtest)
@@ -1515,11 +1516,11 @@ class SignalDetector:
                 'volatility_state': volatility_state,
             }
             self._routing_cache[cache_key] = {
-                'timestamp': datetime.now(),
+                'timestamp': now,
                 'result': dict(result),
             }
             if len(self._routing_cache) > 256:
-                cutoff = datetime.now() - timedelta(seconds=self._routing_cache_ttl_seconds)
+                cutoff = now - timedelta(seconds=self._routing_cache_ttl_seconds)
                 self._routing_cache = {
                     key: entry for key, entry in self._routing_cache.items()
                     if entry['timestamp'] >= cutoff
@@ -1576,7 +1577,8 @@ class SignalDetector:
         try:
             cache_key = epic
             cached = self._weekly_consistency_cache.get(cache_key)
-            if cached and (datetime.now() - cached['timestamp']).total_seconds() < self._weekly_consistency_cache_ttl_seconds:
+            now = datetime.now(timezone.utc)
+            if cached and (now - cached['timestamp']).total_seconds() < self._weekly_consistency_cache_ttl_seconds:
                 return dict(cached['result'])
 
             from sqlalchemy import text
@@ -1598,7 +1600,7 @@ class SignalDetector:
 
             if len(result) < 3:
                 self._weekly_consistency_cache[cache_key] = {
-                    'timestamp': datetime.now(),
+                    'timestamp': now,
                     'result': default,
                 }
                 return default
@@ -1607,7 +1609,7 @@ class SignalDetector:
             weeks = result[:-1] if len(result) > 3 else result
             if len(weeks) < 3:
                 self._weekly_consistency_cache[cache_key] = {
-                    'timestamp': datetime.now(),
+                    'timestamp': now,
                     'result': default,
                 }
                 return default
@@ -1633,11 +1635,11 @@ class SignalDetector:
                 'alternations': alternations
             }
             self._weekly_consistency_cache[cache_key] = {
-                'timestamp': datetime.now(),
+                'timestamp': now,
                 'result': dict(result),
             }
             if len(self._weekly_consistency_cache) > 256:
-                cutoff = datetime.now() - timedelta(seconds=self._weekly_consistency_cache_ttl_seconds)
+                cutoff = now - timedelta(seconds=self._weekly_consistency_cache_ttl_seconds)
                 self._weekly_consistency_cache = {
                     key: entry for key, entry in self._weekly_consistency_cache.items()
                     if entry['timestamp'] >= cutoff
