@@ -221,7 +221,11 @@ export async function GET(request: Request) {
         SELECT
           a.strategy,
           COALESCE(NULLIF(a.market_regime, ''), 'unknown') AS regime,
-          COALESCE(NULLIF(a.market_session, ''), 'unknown') AS session,
+          COALESCE(
+            NULLIF(a.market_session, ''),
+            a.strategy_metadata::json->'market_intelligence'->'session_analysis'->>'current_session',
+            'unknown'
+          ) AS session,
           COUNT(*)::int AS alerts,
           COUNT(t.id) FILTER (WHERE t.status = 'closed')::int AS closed,
           COUNT(*) FILTER (WHERE t.profit_loss > 0)::int AS wins,
@@ -233,13 +237,18 @@ export async function GET(request: Request) {
         LEFT JOIN trade_log t ON t.alert_id = a.id
         WHERE a.alert_timestamp >= $1 AND a.alert_timestamp <= $2
           AND a.environment = $3
-        GROUP BY a.strategy, regime, session
+        GROUP BY a.strategy, regime,
+          COALESCE(
+            NULLIF(a.market_session, ''),
+            a.strategy_metadata::json->'market_intelligence'->'session_analysis'->>'current_session',
+            'unknown'
+          )
         HAVING COUNT(*) > 0
         ORDER BY alerts DESC
         `,
         [start, end, env]
       );
-      effectiveness = rows.map((r) => {
+      effectiveness = rows.map((r: Row) => {
         const gp = Number(r.gross_profit);
         const gl = Number(r.gross_loss);
         const closed = Number(r.closed);

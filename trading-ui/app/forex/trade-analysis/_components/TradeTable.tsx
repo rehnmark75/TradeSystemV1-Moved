@@ -23,6 +23,7 @@ export type TradeRow = {
   lifecycle_duration_minutes: number | null;
   is_scalp_trade: boolean;
   stages_reached: number;
+  strategy: string | null;
   counterfactual?: { verdict: CounterfactualVerdict; delta_pips: number | null };
 };
 
@@ -86,6 +87,7 @@ export default function TradeTable({ trades, selectedId, onSelect }: Props) {
             {th("Time", "timestamp")}
             <th className="ta-th">Pair</th>
             <th className="ta-th">Dir</th>
+            <th className="ta-th">Strategy</th>
             <th className="ta-th">Entry</th>
             {th("Pips", "pips_gained")}
             {th("P&L", "profit_loss")}
@@ -113,6 +115,7 @@ export default function TradeTable({ trades, selectedId, onSelect }: Props) {
                 <td className={`ta-td ta-dir ${t.direction === "BUY" ? "dir-buy" : "dir-sell"}`}>
                   {t.direction}
                 </td>
+                <td className="ta-td ta-strategy">{t.strategy ?? "-"}</td>
                 <td className="ta-td ta-mono">
                   {t.entry_price != null ? t.entry_price.toFixed(5) : "-"}
                 </td>

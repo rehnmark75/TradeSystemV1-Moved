@@ -12,8 +12,11 @@ const DEFAULT_PAIRS = [
   "CS.D.AUDJPY.MINI.IP",
   "CS.D.AUDUSD.MINI.IP",
   "CS.D.NZDUSD.MINI.IP",
-  "CS.D.USDCAD.MINI.IP"
+  "CS.D.USDCAD.MINI.IP",
+  "CS.D.CFEGOLD.CEE.IP"
 ];
+
+const GOLD_EPIC = "CS.D.CFEGOLD.CEE.IP";
 
 const ADX_PERIOD = 14;
 const BARS_PER_PAIR_IN_RESPONSE = 240;
@@ -162,6 +165,19 @@ async function getThresholds(epics: string[]): Promise<
   const map = new Map<string, { value: number | null; source: PairResult["threshold_source"] }>();
   if (!epics.length) return map;
 
+  // Gold uses xau_gold_global_config.adx_trending_threshold, not smc_simple_pair_overrides
+  if (epics.includes(GOLD_EPIC)) {
+    const goldRes = await strategyConfigPool.query(
+      `SELECT parameter_value FROM xau_gold_global_config
+       WHERE parameter_name = 'adx_trending_threshold' AND is_active = TRUE LIMIT 1`
+    );
+    const val = goldRes.rows[0]?.parameter_value ?? null;
+    map.set(GOLD_EPIC, { value: val != null ? Number(val) : null, source: "column" });
+  }
+
+  const fxEpics = epics.filter((e) => e !== GOLD_EPIC);
+  if (!fxEpics.length) return map;
+
   // smc_simple_global_config has no scalp_min_adx column — per-pair only. NULL = no filter.
   const globalDefault: number | null = null;
 
@@ -171,10 +187,10 @@ async function getThresholds(epics: string[]): Promise<
     FROM smc_simple_pair_overrides
     WHERE epic = ANY($1) AND is_enabled = TRUE
     `,
-    [epics]
+    [fxEpics]
   );
 
-  for (const epic of epics) {
+  for (const epic of fxEpics) {
     const rows = res.rows.filter((r) => r.epic === epic);
     if (rows.length === 0) {
       map.set(epic, { value: globalDefault, source: "default" });

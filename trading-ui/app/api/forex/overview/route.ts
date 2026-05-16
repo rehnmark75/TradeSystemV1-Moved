@@ -108,7 +108,6 @@ export async function GET(request: Request) {
       WHERE t.timestamp >= $1
         AND t.environment = $2
       ORDER BY t.timestamp DESC
-      LIMIT 12
       `,
       [since, env]
     );
@@ -128,7 +127,7 @@ export async function GET(request: Request) {
         largest_loss: largestLoss,
         best_pair: bestPair,
         worst_pair: worstPair,
-        active_pairs: pairs.map((row) => row.symbol)
+        active_pairs: pairs.map((row: { symbol: string }) => row.symbol)
       },
       daily_pnl: dailyPnlResult.rows ?? [],
       recent_trades: recentTradesResult.rows ?? []

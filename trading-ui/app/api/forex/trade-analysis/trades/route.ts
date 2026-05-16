@@ -13,29 +13,29 @@ export async function GET(request: Request) {
   const limit = Math.min(Number(searchParams.get("limit") || "200"), 500);
 
   const conditions: string[] = [
-    "status IN ('closed', 'tracking')",
-    "environment = $1",
+    "t.status IN ('closed', 'tracking')",
+    "t.environment = $1",
   ];
   const params: unknown[] = [env];
 
   if (from) {
     params.push(from);
-    conditions.push(`timestamp >= $${params.length}`);
+    conditions.push(`t.timestamp >= $${params.length}`);
   }
   if (to) {
     params.push(to);
-    conditions.push(`timestamp < $${params.length}::date + INTERVAL '1 day'`);
+    conditions.push(`t.timestamp < $${params.length}::date + INTERVAL '1 day'`);
   }
   if (epic) {
     params.push(epic);
-    conditions.push(`symbol = $${params.length}`);
+    conditions.push(`t.symbol = $${params.length}`);
   }
   if (outcome === "win") {
-    conditions.push("pips_gained > 0");
+    conditions.push("t.pips_gained > 0");
   } else if (outcome === "loss") {
-    conditions.push("(pips_gained < 0 OR (pips_gained IS NULL AND profit_loss < 0))");
+    conditions.push("(t.pips_gained < 0 OR (t.pips_gained IS NULL AND t.profit_loss < 0))");
   } else if (outcome === "be") {
-    conditions.push("(pips_gained = 0 OR (pips_gained IS NULL AND profit_loss = 0))");
+    conditions.push("(t.pips_gained = 0 OR (t.pips_gained IS NULL AND t.profit_loss = 0))");
   }
 
   params.push(limit);
@@ -44,30 +44,32 @@ export async function GET(request: Request) {
   try {
     const result = await forexPool.query(
       `SELECT
-        id,
-        symbol,
-        direction,
-        timestamp,
-        closed_at,
-        status,
-        profit_loss,
-        pnl_currency,
-        entry_price,
-        sl_price,
-        initial_sl_price,
-        tp_price,
-        pips_gained,
-        early_be_executed,
-        moved_to_breakeven,
-        moved_to_stage1,
-        moved_to_stage2,
-        stop_limit_changes_count,
-        lifecycle_duration_minutes,
-        is_scalp_trade,
-        deal_id
-      FROM trade_log
+        t.id,
+        t.symbol,
+        t.direction,
+        t.timestamp,
+        t.closed_at,
+        t.status,
+        t.profit_loss,
+        t.pnl_currency,
+        t.entry_price,
+        t.sl_price,
+        t.initial_sl_price,
+        t.tp_price,
+        t.pips_gained,
+        t.early_be_executed,
+        t.moved_to_breakeven,
+        t.moved_to_stage1,
+        t.moved_to_stage2,
+        t.stop_limit_changes_count,
+        t.lifecycle_duration_minutes,
+        t.is_scalp_trade,
+        t.deal_id,
+        a.strategy
+      FROM trade_log t
+      LEFT JOIN alert_history a ON t.alert_id = a.id
       WHERE ${conditions.join(" AND ")}
-      ORDER BY timestamp DESC
+      ORDER BY t.timestamp DESC
       LIMIT ${limitParam}`,
       params
     );
