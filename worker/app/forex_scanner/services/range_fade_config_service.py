@@ -117,6 +117,12 @@ class RangeFadeConfig:
     def get_pair_fixed_take_profit_pips(self, epic: str) -> float:
         return float(self._override(epic, "fixed_take_profit_pips", self.fixed_take_profit_pips))
 
+    def get_pair_rsi_oversold(self, epic: str) -> int:
+        return int(self._override(epic, "rsi_oversold", self.rsi_oversold))
+
+    def get_pair_rsi_overbought(self, epic: str) -> int:
+        return int(self._override(epic, "rsi_overbought", self.rsi_overbought))
+
     def get_pair_blocked_hours(self, epic: str) -> set:
         raw = self._override(epic, "blocked_hours_utc", self.blocked_hours_utc)
         if not raw:

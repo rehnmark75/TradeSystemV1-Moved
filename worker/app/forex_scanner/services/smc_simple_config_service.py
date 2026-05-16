@@ -1653,6 +1653,25 @@ class SMCSimpleConfig:
         value = self.get_for_pair(epic, 'scalp_min_adx')
         return float(value) if value is not None else None
 
+    def get_pair_scalp_min_abs_macd_histogram(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair minimum absolute MACD histogram threshold for scalp trades.
+
+        This blocks weak momentum setups even when the histogram points in the
+        correct direction.
+        """
+        value = self.get_for_pair(epic, 'scalp_min_abs_macd_histogram')
+        return float(value) if value is not None else None
+
+    def get_pair_scalp_min_atr_pips(self, epic: str) -> Optional[float]:
+        """
+        Get per-pair minimum ATR threshold, in pips, for scalp trades.
+
+        This blocks thin-volatility setups that lack enough range to reach TP.
+        """
+        value = self.get_for_pair(epic, 'scalp_min_atr_pips')
+        return float(value) if value is not None else None
+
     def get_pair_scalp_ema_buffer_pips(self, epic: str) -> Optional[float]:
         """
         Get per-pair EMA buffer for scalp trades.

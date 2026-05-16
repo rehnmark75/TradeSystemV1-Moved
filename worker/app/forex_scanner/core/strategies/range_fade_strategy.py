@@ -184,6 +184,8 @@ class RangeFadeStrategy(StrategyInterface):
         if None in (latest_upper, latest_lower, latest_mid, latest_rsi, latest_atr, latest_bar_range):
             self._reject(epic, "indicator_nan")
             return None
+        rsi_oversold = cfg.get_pair_rsi_oversold(epic)
+        rsi_overbought = cfg.get_pair_rsi_overbought(epic)
 
         pip = 0.01 if "JPY" in epic.upper() else 0.0001
         band_width_pips = (latest_upper - latest_lower) / pip
@@ -223,22 +225,22 @@ class RangeFadeStrategy(StrategyInterface):
 
         if (
             latest_close <= latest_lower
-            and latest_rsi <= cfg.rsi_oversold
+            and latest_rsi <= rsi_oversold
             and distance_to_low_pips <= cfg.range_proximity_pips
             and htf_bias in ("bullish", "neutral")
         ):
             direction = "BUY"
-            rsi_extremity = max(0.0, cfg.rsi_oversold - latest_rsi) / max(cfg.rsi_oversold, 1)
+            rsi_extremity = max(0.0, rsi_oversold - latest_rsi) / max(rsi_oversold, 1)
             band_penetration = max(0.0, latest_lower - latest_close) / max(latest_atr, 1e-6)
             range_proximity = max(0.0, cfg.range_proximity_pips - distance_to_low_pips) / max(cfg.range_proximity_pips, 1e-6)
         elif (
             latest_close >= latest_upper
-            and latest_rsi >= cfg.rsi_overbought
+            and latest_rsi >= rsi_overbought
             and distance_to_high_pips <= cfg.range_proximity_pips
             and htf_bias in ("bearish", "neutral")
         ):
             direction = "SELL"
-            rsi_extremity = max(0.0, latest_rsi - cfg.rsi_overbought) / max(100 - cfg.rsi_overbought, 1)
+            rsi_extremity = max(0.0, latest_rsi - rsi_overbought) / max(100 - rsi_overbought, 1)
             band_penetration = max(0.0, latest_close - latest_upper) / max(latest_atr, 1e-6)
             range_proximity = max(0.0, cfg.range_proximity_pips - distance_to_high_pips) / max(cfg.range_proximity_pips, 1e-6)
 
@@ -293,6 +295,8 @@ class RangeFadeStrategy(StrategyInterface):
                 "bb_mid": latest_mid,
                 "band_width_pips": round(band_width_pips, 2),
                 "rsi": latest_rsi,
+                "rsi_oversold": rsi_oversold,
+                "rsi_overbought": rsi_overbought,
                 "htf_bias": htf_bias,
                 "range_high": range_high,
                 "range_low": range_low,

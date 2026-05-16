@@ -1379,6 +1379,30 @@ class SMCSimpleStrategy:
                     self._track_filter_rejection('macd_alignment')
                     return False, f"MACD histogram {macd_hist:.6f} positive on SELL"
 
+        # Filter 4b: Minimum MACD histogram strength
+        min_abs_macd_hist = self._db_config.get_pair_scalp_min_abs_macd_histogram(epic)
+        if min_abs_macd_hist is not None:
+            macd_hist = signal.get('macd_histogram')
+            if macd_hist is None:
+                self._track_filter_rejection('min_abs_macd_histogram')
+                return False, "MACD histogram unavailable"
+            if abs(float(macd_hist)) < min_abs_macd_hist:
+                self._track_filter_rejection('min_abs_macd_histogram')
+                return False, f"|MACD histogram| {abs(float(macd_hist)):.6f} < {min_abs_macd_hist:.6f}"
+
+        # Filter 4c: Minimum ATR in pips
+        min_atr_pips = self._db_config.get_pair_scalp_min_atr_pips(epic)
+        if min_atr_pips is not None:
+            atr = signal.get('atr')
+            if atr is None:
+                self._track_filter_rejection('min_atr_pips')
+                return False, "ATR unavailable"
+            pip_value = self._db_config.get_pip_value(epic)
+            atr_pips = float(atr) / pip_value if pip_value else 0.0
+            if atr_pips < min_atr_pips:
+                self._track_filter_rejection('min_atr_pips')
+                return False, f"ATR {atr_pips:.1f}p < {min_atr_pips:.1f}p"
+
         # Filter 5: EMA Stack Alignment (with backtest override support)
         # Check override first, then fall back to database config
         if 'scalp_require_ema_stack_alignment' in override:
