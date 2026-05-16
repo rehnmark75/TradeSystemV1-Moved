@@ -337,13 +337,12 @@ class DataFetcher:
                     self.logger.debug("Behavior analysis method not available, skipping")
             
             
-            # CRITICAL FIX: Set proper market_timestamp from latest candle
+            # Set market_timestamp from latest candle's start_time column (RangeIndex is always used)
             if len(df_enhanced) > 0:
-                # Get the latest timestamp from the DataFrame index
-                if hasattr(df_enhanced.index, '__getitem__') and len(df_enhanced.index) > 0:
+                if 'start_time' in df_enhanced.columns:
+                    latest_timestamp = df_enhanced['start_time'].iloc[-1]
+                elif isinstance(df_enhanced.index, pd.DatetimeIndex):
                     latest_timestamp = df_enhanced.index[-1]
-                elif 'start_time' in df_enhanced.columns:
-                    latest_timestamp = df_enhanced.iloc[-1]['start_time']
                 else:
                     latest_timestamp = datetime.now()
                 
@@ -379,10 +378,10 @@ class DataFetcher:
             # Return original data with basic timestamp fix
             if len(df) > 0:
                 try:
-                    if hasattr(df.index, '__getitem__') and len(df.index) > 0:
+                    if 'start_time' in df.columns:
+                        latest_candle_time = df['start_time'].iloc[-1]
+                    elif isinstance(df.index, pd.DatetimeIndex):
                         latest_candle_time = df.index[-1]
-                    elif 'start_time' in df.columns:
-                        latest_candle_time = df.iloc[-1]['start_time']
                     else:
                         latest_candle_time = datetime.now()
                     
