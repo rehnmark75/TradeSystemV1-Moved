@@ -242,7 +242,11 @@ export async function GET(request: Request) {
           MIN(low)   AS low,
           (ARRAY_AGG(close ORDER BY start_time DESC))[1] AS close
         FROM ig_candles
-        WHERE epic = $1 AND timeframe = 1 AND start_time >= $2
+        WHERE epic = $1
+          AND timeframe = 1
+          AND start_time >= $2
+          AND start_time < date_trunc('hour', NOW())
+            + (floor(EXTRACT(MINUTE FROM NOW())::int / 5) * INTERVAL '5 minutes')
         GROUP BY 1
         ORDER BY 1
         `,

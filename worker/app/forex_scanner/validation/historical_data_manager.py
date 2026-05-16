@@ -512,7 +512,12 @@ class HistoricalDataManager:
     def _calculate_macd_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """Calculate MACD indicators"""
         try:
-            df = self.technical_analyzer.calculate_macd(df, fast=12, slow=26, signal=9)
+            df = self.technical_analyzer.calculate_macd(
+                df,
+                fast_period=12,
+                slow_period=26,
+                signal_period=9,
+            )
             return df
         except Exception as e:
             self.logger.error(f"❌ Error calculating MACD indicators: {e}")

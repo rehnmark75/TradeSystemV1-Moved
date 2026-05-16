@@ -253,7 +253,7 @@ export async function GET(request: Request) {
         const gl = Number(r.gross_loss);
         const closed = Number(r.closed);
         const wins = Number(r.wins);
-        const pf = gl > 0 ? gp / gl : gp > 0 ? null : null;
+        const pf = gl > 0 ? gp / gl : gp > 0 ? Infinity : null;
         return {
           strategy: r.strategy,
           regime: r.regime,
@@ -263,7 +263,8 @@ export async function GET(request: Request) {
           wins,
           losses: Number(r.losses),
           win_rate: closed > 0 ? wins / closed : null,
-          pf,
+          pf: pf === Infinity ? null : pf,
+          pf_infinite: pf === Infinity,
           pips: Number(r.pips)
         };
       });

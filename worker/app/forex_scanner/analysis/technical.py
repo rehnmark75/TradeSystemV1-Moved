@@ -7,7 +7,7 @@ Handles EMA calculations, support/resistance detection, and technical indicators
 import pandas as pd
 import numpy as np
 from scipy.signal import argrelextrema
-from typing import List, Dict, Tuple
+from typing import List, Dict, Tuple, Optional
 import logging
 try:
     from configdata import config
@@ -115,14 +115,14 @@ class TechnicalAnalyzer:
         df_macd = df.copy()
         
         # Calculate EMAs
-        ema_fast = df_macd['close'].ewm(span=fast_period).mean()
-        ema_slow = df_macd['close'].ewm(span=slow_period).mean()
+        ema_fast = df_macd['close'].ewm(span=fast_period, adjust=False).mean()
+        ema_slow = df_macd['close'].ewm(span=slow_period, adjust=False).mean()
         
         # Calculate MACD line
         df_macd['macd_line'] = ema_fast - ema_slow
         
         # Calculate signal line
-        df_macd['macd_signal'] = df_macd['macd_line'].ewm(span=signal_period).mean()
+        df_macd['macd_signal'] = df_macd['macd_line'].ewm(span=signal_period, adjust=False).mean()
         
         # Calculate histogram
         df_macd['macd_histogram'] = df_macd['macd_line'] - df_macd['macd_signal']
@@ -358,16 +358,14 @@ class TechnicalAnalyzer:
         # Calculate price changes
         delta = df_rsi['close'].diff()
         
-        # Separate gains and losses
-        gains = delta.where(delta > 0, 0)
-        losses = -delta.where(delta < 0, 0)
-        
-        # Calculate average gains and losses
-        avg_gains = gains.rolling(window=period).mean()
-        avg_losses = losses.rolling(window=period).mean()
+        # Wilder RSI, matching active strategy threshold logic.
+        gains = delta.clip(lower=0)
+        losses = -delta.clip(upper=0)
+        avg_gains = gains.ewm(alpha=1.0 / period, adjust=False).mean()
+        avg_losses = losses.ewm(alpha=1.0 / period, adjust=False).mean()
         
         # Calculate RSI
-        rs = avg_gains / avg_losses
+        rs = avg_gains / avg_losses.replace(0, np.nan)
         df_rsi['rsi'] = 100 - (100 / (1 + rs))
         
         return df_rsi
@@ -377,7 +375,10 @@ class TechnicalAnalyzer:
         df: pd.DataFrame, 
         fast_period: int = 12, 
         slow_period: int = 26, 
-        signal_period: int = 9
+        signal_period: int = 9,
+        fast: Optional[int] = None,
+        slow: Optional[int] = None,
+        signal: Optional[int] = None
     ) -> pd.DataFrame:
         """
         Calculate MACD (Moving Average Convergence Divergence)
@@ -392,19 +393,28 @@ class TechnicalAnalyzer:
             DataFrame with MACD columns
         """
         df_macd = df.copy()
+
+        # Support legacy keyword names used by older validation callers.
+        if fast is not None:
+            fast_period = fast
+        if slow is not None:
+            slow_period = slow
+        if signal is not None:
+            signal_period = signal
         
         # Calculate EMAs
         ema_fast = df_macd['close'].ewm(span=fast_period, adjust=False).mean()
         ema_slow = df_macd['close'].ewm(span=slow_period, adjust=False).mean()
         
         # Calculate MACD line
-        df_macd['macd'] = ema_fast - ema_slow
+        df_macd['macd_line'] = ema_fast - ema_slow
+        df_macd['macd'] = df_macd['macd_line']
         
         # Calculate signal line
         df_macd['macd_signal'] = df_macd['macd_line'].ewm(span=signal_period, adjust=False).mean()
         
         # Calculate histogram
-        df_macd['macd_histogram'] = df_macd['macd'] - df_macd['macd_signal']
+        df_macd['macd_histogram'] = df_macd['macd_line'] - df_macd['macd_signal']
         
         return df_macd
     

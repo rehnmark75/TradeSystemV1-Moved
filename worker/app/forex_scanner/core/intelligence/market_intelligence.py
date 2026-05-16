@@ -16,7 +16,7 @@ import pandas as pd
 import numpy as np
 from typing import Dict, List, Optional, Tuple
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from scipy import stats
 import json
 
@@ -24,6 +24,11 @@ try:
     import config
 except ImportError:
     from forex_scanner import config
+
+try:
+    from forex_scanner.services.regime_classifier import get_adx_from_df
+except ImportError:
+    from services.regime_classifier import get_adx_from_df
 
 
 class MarketIntelligenceEngine:
@@ -231,19 +236,24 @@ class MarketIntelligenceEngine:
             df_15m = self._safe_get_data(epic, pair_name, '15m')
             df_5m = self._safe_get_data(epic, pair_name, '5m')
             
-            # Use whatever data is available
-            available_data = [df for df in [df_1h, df_15m, df_5m] if df is not None and len(df) > 10]
+            # Use whatever data is available, keeping timeframe so lookback_hours
+            # can be converted to the correct number of bars when needed.
+            available_data = [
+                (timeframe, df)
+                for timeframe, df in [('1h', df_1h), ('15m', df_15m), ('5m', df_5m)]
+                if df is not None and len(df) > 10
+            ]
             
             if not available_data:
                 raise ValueError(f"No usable data for {epic}")
             
             # Use the best available timeframe
-            primary_df = available_data[0]
-            secondary_df = available_data[1] if len(available_data) > 1 else primary_df
+            primary_timeframe, primary_df = available_data[0]
+            secondary_timeframe, secondary_df = available_data[1] if len(available_data) > 1 else available_data[0]
             
             # Focus on recent data
-            recent_primary = primary_df.tail(min(lookback_hours, len(primary_df)))
-            recent_secondary = secondary_df.tail(min(lookback_hours * 2, len(secondary_df)))
+            recent_primary = self._tail_lookback_hours(primary_df, lookback_hours, primary_timeframe)
+            recent_secondary = self._tail_lookback_hours(secondary_df, lookback_hours * 2, secondary_timeframe)
             
             regime_scores = {}
             structure_regime = None
@@ -406,6 +416,54 @@ class MarketIntelligenceEngine:
         except Exception as e:
             self.logger.debug(f"Failed to get {timeframe} data for {epic}: {e}")
             return None
+
+    def _tail_lookback_hours(self, df: pd.DataFrame, lookback_hours: int, timeframe: str) -> pd.DataFrame:
+        """Return the recent window for a duration, not a raw bar count."""
+        if df is None or len(df) == 0:
+            return df
+
+        try:
+            timestamps = self._get_candle_timestamps(df)
+            if timestamps is not None and len(timestamps) == len(df):
+                latest = timestamps.iloc[-1]
+                if pd.notna(latest):
+                    cutoff = latest - pd.Timedelta(hours=lookback_hours)
+                    window = df.loc[timestamps >= cutoff]
+                    if len(window) > 0:
+                        return window
+        except Exception as e:
+            self.logger.debug(f"Time-based lookback failed for {timeframe}: {e}")
+
+        timeframe_minutes = self._timeframe_to_minutes(timeframe)
+        bars = max(1, int(np.ceil((lookback_hours * 60) / timeframe_minutes)))
+        return df.tail(min(bars, len(df)))
+
+    def _get_candle_timestamps(self, df: pd.DataFrame) -> Optional[pd.Series]:
+        """Get per-candle timestamps from common candle columns or datetime index."""
+        for column in ('start_time', 'period_start', 'timestamp'):
+            if column in df.columns:
+                timestamps = pd.to_datetime(df[column], utc=True, errors='coerce')
+                if timestamps.notna().any():
+                    return pd.Series(timestamps, index=df.index)
+
+        if isinstance(df.index, pd.DatetimeIndex):
+            return pd.Series(pd.to_datetime(df.index, utc=True, errors='coerce'), index=df.index)
+
+        return None
+
+    def _timeframe_to_minutes(self, timeframe: str) -> int:
+        """Convert a timeframe string to minutes for duration-to-bar fallback."""
+        timeframe_map = {
+            '1m': 1,
+            '5m': 5,
+            '15m': 15,
+            '30m': 30,
+            '1h': 60,
+            '60m': 60,
+            '4h': 240,
+            '1d': 1440,
+        }
+        return timeframe_map.get(str(timeframe).lower(), 60)
     
     def _calculate_trend_score(self, df_primary: pd.DataFrame, df_secondary: pd.DataFrame) -> float:
         """Calculate trend strength score (0 = ranging, 1 = strong trend) - FIXED"""
@@ -414,7 +472,8 @@ class MarketIntelligenceEngine:
         try:
             # 1. Price momentum
             price_change = (df_primary['close'].iloc[-1] - df_primary['close'].iloc[0]) / df_primary['close'].iloc[0]
-            momentum_score = min(1.0, abs(price_change) * 100)  # Normalize to percentage
+            # Match enhanced regime momentum scale: 2% move = 1.0 score.
+            momentum_score = min(1.0, abs(price_change) * 50)
             scores.append(momentum_score)
         except:
             pass
@@ -563,8 +622,12 @@ class MarketIntelligenceEngine:
                 )
             )
             
-            recent_atr = df_calc['tr'].tail(min(14, len(df_calc))).mean()
-            long_term_atr = df_calc['tr'].tail(min(50, len(df_calc))).mean()
+            recent_window = min(14, len(df_calc))
+            recent_atr = df_calc['tr'].tail(recent_window).mean()
+            baseline_tr = df_calc['tr'].iloc[:-recent_window].tail(50)
+            if len(baseline_tr) < recent_window:
+                baseline_tr = df_calc['tr'].tail(min(50, len(df_calc)))
+            long_term_atr = baseline_tr.mean()
             
             if long_term_atr > 0:
                 volatility_ratio = recent_atr / long_term_atr
@@ -897,7 +960,7 @@ class MarketIntelligenceEngine:
     def get_session_analysis(self) -> Dict:
         """Analyze current trading session and its characteristics - FIXED VERSION"""
         try:
-            current_time = datetime.now()
+            current_time = datetime.now(timezone.utc)
             hour = current_time.hour
             
             # Determine current session (UTC hours)
@@ -1385,7 +1448,7 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
             df_calc['returns'] = df_calc['close'].pct_change()
             recent_vol = df_calc['returns'].tail(10).std()
             
-            hist_vol = df_calc['returns'].rolling(10).std().dropna()
+            hist_vol = df_calc['returns'].rolling(10).std().dropna().iloc[:-1]
             
             if len(hist_vol) < 5 or recent_vol is None or pd.isna(recent_vol):
                 return 50.0
@@ -1467,46 +1530,8 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
             if len(df) < period + 1:
                 return None
 
-            df_calc = df.copy()
-
-            # Calculate True Range
-            df_calc['tr'] = np.maximum(
-                df_calc['high'] - df_calc['low'],
-                np.maximum(
-                    abs(df_calc['high'] - df_calc['close'].shift(1)),
-                    abs(df_calc['low'] - df_calc['close'].shift(1))
-                )
-            )
-
-            # Calculate +DM and -DM
-            df_calc['up_move'] = df_calc['high'] - df_calc['high'].shift(1)
-            df_calc['down_move'] = df_calc['low'].shift(1) - df_calc['low']
-
-            df_calc['+dm'] = np.where(
-                (df_calc['up_move'] > df_calc['down_move']) & (df_calc['up_move'] > 0),
-                df_calc['up_move'],
-                0
-            )
-            df_calc['-dm'] = np.where(
-                (df_calc['down_move'] > df_calc['up_move']) & (df_calc['down_move'] > 0),
-                df_calc['down_move'],
-                0
-            )
-
-            # Smooth with EMA
-            df_calc['atr'] = df_calc['tr'].ewm(span=period, adjust=False).mean()
-            df_calc['+di'] = 100 * (df_calc['+dm'].ewm(span=period, adjust=False).mean() / df_calc['atr'])
-            df_calc['-di'] = 100 * (df_calc['-dm'].ewm(span=period, adjust=False).mean() / df_calc['atr'])
-
-            # Calculate DX
-            df_calc['dx'] = 100 * abs(df_calc['+di'] - df_calc['-di']) / (df_calc['+di'] + df_calc['-di'])
-
-            # Calculate ADX (smoothed DX)
-            df_calc['adx'] = df_calc['dx'].ewm(span=period, adjust=False).mean()
-
-            adx_value = df_calc['adx'].iloc[-1]
-
-            if pd.isna(adx_value):
+            adx_value = get_adx_from_df(df, period)
+            if adx_value is None or pd.isna(adx_value):
                 return None
 
             return float(adx_value)
@@ -1709,12 +1734,15 @@ Regime Distribution: Trending({regime_counts['trending']}), Ranging({regime_coun
             )
 
             recent_atr = df_calc['tr'].tail(14).mean()
-            baseline_atr = df_calc['tr'].tail(50).mean()
+            baseline_tr = df_calc['tr'].iloc[:-14].tail(50)
+            if len(baseline_tr) < 14:
+                baseline_tr = df_calc['tr'].tail(50)
+            baseline_atr = baseline_tr.mean()
 
             atr_ratio = recent_atr / baseline_atr if baseline_atr > 0 else 1.0
 
             # Calculate percentile
-            atr_series = df_calc['tr'].rolling(14).mean().dropna()
+            atr_series = df_calc['tr'].rolling(14).mean().dropna().iloc[:-1]
             if len(atr_series) >= 10:
                 volatility_percentile = stats.percentileofscore(atr_series, recent_atr)
             else:

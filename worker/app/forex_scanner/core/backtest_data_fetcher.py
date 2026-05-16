@@ -1092,18 +1092,18 @@ class BacktestDataFetcher(DataFetcher):
                 slow = macd_config.get('slow', 26)
                 signal = macd_config.get('signal', 9)
 
-                ema_fast = df['close'].ewm(span=fast).mean()
-                ema_slow = df['close'].ewm(span=slow).mean()
+                ema_fast = df['close'].ewm(span=fast, adjust=False).mean()
+                ema_slow = df['close'].ewm(span=slow, adjust=False).mean()
                 df['macd_line'] = ema_fast - ema_slow
-                df['macd_signal'] = df['macd_line'].ewm(span=signal).mean()
+                df['macd_signal'] = df['macd_line'].ewm(span=signal, adjust=False).mean()
                 df['macd_histogram'] = df['macd_line'] - df['macd_signal']
 
             if 'rsi_period' in strategy_config:
                 period = strategy_config['rsi_period']
                 delta = df['close'].diff()
-                gain = (delta.where(delta > 0, 0)).rolling(window=period).mean()
-                loss = (-delta.where(delta < 0, 0)).rolling(window=period).mean()
-                rs = gain / loss
+                gain = delta.clip(lower=0).ewm(alpha=1.0 / period, adjust=False).mean()
+                loss = (-delta.clip(upper=0)).ewm(alpha=1.0 / period, adjust=False).mean()
+                rs = gain / loss.replace(0, np.nan)
                 df['rsi'] = 100 - (100 / (1 + rs))
 
         except Exception as e:

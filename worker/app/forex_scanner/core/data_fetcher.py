@@ -854,9 +854,9 @@ class DataFetcher:
             minus_dm = np.where((down_move > up_move) & (down_move > 0), down_move, 0)
 
             # Smoothed TR and DM using Wilder's smoothing (similar to EMA with alpha = 1/period)
-            atr_smooth = pd.Series(tr).ewm(alpha=1/period, adjust=False).mean()
-            plus_dm_smooth = pd.Series(plus_dm).ewm(alpha=1/period, adjust=False).mean()
-            minus_dm_smooth = pd.Series(minus_dm).ewm(alpha=1/period, adjust=False).mean()
+            atr_smooth = pd.Series(tr, index=df_adx.index).ewm(alpha=1/period, adjust=False).mean()
+            plus_dm_smooth = pd.Series(plus_dm, index=df_adx.index).ewm(alpha=1/period, adjust=False).mean()
+            minus_dm_smooth = pd.Series(minus_dm, index=df_adx.index).ewm(alpha=1/period, adjust=False).mean()
 
             # Calculate +DI and -DI
             df_adx['plus_di'] = 100 * (plus_dm_smooth / atr_smooth)
