@@ -35,7 +35,7 @@ import os
 import time
 import logging
 import json
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import List, Dict, Optional
 import pandas as pd
 
@@ -245,9 +245,21 @@ class TradingOrchestrator:
                 self.enable_claude = False
                 self.logger.info("🎯 [SCALP MODE] Claude AI validation DISABLED per scalp config")
 
-        self.claude_analysis_mode = claude_analysis_mode or 'minimal'
-        self.claude_analysis_level = claude_analysis_level or 'institutional'
-        self.use_advanced_claude_prompts = use_advanced_claude_prompts if use_advanced_claude_prompts is not None else True
+        self.claude_analysis_mode = (
+            claude_analysis_mode
+            if claude_analysis_mode is not None
+            else self._scanner_cfg.claude_analysis_mode
+        )
+        self.claude_analysis_level = (
+            claude_analysis_level
+            if claude_analysis_level is not None
+            else self._scanner_cfg.claude_analysis_level
+        )
+        self.use_advanced_claude_prompts = (
+            use_advanced_claude_prompts
+            if use_advanced_claude_prompts is not None
+            else self._scanner_cfg.use_advanced_claude_prompts
+        )
 
         # TRADING CONFIGURATION - from database (NO FALLBACK)
         if enable_trading is not None:
@@ -581,6 +593,12 @@ class TradingOrchestrator:
                     self.signal_detector = signal_detector
                     self.epic_list = epic_list
                     self.logger = logger
+
+                def _extract_pair_from_epic(self, epic):
+                    parts = epic.split('.') if epic else []
+                    if len(parts) >= 3:
+                        return parts[2]
+                    return epic or 'EURUSD'
                 
                 def scan_once(self):
                     """Minimal scan implementation"""
@@ -588,7 +606,8 @@ class TradingOrchestrator:
                         signals = []
                         for epic in self.epic_list:
                             try:
-                                signal = self.signal_detector.detect_signals(epic)
+                                pair = self._extract_pair_from_epic(epic)
+                                signal = self.signal_detector.detect_signals(epic, pair)
                                 if signal:
                                     signals.extend(signal if isinstance(signal, list) else [signal])
                             except Exception as e:
@@ -1846,7 +1865,7 @@ class TradingOrchestrator:
         # Derive boundary interval from scan_interval (in minutes)
         boundary_minutes = max(1, scan_interval // 60)  # Default to scan_interval
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         current_minute = now.minute
         current_second = now.second
 
@@ -1927,7 +1946,7 @@ class TradingOrchestrator:
                 if self.running:
                     if boundary_aligned:
                         sleep_time = self._calculate_boundary_aligned_sleep()
-                        next_scan = datetime.utcnow() + timedelta(seconds=sleep_time)
+                        next_scan = datetime.now(timezone.utc) + timedelta(seconds=sleep_time)
                         self.logger.info(f"⏰ Boundary-aligned: next scan at {next_scan.strftime('%H:%M:%S')} UTC (sleeping {sleep_time:.0f}s)")
                     else:
                         sleep_time = self.scan_interval

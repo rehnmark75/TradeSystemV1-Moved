@@ -10,7 +10,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 import pandas as pd
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Dict, Any, List
 from core.database import DatabaseManager
 try:
@@ -29,7 +29,7 @@ class StreamValidationMonitor:
     def get_validation_summary(self, hours_back: int = 24) -> Dict[str, Any]:
         """Get validation summary for the specified time period"""
         
-        since_time = datetime.utcnow() - timedelta(hours=hours_back)
+        since_time = datetime.now(timezone.utc) - timedelta(hours=hours_back)
         
         # Get validation statistics
         validation_stats_query = """
@@ -103,7 +103,7 @@ class StreamValidationMonitor:
         health_score = self._calculate_validation_health_score(validation_stats, epic_trends)
         
         return {
-            'timestamp': datetime.utcnow(),
+            'timestamp': datetime.now(timezone.utc),
             'time_period_hours': hours_back,
             'validation_stats': validation_stats,
             'epic_trends': epic_trends,

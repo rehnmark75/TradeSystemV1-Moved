@@ -203,6 +203,11 @@ class IntelligentForexScanner:
         
         # Initialize signal detector
         self.signal_detector = self._initialize_signal_detector(db_manager, user_timezone)
+        data_fetcher = getattr(self.signal_detector, 'data_fetcher', None)
+        if data_fetcher:
+            data_fetcher.cache_enabled = True
+            data_fetcher._cache_timeout = max(getattr(data_fetcher, '_cache_timeout', 0), 900)
+            self.logger.info("📦 DataFetcher scan cache enabled (15-minute TTL)")
 
         # Initialize deduplication manager FIRST (shared with SignalProcessor)
         # Get dedup setting from database - NO FALLBACK
@@ -219,7 +224,7 @@ class IntelligentForexScanner:
 
         # Initialize SignalProcessor for Smart Money analysis (pass shared dedup manager)
         self.signal_processor = None
-        self.use_signal_processor = True and SIGNAL_PROCESSOR_AVAILABLE  # Always use signal processor
+        self.use_signal_processor = SIGNAL_PROCESSOR_AVAILABLE  # Always use signal processor when available
 
         if self.use_signal_processor and SIGNAL_PROCESSOR_AVAILABLE:
             try:
@@ -331,6 +336,7 @@ class IntelligentForexScanner:
             'smart_money_enhanced': 0,
             'signal_processor_used': 0,  # ADD: Track SignalProcessor usage
             'smart_money_validated': 0,  # ADD: Track validated signals
+            'smc_conflict_rejected': 0,
             'market_intelligence_generated': 0,  # ADD: Track market intelligence generation
             'market_intelligence_stored': 0,     # ADD: Track successful storage
             'market_intelligence_errors': 0,     # ADD: Track storage errors
@@ -501,7 +507,7 @@ class IntelligentForexScanner:
             if not raw_signals:
                 self.logger.info("✓ No signals detected")
                 # Still capture market intelligence even with no signals
-                intelligence_report = self._capture_scan_market_intelligence(scan_start, [])
+                intelligence_report = self._capture_scan_market_intelligence(scan_start, [], scan_cycle_id)
 
                 # Capture performance snapshots for all epics (no signals case)
                 self._capture_scan_performance_snapshots(
@@ -623,7 +629,14 @@ class IntelligentForexScanner:
                         self.signal_detector.data_fetcher,
                         self.db_manager
                     )
-                    self.stats['smart_money_enhanced'] += len(filtered_signals)
+                    enhanced_count = sum(
+                        1 for signal in filtered_signals
+                        if signal.get('smart_money_analysis')
+                        or signal.get('smart_money_validated')
+                        or signal.get('smart_money_score') is not None
+                        or signal.get('smart_money_type')
+                    )
+                    self.stats['smart_money_enhanced'] += enhanced_count
                 except Exception as e:
                     self.logger.warning(f"⚠️ Smart money enhancement failed: {e}")
 
@@ -658,58 +671,65 @@ class IntelligentForexScanner:
                     self.logger.info(f"🧠 Smart Money validated: {self.stats['smart_money_validated']}/{len(clean_signals)} signals")
 
                 # NEW: Log Market Intelligence summary for analysis
-                self._log_market_intelligence_summary(clean_signals)
+                try:
+                    self._log_market_intelligence_summary(clean_signals)
+                except Exception as e:
+                    self.logger.warning(f"⚠️ Market intelligence summary logging failed: {e}")
 
             # Log rejection summary if any
             if rejected_signals:
                 self.logger.debug(f"📊 {len(rejected_signals)} signals rejected this scan")
 
-            # ADD: Generate and store market intelligence for this scan cycle
-            intelligence_report = self._capture_scan_market_intelligence(scan_start, clean_signals)
+            try:
+                # ADD: Generate and store market intelligence for this scan cycle
+                intelligence_report = self._capture_scan_market_intelligence(scan_start, clean_signals, scan_cycle_id)
 
-            # Attach intelligence to signals for storage in alert_history (NOT for filtering)
-            # Strategy filters have already run at this point, so this is storage-only.
-            # This allows us to analyze intelligence vs trade outcomes later.
-            if intelligence_report and clean_signals:
-                market_regime = intelligence_report.get('market_regime', {})
-                session_analysis = intelligence_report.get('session_analysis', {})
-                trading_recs = intelligence_report.get('trading_recommendations', {})
-                # Keys must match what alert_history._extract_market_intelligence_data() reads:
-                # regime_analysis, session_analysis, market_context, strategy_adaptation
-                formatted_intel = {
-                    'regime_analysis': {
-                        'dominant_regime': market_regime.get('dominant_regime', 'unknown'),
-                        'confidence': market_regime.get('confidence', 0.5),
-                        'regime_scores': market_regime.get('regime_scores', {}),
-                    },
-                    'session_analysis': session_analysis,
-                    'market_context': {
-                        'market_strength': market_regime.get('market_strength', {}),
-                        'correlation_analysis': market_regime.get('correlation_analysis', {}),
-                    },
-                    'strategy_adaptation': trading_recs,
-                    'intelligence_source': 'live_scan',
-                    'scan_timestamp': scan_start.isoformat() if scan_start else None,
-                }
-                for signal in clean_signals:
-                    signal['market_intelligence'] = formatted_intel
-                    signal['intelligence_source'] = 'live_scan'
-                    signal['market_regime'] = market_regime.get('dominant_regime', 'unknown')
-                    signal['regime_confidence'] = market_regime.get('confidence', 0.5)
+                # Attach intelligence to signals for storage in alert_history (NOT for filtering)
+                # Strategy filters have already run at this point, so this is storage-only.
+                # This allows us to analyze intelligence vs trade outcomes later.
+                if intelligence_report and clean_signals:
+                    market_regime = intelligence_report.get('market_regime', {})
+                    session_analysis = intelligence_report.get('session_analysis', {})
+                    trading_recs = intelligence_report.get('trading_recommendations', {})
+                    # Keys must match what alert_history._extract_market_intelligence_data() reads:
+                    # regime_analysis, session_analysis, market_context, strategy_adaptation
+                    formatted_intel = {
+                        'regime_analysis': {
+                            'dominant_regime': market_regime.get('dominant_regime', 'unknown'),
+                            'confidence': market_regime.get('confidence', 0.5),
+                            'regime_scores': market_regime.get('regime_scores', {}),
+                        },
+                        'session_analysis': session_analysis,
+                        'market_context': {
+                            'market_strength': market_regime.get('market_strength', {}),
+                            'correlation_analysis': market_regime.get('correlation_analysis', {}),
+                        },
+                        'strategy_adaptation': trading_recs,
+                        'intelligence_source': 'live_scan',
+                        'scan_timestamp': scan_start.isoformat() if scan_start else None,
+                    }
+                    for signal in clean_signals:
+                        signal['market_intelligence'] = formatted_intel
+                        signal['intelligence_source'] = 'live_scan'
+                        signal['market_regime'] = market_regime.get('dominant_regime', 'unknown')
+                        signal['regime_confidence'] = market_regime.get('confidence', 0.5)
 
-            # ADD: Capture per-epic performance snapshots for rejection analysis
-            self._capture_scan_performance_snapshots(
-                scan_cycle_id=scan_cycle_id,
-                scan_timestamp=scan_start,
-                epic_scan_data=epic_scan_data,
-                signals=clean_signals,
-                rejected_signals=rejected_signals,
-                intelligence_report=intelligence_report
-            )
+                # ADD: Capture per-epic performance snapshots for rejection analysis
+                self._capture_scan_performance_snapshots(
+                    scan_cycle_id=scan_cycle_id,
+                    scan_timestamp=scan_start,
+                    epic_scan_data=epic_scan_data,
+                    signals=clean_signals,
+                    rejected_signals=rejected_signals,
+                    intelligence_report=intelligence_report
+                )
 
-            # Periodic cleanup of old intelligence records (once per ~24 hours)
-            # At ~600 scans/day (every 2.5 minutes), check every 500 scans
-            self._maybe_cleanup_old_intelligence_records()
+                # Periodic cleanup of old intelligence records (once per ~24 hours)
+                # At ~600 scans/day (every 2.5 minutes), check every 500 scans
+                self._maybe_cleanup_old_intelligence_records()
+            except Exception as e:
+                self.logger.error(f"❌ Scan post-processing failed after signals were built: {e}")
+                self.stats['errors'] += 1
 
             return clean_signals
 
@@ -1138,7 +1158,12 @@ class IntelligentForexScanner:
         except Exception as e:
             self.logger.warning(f"⚠️ Error logging market intelligence summary: {e}")
 
-    def _capture_scan_market_intelligence(self, scan_start: datetime, signals: List[Dict]) -> Optional[Dict]:
+    def _capture_scan_market_intelligence(
+        self,
+        scan_start: datetime,
+        signals: List[Dict],
+        scan_cycle_id: Optional[str] = None
+    ) -> Optional[Dict]:
         """
         🧠 Generate and store comprehensive market intelligence for this scan cycle
         This captures market conditions regardless of whether signals were detected
@@ -1159,8 +1184,8 @@ class IntelligentForexScanner:
             if intelligence_report:
                 self.stats['market_intelligence_generated'] += 1
 
-                # Generate unique scan cycle ID
-                scan_cycle_id = f"scan_{scan_start.strftime('%Y%m%d_%H%M%S')}_{len(signals)}signals"
+                if not scan_cycle_id:
+                    scan_cycle_id = f"scan_{scan_start.strftime('%Y%m%d_%H%M%S')}_{self.stats['scans_completed']:05d}"
 
                 # Store market intelligence in dedicated table
                 record_id = self.market_intelligence_history.save_market_intelligence(
@@ -1408,7 +1433,7 @@ class IntelligentForexScanner:
         # Boundary interval: 5 minutes for scalp, 15 minutes for swing
         boundary_minutes = 5 if scalp_mode else 15
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         current_minute = now.minute
 
         # Find next boundary based on mode

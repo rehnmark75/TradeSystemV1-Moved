@@ -208,7 +208,7 @@ class ScannerConfig:
     enable_data_cache: bool = False
     reduced_lookback_hours: bool = True
     lazy_indicator_loading: bool = True
-    data_batch_size: int = 10000
+    data_batch_size: int = 25000
     enable_support_resistance: bool = True
     enable_volume_analysis: bool = True
     enable_behavior_analysis: bool = False

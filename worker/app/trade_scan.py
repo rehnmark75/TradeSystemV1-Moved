@@ -914,8 +914,11 @@ def main():
                                     # Test strategy detection manually
                                     print(f"\n🧪 Testing strategy detection on this data...")
                                     try:
-                                        # Test combined strategy
-                                        signal = signal_detector.detect_combined_signals(epic, epic.replace('CS.D.', '').replace('.MINI.IP', ''))
+                                        # Test active strategy routing
+                                        parts = epic.split('.')
+                                        pair_name = parts[2] if len(parts) >= 3 else epic.replace('CS.D.', '').replace('.MINI.IP', '')
+                                        signals = signal_detector.detect_signals(epic, pair_name)
+                                        signal = signals[0] if isinstance(signals, list) and signals else signals
                                         if signal:
                                             print(f"✅ Strategy detected signal: {signal['signal_type']} at {signal['confidence_score']:.1%}")
                                         else:

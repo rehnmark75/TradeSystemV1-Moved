@@ -73,6 +73,10 @@ class SignalDetector:
         # Database columns for large candle filter were dropped.
         # See migration: remove_safety_filter_columns.sql
         self.large_candle_filter = None
+        self._routing_cache = {}
+        self._routing_cache_ttl_seconds = 900
+        self._weekly_consistency_cache = {}
+        self._weekly_consistency_cache_ttl_seconds = 4 * 60 * 60
 
         # Initialize SMC Simple Strategy (the only active strategy)
         # NOTE: SMC Simple is always enabled after January 2026 cleanup
@@ -576,8 +580,9 @@ class SignalDetector:
             return False
         try:
             return XAUGoldConfigService.get_instance().is_pair_enabled(epic)
-        except Exception:
-            return True
+        except Exception as e:
+            self.logger.error(f"❌ [XAU_GOLD] Config lookup failed for {epic}; failing closed: {e}")
+            return False
 
     def detect_xau_gold_signals(
         self,
@@ -1356,6 +1361,11 @@ class SignalDetector:
             return default_result
 
         try:
+            cache_key = (epic, pair)
+            cached = self._routing_cache.get(cache_key)
+            if cached and (datetime.now() - cached['timestamp']).total_seconds() < self._routing_cache_ttl_seconds:
+                return dict(cached['result'])
+
             # Fetch 1h data for regime detection (same as backtest)
             df = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -1405,8 +1415,6 @@ class SignalDetector:
                         regime = 'high_volatility'
                 elif atr_ratio < 0.7:
                     volatility_state = 'low'
-                    if regime == 'trending' and adx_value and adx_value < 25:
-                        regime = 'low_volatility'
 
             # --- Enhanced regime validation: efficiency ratio + weekly consistency ---
             regime_downgraded = False
@@ -1499,13 +1507,24 @@ class SignalDetector:
             elif regime == 'low_volatility':
                 regime_confidence = 0.6
 
-            return {
+            result = {
                 'strategy': strategy_name,
                 'regime': regime,
                 'regime_confidence': regime_confidence,
                 'adx_value': adx_value,
                 'volatility_state': volatility_state,
             }
+            self._routing_cache[cache_key] = {
+                'timestamp': datetime.now(),
+                'result': dict(result),
+            }
+            if len(self._routing_cache) > 256:
+                cutoff = datetime.now() - timedelta(seconds=self._routing_cache_ttl_seconds)
+                self._routing_cache = {
+                    key: entry for key, entry in self._routing_cache.items()
+                    if entry['timestamp'] >= cutoff
+                }
+            return result
 
         except Exception as e:
             self.logger.warning(f"⚠️ Regime routing error for {epic}, defaulting to SMC_SIMPLE: {e}")
@@ -1555,6 +1574,11 @@ class SignalDetector:
         """
         default = {'is_oscillating': False, 'pattern': '', 'alternations': 0}
         try:
+            cache_key = epic
+            cached = self._weekly_consistency_cache.get(cache_key)
+            if cached and (datetime.now() - cached['timestamp']).total_seconds() < self._weekly_consistency_cache_ttl_seconds:
+                return dict(cached['result'])
+
             from sqlalchemy import text
             query = text("""
                 SELECT
@@ -1573,11 +1597,19 @@ class SignalDetector:
                 result = conn.execute(query, {'epic': epic}).fetchall()
 
             if len(result) < 3:
+                self._weekly_consistency_cache[cache_key] = {
+                    'timestamp': datetime.now(),
+                    'result': default,
+                }
                 return default
 
             # Exclude current partial week (last row)
             weeks = result[:-1] if len(result) > 3 else result
             if len(weeks) < 3:
+                self._weekly_consistency_cache[cache_key] = {
+                    'timestamp': datetime.now(),
+                    'result': default,
+                }
                 return default
 
             # Take last 4 complete weeks
@@ -1595,11 +1627,22 @@ class SignalDetector:
             pattern = '→'.join(['B' if d == 1 else 'S' for d in directions])
             is_oscillating = alternations >= min(len(directions) - 1, 3)
 
-            return {
+            result = {
                 'is_oscillating': is_oscillating,
                 'pattern': pattern,
                 'alternations': alternations
             }
+            self._weekly_consistency_cache[cache_key] = {
+                'timestamp': datetime.now(),
+                'result': dict(result),
+            }
+            if len(self._weekly_consistency_cache) > 256:
+                cutoff = datetime.now() - timedelta(seconds=self._weekly_consistency_cache_ttl_seconds)
+                self._weekly_consistency_cache = {
+                    key: entry for key, entry in self._weekly_consistency_cache.items()
+                    if entry['timestamp'] >= cutoff
+                }
+            return result
 
         except Exception as e:
             self.logger.debug(f"⚠️ Weekly consistency check error for {epic}: {e}")

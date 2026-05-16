@@ -993,7 +993,7 @@ class TradeValidator:
                 self.db_manager.execute_query(
                     insert_sql,
                     (
-                        datetime.utcnow(),
+                        datetime.now(timezone.utc),
                         epic,
                         pair,
                         'REVERSAL_FILTER',  # Matches STAGE_REVERSAL_FILTER

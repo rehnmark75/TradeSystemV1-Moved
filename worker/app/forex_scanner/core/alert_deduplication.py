@@ -12,7 +12,7 @@ import os
 import hashlib
 import json
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 # Trading environment (live/demo) — scope all dedup/cooldown queries to this worker's env
 TRADING_ENVIRONMENT = os.getenv('TRADING_ENVIRONMENT', 'demo')
@@ -176,23 +176,9 @@ class AlertDeduplicationManager:
     def generate_signal_hash(self, signal: Dict) -> str:
         """
         Generate a unique hash for the signal to detect exact duplicates
-        Enhanced with time components to prevent false positives
+        Stable across wall-clock bucket boundaries; cooldown/cache expiry limits
+        how long an exact duplicate is suppressed.
         """
-        # Get current time and create time bucket (15-minute intervals)
-        current_time = datetime.now()
-        time_bucket = current_time.strftime('%Y-%m-%d-%H') + f":{(current_time.minute // 15) * 15:02d}"
-
-        # Determine market session
-        hour = current_time.hour
-        if 0 <= hour < 8:
-            market_session = 'SYDNEY_TOKYO'
-        elif 8 <= hour < 16:
-            market_session = 'LONDON'
-        elif 16 <= hour < 24:
-            market_session = 'NEW_YORK'
-        else:
-            market_session = 'TRANSITION'
-
         # Create a normalized signal for hashing
         hash_data = {
             'epic': signal.get('epic', ''),
@@ -205,11 +191,6 @@ class AlertDeduplicationManager:
             'ema_short': round(float(signal.get('ema_short', 0)), 5) if signal.get('ema_short') else None,
             'ema_long': round(float(signal.get('ema_long', 0)), 5) if signal.get('ema_long') else None,
             'macd_line': round(float(signal.get('macd_line', 0)), 6) if signal.get('macd_line') else None,
-            # NEW: Add time-based components (configurable)
-            **({
-                'time_bucket': time_bucket,  # 15-minute time window
-                'market_session': market_session,  # Market session context
-            } if self._enable_time_hash else {})
         }
 
         # Convert to deterministic JSON string
@@ -417,7 +398,7 @@ class AlertDeduplicationManager:
             conn = self.db_manager.get_connection()
             cursor = conn.cursor()
 
-            current_time = datetime.utcnow()
+            current_time = datetime.now(timezone.utc)
             cooldown_threshold = current_time - timedelta(minutes=trade_cooldown_minutes)
 
             # CRITICAL: Check for ACTIVE/OPEN trades first (any status that means position is open)

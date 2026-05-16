@@ -68,14 +68,15 @@ class DataFetcher:
                 self.enable_behavior_analysis = self._scanner_config.enable_behavior_analysis
                 logging.getLogger(__name__).debug("[CONFIG:DB] DataFetcher settings loaded from database")
             except Exception as e:
-                logging.getLogger(__name__).warning(f"[CONFIG:DB] Failed to load DataFetcher settings: {e}")
-                self._load_fallback_config()
+                raise RuntimeError(
+                    f"[CONFIG:DB] Failed to load DataFetcher settings; database config is required: {e}"
+                ) from e
         else:
             self._load_fallback_config()
 
         # Cache for recently fetched data
         self._data_cache = {}
-        self._cache_timeout = 150  # 5 minutes
+        self._cache_timeout = 900  # 15 minutes
         self._indicator_cache = {}
 
     def _load_fallback_config(self):
@@ -83,7 +84,7 @@ class DataFetcher:
         self.cache_enabled = False
         self.reduced_lookback = True
         self.lazy_indicators = True
-        self.batch_size = 10000
+        self.batch_size = 25000
         self.enable_support_resistance = True
         self.enable_volume_analysis = True
         self.enable_behavior_analysis = False
@@ -1920,9 +1921,9 @@ class DataFetcher:
                 'next_boundary': datetime    # Next candle close time
             }
         """
-        from datetime import datetime, timedelta
+        from datetime import datetime, timedelta, timezone
 
-        now = datetime.utcnow()
+        now = datetime.now(timezone.utc)
         current_minute = now.minute
         current_hour = now.hour
 
@@ -2045,9 +2046,9 @@ class DataFetcher:
             ema_key = "_".join(map(str, ema_periods))
             base_key = f"{epic}_{timeframe}_{lookback_hours}_{ema_key}"
             
-            # Add timestamp for cache expiration (5 minutes)
+            # Add timestamp for cache expiration
             import time
-            cache_window = int(time.time() // 300)  # 5-minute windows
+            cache_window = int(time.time() // self._cache_timeout)
             
             return f"{base_key}_{cache_window}"
             
