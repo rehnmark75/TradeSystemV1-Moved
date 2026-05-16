@@ -297,6 +297,10 @@ class XAUGoldStrategy(StrategyInterface):
             if event_signal is not None:
                 return event_signal
 
+        if not bool(getattr(cfg, "enable_strict_bos_pullback", True)):
+            self._reject(epic, "strict_bos_pullback_disabled", "")
+            return None
+
         # Tier 1: HTF bias
         bias = self._htf_bias(df_4h)
         if bias is None:
@@ -436,8 +440,8 @@ class XAUGoldStrategy(StrategyInterface):
             "limit_distance": int(round(float(tp_pips) / 5.0)),
             "confidence_score": float(confidence),
             "confidence": float(confidence),
-            "signal_timestamp": datetime.now(timezone.utc).isoformat(),
-            "timestamp": datetime.now(timezone.utc),
+            "signal_timestamp": current_time.isoformat(),
+            "timestamp": current_time,
             "version": self.config.version,
             "market_regime_detected": regime,
             "market_regime": regime,
@@ -476,13 +480,13 @@ class XAUGoldStrategy(StrategyInterface):
         )
 
         # LPF gate — strategy-side opt-in (LPF_ENABLED = True)
-        if getattr(self, 'LPF_ENABLED', True):
+        if getattr(self, 'LPF_ENABLED', True) and bool(getattr(self.config, "lpf_enabled", True)):
             try:
                 try:
                     from .lpf_gate import apply_lpf_gate
                 except ImportError:
                     from forex_scanner.core.strategies.lpf_gate import apply_lpf_gate
-                signal = apply_lpf_gate(signal, self.logger)
+                signal = apply_lpf_gate(signal, self.logger, backtest_timestamp=current_time)
             except Exception as _lpf_exc:
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
         return signal
@@ -710,10 +714,30 @@ class XAUGoldStrategy(StrategyInterface):
 
             score += float(adaptive.get("score_delta", 0.0))
 
+            profile = self._event_profile_decision(
+                direction=direction,
+                setup=cand["setup"],
+                current_time=current_time,
+                score=score,
+                metrics={
+                    "rsi_14": rsi_val,
+                    "body_atr": body_atr,
+                    "recent_range_pips": recent_range_pips,
+                    "ema21_distance_pips": ema_distance_pips,
+                    "event_strength": float(cand.get("event_strength") or 0.0),
+                    "atr_pct": float(atr_pct),
+                },
+            )
+            if not profile.get("allowed", True):
+                filtered_candidates += 1
+                continue
+            score += float(profile.get("score_delta", 0.0))
+
             cand = {
                 **cand,
                 "score": min(max(score, 0.0), cfg.max_confidence),
                 "adaptive": adaptive,
+                "profile": profile,
             }
             scored.append(cand)
 
@@ -726,11 +750,13 @@ class XAUGoldStrategy(StrategyInterface):
             return None
 
         best = max(scored, key=lambda c: c["score"])
-        if best["score"] < cfg.event_min_confidence:
+        profile = best.get("profile") or {}
+        min_confidence = float(profile.get("min_confidence", cfg.event_min_confidence))
+        if best["score"] < min_confidence:
             self._reject(
                 epic,
                 "event_low_confidence",
-                f"{best['setup']} {best['score']:.3f} < {cfg.event_min_confidence:.3f}",
+                f"{best['setup']} {best['score']:.3f} < {min_confidence:.3f}",
             )
             return None
 
@@ -784,25 +810,154 @@ class XAUGoldStrategy(StrategyInterface):
                 "atr_pct": float(atr_pct),
                 "rr_ratio": float(tp_pips / sl_pips) if sl_pips else 0.0,
                 "adaptive_playbook": best.get("adaptive"),
+                "event_profile": profile,
             },
         }
 
-        self._set_cooldown_minutes(epic, current_time, int(cfg.event_cooldown_minutes))
+        cooldown_minutes = int(profile.get("cooldown_minutes", cfg.event_cooldown_minutes))
+        self._set_cooldown_minutes(epic, current_time, cooldown_minutes)
         self.logger.info(
             f"✅ [XAU_GOLD:event] {epic} {direction} {best['setup']} @ {close:.2f} "
             f"SL={sl_pips:.1f}p TP={tp_pips:.1f}p conf={best['score']:.2f} regime={regime}"
         )
 
-        if getattr(self, 'LPF_ENABLED', True):
+        if getattr(self, 'LPF_ENABLED', True) and bool(getattr(self.config, "lpf_enabled", True)):
             try:
                 try:
                     from .lpf_gate import apply_lpf_gate
                 except ImportError:
                     from forex_scanner.core.strategies.lpf_gate import apply_lpf_gate
-                signal = apply_lpf_gate(signal, self.logger)
+                signal = apply_lpf_gate(signal, self.logger, backtest_timestamp=current_time)
             except Exception as _lpf_exc:
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
         return signal
+
+    def _event_profile_decision(
+        self,
+        direction: str,
+        setup: str,
+        current_time: datetime,
+        score: float,
+        metrics: Optional[Dict[str, float]] = None,
+    ) -> Dict[str, Any]:
+        cfg = self.config
+        metrics = metrics or {}
+        result: Dict[str, Any] = {
+            "enabled": bool(cfg.event_dynamic_profiles_enabled),
+            "allowed": True,
+            "matched_rule": None,
+            "min_confidence": float(cfg.event_min_confidence),
+            "cooldown_minutes": int(cfg.event_cooldown_minutes),
+            "score_delta": 0.0,
+        }
+        if not cfg.event_dynamic_profiles_enabled:
+            return result
+
+        rules = cfg.event_profile_rules or []
+        if not isinstance(rules, list):
+            result["allowed"] = False
+            result["reason"] = "invalid_profile_rules"
+            return result
+
+        hour = current_time.hour
+        for idx, rule in enumerate(rules):
+            if not isinstance(rule, dict):
+                continue
+            setups = rule.get("setups", rule.get("setup", "*"))
+            directions = rule.get("directions", rule.get("direction", "*"))
+            hours = rule.get("hours")
+
+            if not self._profile_value_matches(setup, setups):
+                continue
+            if not self._profile_value_matches(direction, directions):
+                continue
+            if hours is not None and not self._profile_hour_matches(hour, hours):
+                continue
+
+            metric_failure = self._profile_metric_failure(rule, metrics)
+            if metric_failure is not None:
+                result["matched_rule"] = idx
+                result["allowed"] = False
+                result["reason"] = metric_failure
+                return result
+
+            result["matched_rule"] = idx
+            result["allowed"] = bool(rule.get("enabled", True))
+            if "min_confidence" in rule:
+                result["min_confidence"] = float(rule["min_confidence"])
+            if "cooldown_minutes" in rule:
+                result["cooldown_minutes"] = int(rule["cooldown_minutes"])
+            if "score_delta" in rule:
+                result["score_delta"] = float(rule["score_delta"])
+            if score + float(result["score_delta"]) < float(result["min_confidence"]):
+                result["reason"] = "below_profile_min_confidence"
+            else:
+                result["reason"] = "profile_matched"
+            return result
+
+        result["allowed"] = False
+        result["reason"] = "no_profile_match"
+        return result
+
+    @staticmethod
+    def _profile_value_matches(value: str, allowed: Any) -> bool:
+        if allowed in (None, "*"):
+            return True
+        if isinstance(allowed, str):
+            return value.upper() == allowed.upper()
+        if isinstance(allowed, (list, tuple, set)):
+            return any(XAUGoldStrategy._profile_value_matches(value, item) for item in allowed)
+        return False
+
+    @staticmethod
+    def _profile_hour_matches(hour: int, hours: Any) -> bool:
+        if hours in (None, "*"):
+            return True
+        if isinstance(hours, int):
+            return hour == hours
+        if isinstance(hours, str):
+            try:
+                return hour == int(hours)
+            except ValueError:
+                return False
+        if isinstance(hours, (list, tuple)):
+            if len(hours) == 2 and all(isinstance(x, (int, float, str)) for x in hours):
+                try:
+                    start = int(hours[0])
+                    end = int(hours[1])
+                except ValueError:
+                    return False
+                if start <= end:
+                    return start <= hour <= end
+                return hour >= start or hour <= end
+            return any(XAUGoldStrategy._profile_hour_matches(hour, item) for item in hours)
+        return False
+
+    @staticmethod
+    def _profile_metric_failure(rule: Dict[str, Any], metrics: Dict[str, float]) -> Optional[str]:
+        aliases = {
+            "rsi": "rsi_14",
+            "range": "recent_range_pips",
+            "recent_range": "recent_range_pips",
+            "ema_distance": "ema21_distance_pips",
+            "ema_dist": "ema21_distance_pips",
+        }
+        for key, raw_value in rule.items():
+            if key.startswith("min_"):
+                metric_name = aliases.get(key[4:], key[4:])
+                if metric_name in {"confidence", "conf"}:
+                    continue
+                metric = metrics.get(metric_name)
+                if metric is not None and metric < float(raw_value):
+                    return f"{metric_name}_below_min"
+            elif key.startswith("max_"):
+                metric_name = aliases.get(key[4:], key[4:])
+                if metric_name in {"confidence", "conf"}:
+                    continue
+                metric = metrics.get(metric_name)
+                if metric is not None and metric > float(raw_value):
+                    return f"{metric_name}_above_max"
+        return None
 
     def _regime(
         self, df_htf: pd.DataFrame, df_trigger: pd.DataFrame

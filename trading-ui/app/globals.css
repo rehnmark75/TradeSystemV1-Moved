@@ -7778,6 +7778,151 @@ table {
   gap: 10px;
 }
 
+.xau-profile-panel {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface-2);
+  padding: 14px;
+}
+
+.xau-profile-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid var(--border);
+}
+
+.xau-profile-kicker {
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.xau-profile-header h2 {
+  margin: 2px 0 0;
+  font-family: "Space Grotesk", sans-serif;
+  font-size: 1rem;
+}
+
+.xau-profile-status-row,
+.xau-profile-rule-meta,
+.xau-profile-rule-filters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.xau-profile-pill,
+.xau-profile-rule-meta span,
+.xau-profile-rule-filters span {
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 4px 8px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: var(--muted);
+  background: var(--surface);
+  white-space: nowrap;
+}
+
+.xau-profile-pill.is-on {
+  color: #047857;
+  border-color: #a7f3d0;
+  background: #ecfdf5;
+}
+
+.xau-profile-pill.is-off {
+  color: var(--muted);
+}
+
+.xau-profile-pill.is-warn {
+  color: #9a3412;
+  border-color: #fed7aa;
+  background: #fff7ed;
+}
+
+.xau-profile-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.xau-profile-metrics div {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 9px 10px;
+  background: var(--surface);
+}
+
+.xau-profile-metrics span {
+  display: block;
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.xau-profile-metrics strong {
+  display: block;
+  margin-top: 2px;
+  color: var(--ink);
+  font-size: 1rem;
+}
+
+.xau-profile-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.xau-profile-rule,
+.xau-profile-empty {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  background: var(--surface);
+}
+
+.xau-profile-rule-top {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  margin-bottom: 8px;
+}
+
+.xau-profile-rule-top strong {
+  color: var(--ink);
+  font-size: 0.88rem;
+  line-height: 1.3;
+}
+
+.xau-profile-rule-top span {
+  border-radius: 999px;
+  padding: 3px 7px;
+  color: #9a3412;
+  background: #fff7ed;
+  border: 1px solid #fed7aa;
+  font-size: 0.72rem;
+  font-weight: 800;
+}
+
+.xau-profile-rule-filters {
+  margin-top: 8px;
+}
+
+.xau-profile-empty {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
 /* ── Enhanced SettingsField ── */
 .settings-field {
   background: var(--surface-2);

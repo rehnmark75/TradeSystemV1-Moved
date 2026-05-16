@@ -114,6 +114,7 @@ const STRATEGIES: Record<StrategyKey, {
       "regime",
       "session",
       "structure",
+      "event_profiles",
       "limits",
       "filters",
       "pairs",
@@ -217,6 +218,118 @@ function valuesEqual(a: unknown, b: unknown) {
 
 function hasKey(obj: Record<string, unknown>, key: string) {
   return Object.prototype.hasOwnProperty.call(obj, key);
+}
+
+function asBoolean(value: unknown) {
+  if (typeof value === "boolean") return value;
+  if (typeof value === "string") return value.toLowerCase() === "true";
+  return Boolean(value);
+}
+
+function formatProfileValue(value: unknown, fallback = "-") {
+  if (value === null || value === undefined || value === "") return fallback;
+  if (Array.isArray(value)) return value.join(", ");
+  return String(value);
+}
+
+function formatProfileHours(value: unknown) {
+  if (!Array.isArray(value) || value.length === 0) return "Any hour";
+  if (value.length === 2) return `${value[0]}-${value[1]} UTC`;
+  return `${value.join(", ")} UTC`;
+}
+
+function parseProfileRules(value: unknown): Array<Record<string, unknown>> {
+  if (Array.isArray(value)) {
+    return value.filter((item): item is Record<string, unknown> =>
+      Boolean(item) && typeof item === "object" && !Array.isArray(item)
+    );
+  }
+  if (typeof value === "string" && value.trim()) {
+    try {
+      const parsed = JSON.parse(value);
+      return parseProfileRules(parsed);
+    } catch {
+      return [];
+    }
+  }
+  return [];
+}
+
+function profileFilters(rule: Record<string, unknown>) {
+  return Object.entries(rule)
+    .filter(([key]) => key.startsWith("min_") || key.startsWith("max_"))
+    .filter(([key]) => key !== "min_confidence")
+    .map(([key, value]) => `${key.replace(/_/g, " ")} ${value}`);
+}
+
+function XauGoldProfilePanel({ config }: { config: Record<string, unknown> }) {
+  const rules = parseProfileRules(config.event_profile_rules);
+  const dynamicEnabled = asBoolean(config.event_dynamic_profiles_enabled);
+  const strictFallbackEnabled = asBoolean(config.enable_strict_bos_pullback);
+  const lpfEnabled = asBoolean(config.lpf_enabled);
+
+  return (
+    <section className="xau-profile-panel" aria-label="XAU Gold dynamic profile">
+      <div className="xau-profile-header">
+        <div>
+          <div className="xau-profile-kicker">XAU_GOLD event profile</div>
+          <h2>April-protected dynamic rules</h2>
+        </div>
+        <div className="xau-profile-status-row">
+          <span className={`xau-profile-pill ${dynamicEnabled ? "is-on" : "is-off"}`}>
+            Dynamic {dynamicEnabled ? "On" : "Off"}
+          </span>
+          <span className={`xau-profile-pill ${strictFallbackEnabled ? "is-warn" : "is-on"}`}>
+            Strict BOS {strictFallbackEnabled ? "On" : "Off"}
+          </span>
+          <span className={`xau-profile-pill ${lpfEnabled ? "is-warn" : "is-on"}`}>
+            LPF {lpfEnabled ? "On" : "Off"}
+          </span>
+        </div>
+      </div>
+
+      <div className="xau-profile-metrics">
+        <div>
+          <span>Base confidence</span>
+          <strong>{formatProfileValue(config.event_min_confidence)}</strong>
+        </div>
+        <div>
+          <span>Fallback cooldown</span>
+          <strong>{formatProfileValue(config.event_cooldown_minutes)}m</strong>
+        </div>
+        <div>
+          <span>Rules</span>
+          <strong>{rules.length}</strong>
+        </div>
+      </div>
+
+      <div className="xau-profile-rule-grid">
+        {rules.length ? rules.map((rule, index) => {
+          const filters = profileFilters(rule);
+          return (
+            <div className="xau-profile-rule" key={`${formatProfileValue(rule.setup ?? rule.setups)}-${index}`}>
+              <div className="xau-profile-rule-top">
+                <strong>{formatProfileValue(rule.setup ?? rule.setups, "Any setup")}</strong>
+                <span>{formatProfileValue(rule.direction ?? rule.directions, "Any direction")}</span>
+              </div>
+              <div className="xau-profile-rule-meta">
+                <span>{formatProfileHours(rule.hours)}</span>
+                <span>min {formatProfileValue(rule.min_confidence)}</span>
+                <span>{formatProfileValue(rule.cooldown_minutes)}m cooldown</span>
+              </div>
+              {filters.length ? (
+                <div className="xau-profile-rule-filters">
+                  {filters.map((filter) => <span key={filter}>{filter}</span>)}
+                </div>
+              ) : null}
+            </div>
+          );
+        }) : (
+          <div className="xau-profile-empty">No dynamic profile rules are configured.</div>
+        )}
+      </div>
+    </section>
+  );
 }
 
 export default function UnifiedStrategySettings() {
@@ -879,7 +992,12 @@ export default function UnifiedStrategySettings() {
           ) : configError ? (
             <div className="settings-placeholder">Error: {configError}</div>
           ) : (
-            sections.map((section) => {
+            <>
+              {strategy === "xau-gold" ? (
+                <XauGoldProfilePanel config={sourceData} />
+              ) : null}
+
+              {sections.map((section) => {
               const allFields = [
                 ...section.items.map((i) => i.parameter_name),
                 ...[...section.subgroups.values()].flat().map((i) => i.parameter_name),
@@ -916,7 +1034,8 @@ export default function UnifiedStrategySettings() {
                   }
                 </section>
               );
-            })
+              })}
+            </>
           )}
         </div>
 

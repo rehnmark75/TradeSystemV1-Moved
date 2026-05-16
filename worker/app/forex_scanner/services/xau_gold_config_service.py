@@ -114,6 +114,9 @@ class XAUGoldConfig:
     event_sweep_min_pips: float = 20.0
     event_max_recent_range_pips: float = 220.0
     event_max_ema_distance_pips: float = 220.0
+    event_dynamic_profiles_enabled: bool = False
+    event_profile_rules: List[Dict[str, Any]] = field(default_factory=list)
+    enable_strict_bos_pullback: bool = True
 
     # Rolling adaptive scoring by direction + playbook
     adaptive_playbook_scoring_enabled: bool = True
@@ -127,6 +130,9 @@ class XAUGoldConfig:
     adaptive_penalty_expectancy_pips: float = 0.0
     adaptive_block_pf: float = 0.80
     adaptive_block_expectancy_pips: float = -10.0
+
+    # Strategy-side LPF gate
+    lpf_enabled: bool = True
 
     # Limits
     signal_cooldown_minutes: int = 180
@@ -406,6 +412,8 @@ def apply_config_overrides(
             elif isinstance(current, list):
                 # Accept JSON array string (e.g. '["CS.D.CFEGOLD.KAGGLE.IP"]') or pre-parsed list
                 new_val = json.loads(value) if isinstance(value, str) else list(value)
+            elif isinstance(current, dict):
+                new_val = json.loads(value) if isinstance(value, str) else dict(value)
             else:
                 new_val = value
             setattr(cfg, key, new_val)
