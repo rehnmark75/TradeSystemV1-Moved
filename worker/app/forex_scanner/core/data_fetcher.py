@@ -313,6 +313,13 @@ class DataFetcher:
             self.logger.debug("🔄 Adding ATR indicator")
             df_enhanced = self.technical_analyzer.calculate_atr(df_enhanced, period=14)
 
+            # Recompute atr_percentile using the final EMA-smoothed atr so that
+            # downstream regime/SL code compares consistent values.
+            if 'atr_20' in df_enhanced.columns:
+                df_enhanced['atr_percentile'] = (
+                    df_enhanced['atr'] / df_enhanced['atr_20'] * 100
+                ).fillna(50.0)
+
             # Always add ADX indicator (for performance collection)
             self.logger.debug("🔄 Adding ADX indicator")
             df_enhanced = self._add_adx_indicator(df_enhanced, period=14)
@@ -551,12 +558,9 @@ class DataFetcher:
                 # Standard ATR (14-period, used by supertrend_period which is typically 14)
                 df['atr'] = true_range.rolling(window=supertrend_period).mean()
 
-                # 20-period ATR for percentile calculation (adaptive volatility)
+                # 20-period ATR baseline for percentile calculation (computed here; percentile
+                # is recomputed after calculate_atr overwrites 'atr' with EMA-smoothed values)
                 df['atr_20'] = true_range.rolling(window=20).mean()
-
-                # ATR percentile: current ATR vs 20-period baseline
-                # Used for regime detection (high volatility, breakout conditions)
-                df['atr_percentile'] = (df['atr'] / df['atr_20'] * 100).fillna(50.0)
 
             # Calculate Bollinger Band width percentile for ranging market detection
             if 'bb_upper' in df.columns and 'bb_lower' in df.columns:
