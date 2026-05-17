@@ -885,7 +885,7 @@ class SignalDetector:
                     self.logger.error(f"❌ [SMC_MOMENTUM] Error for {epic}: {e}")
                     individual_results['smc_momentum'] = None
 
-            if self.range_fade_enabled and RangeFadeConfigService.get_instance().get_config().is_pair_enabled(epic):
+            if self.range_fade_enabled and not self._is_gold_epic(epic) and RangeFadeConfigService.get_instance().get_config().is_pair_enabled(epic):
                 try:
                     self.logger.debug(f"🔍 [RANGE_FADE] Starting detection for {epic}")
                     erf_signal = self.detect_range_fade_signals(
@@ -911,7 +911,9 @@ class SignalDetector:
                     and ImpulseFadeConfigService.get_instance().get_config().is_pair_enabled(epic)):
                 try:
                     self.logger.debug(f"🔍 [IMPULSE_FADE] Starting detection for {epic}")
-                    if_signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=datetime.now(timezone.utc))
+                    _if_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _if_ts = _if_bt_time if _if_bt_time is not None else datetime.now(timezone.utc)
+                    if_signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=_if_ts)
                     individual_results['impulse_fade'] = if_signal
                     if if_signal:
                         all_signals.append(if_signal)
@@ -1361,9 +1363,10 @@ class SignalDetector:
             return default_result
 
         try:
-            cache_key = (epic, pair)
-            cached = self._routing_cache.get(cache_key)
             now = datetime.now(timezone.utc)
+            session = self._get_current_session()
+            cache_key = (epic, pair, session)
+            cached = self._routing_cache.get(cache_key)
             if cached and (now - cached['timestamp']).total_seconds() < self._routing_cache_ttl_seconds:
                 return dict(cached['result'])
 
@@ -1440,9 +1443,6 @@ class SignalDetector:
                         )
                         regime = 'ranging'
                         regime_downgraded = True
-
-            # Determine session
-            session = self._get_current_session()
 
             # Route via the strategy router service
             strategy_name, confidence_modifier = self._strategy_router.get_strategy_for_regime(
@@ -1567,8 +1567,8 @@ class SignalDetector:
     def _check_weekly_directional_consistency(self, epic: str, pair: str) -> dict:
         """Check if recent weeks show alternating direction (oscillation vs trend).
 
-        Queries pre-synthesized 1h candles from ig_candles_backtest, aggregates
-        to weekly OHLC in SQL. Avoids data_batch_size limits.
+        Queries 1h candles from ig_candles (live source), aggregates
+        to weekly OHLC in SQL.
 
         Returns:
             dict with 'is_oscillating' (bool), 'pattern' (str), 'alternations' (int)
@@ -1587,7 +1587,7 @@ class SignalDetector:
                     date_trunc('week', start_time) as week,
                     (array_agg(open ORDER BY start_time ASC))[1] as week_open,
                     (array_agg(close ORDER BY start_time DESC))[1] as week_close
-                FROM ig_candles_backtest
+                FROM ig_candles
                 WHERE epic = :epic AND timeframe = 60
                   AND start_time >= NOW() - INTERVAL '5 weeks'
                 GROUP BY 1
@@ -1596,9 +1596,9 @@ class SignalDetector:
             """)
 
             with self.data_fetcher.db_manager.engine.connect() as conn:
-                result = conn.execute(query, {'epic': epic}).fetchall()
+                rows = conn.execute(query, {'epic': epic}).fetchall()
 
-            if len(result) < 3:
+            if len(rows) < 3:
                 self._weekly_consistency_cache[cache_key] = {
                     'timestamp': now,
                     'result': default,
@@ -1606,7 +1606,7 @@ class SignalDetector:
                 return default
 
             # Exclude current partial week (last row)
-            weeks = result[:-1] if len(result) > 3 else result
+            weeks = rows[:-1] if len(rows) > 3 else rows
             if len(weeks) < 3:
                 self._weekly_consistency_cache[cache_key] = {
                     'timestamp': now,
@@ -1671,10 +1671,7 @@ class SignalDetector:
         technical indicators before returning.
         """
         try:
-            mean_reversion_strategy = self._get_strategy(
-                'MEAN_REVERSION',
-                config_override=self._config_override,
-            )
+            mean_reversion_strategy = self._get_strategy('MEAN_REVERSION')
             if mean_reversion_strategy is None:
                 return None
 
@@ -1784,10 +1781,7 @@ class SignalDetector:
     ) -> Optional[Dict]:
         """Detect signals using the Impulse Fade strategy (5m only, late-US session)."""
         try:
-            impulse_fade_strategy = self._get_strategy(
-                'IMPULSE_FADE',
-                config_override=self._config_override,
-            )
+            impulse_fade_strategy = self._get_strategy('IMPULSE_FADE')
             if impulse_fade_strategy is None:
                 return None
 
