@@ -1582,14 +1582,24 @@ class SignalDetector:
                 return dict(cached['result'])
 
             from sqlalchemy import text
+            # Aggregate 1m bars → hourly → weekly entirely from ig_candles so
+            # this query never depends on ig_candles_backtest (lazy-populated).
             query = text("""
+                WITH hourly AS (
+                    SELECT
+                        date_trunc('hour', start_time) AS hour,
+                        (array_agg(open  ORDER BY start_time ASC))[1]  AS open,
+                        (array_agg(close ORDER BY start_time DESC))[1] AS close
+                    FROM ig_candles
+                    WHERE epic = :epic AND timeframe = 1
+                      AND start_time >= NOW() - INTERVAL '5 weeks'
+                    GROUP BY 1
+                )
                 SELECT
-                    date_trunc('week', start_time) as week,
-                    (array_agg(open ORDER BY start_time ASC))[1] as week_open,
-                    (array_agg(close ORDER BY start_time DESC))[1] as week_close
-                FROM ig_candles
-                WHERE epic = :epic AND timeframe = 60
-                  AND start_time >= NOW() - INTERVAL '5 weeks'
+                    date_trunc('week', hour) AS week,
+                    (array_agg(open  ORDER BY hour ASC))[1]  AS week_open,
+                    (array_agg(close ORDER BY hour DESC))[1] AS week_close
+                FROM hourly
                 GROUP BY 1
                 HAVING COUNT(*) > 20
                 ORDER BY 1
