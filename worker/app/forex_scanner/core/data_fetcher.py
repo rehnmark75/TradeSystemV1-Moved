@@ -297,10 +297,6 @@ class DataFetcher:
             self.logger.debug("🔄 Adding BB+Supertrend indicators")
             df_enhanced = self._add_bb_supertrend_indicators(df_enhanced)
 
-            # Always add Zero Lag EMA indicators (for performance collection)
-            self.logger.debug("🔄 Adding Zero Lag EMA indicators")
-            df_enhanced = self._add_zero_lag_indicators(df_enhanced)
-
             # Always add Two-Pole Oscillator indicators (for performance collection)
             self.logger.debug("🔄 Adding Two-Pole Oscillator indicators")
             df_enhanced = self._add_two_pole_oscillator_indicators(df_enhanced)
@@ -637,88 +633,6 @@ class DataFetcher:
             return df
 
 
-    def _add_zero_lag_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
-        """
-        Add Zero Lag EMA indicators to DataFrame
-        This mirrors the calculation in ZeroLagStrategy
-        """
-        try:
-            # Get parameters from database config
-            length = self._scanner_config.zero_lag_length if self._scanner_config else 21
-            band_multiplier = self._scanner_config.zero_lag_band_mult if self._scanner_config else 1.5
-            
-            # Calculate Zero Lag EMA
-            src = df['close']
-            lag = int(np.floor((length - 1) / 2))
-            
-            # Create lagged price series
-            src_lagged = src.shift(lag)
-            
-            # Calculate momentum adjustment
-            momentum_adj = src - src_lagged
-            
-            # Apply Zero Lag formula
-            zlema_input = src + momentum_adj
-            
-            # Calculate EMA on the adjusted input
-            df['zlema'] = zlema_input.ewm(span=length).mean()
-            
-            # Calculate ATR for volatility bands (if not already calculated)
-            if 'atr' not in df.columns:
-                high_low = df['high'] - df['low']
-                high_close = np.abs(df['high'] - df['close'].shift())
-                low_close = np.abs(df['low'] - df['close'].shift())
-
-                true_range = pd.concat([high_low, high_close, low_close], axis=1).max(axis=1)
-                atr = true_range.rolling(window=length).mean()
-
-                df['atr'] = atr
-
-                # Add 20-period ATR and percentile for adaptive volatility
-                df['atr_20'] = true_range.rolling(window=20).mean()
-                df['atr_percentile'] = (df['atr'] / df['atr_20'] * 100).fillna(50.0)
-            else:
-                atr = df['atr']
-
-            # Calculate volatility using highest ATR over 3x length period
-            volatility_period = min(length * 3, len(df))
-            volatility = atr.rolling(window=volatility_period).max() * band_multiplier
-
-            df['volatility'] = volatility
-            df['upper_band'] = df['zlema'] + volatility
-            df['lower_band'] = df['zlema'] - volatility
-            
-            # Calculate trend state
-            df['trend'] = 0
-            trend = np.zeros(len(df))
-            
-            for i in range(1, len(df)):
-                # Carry forward previous trend
-                trend[i] = trend[i-1]
-                
-                # Check for bullish trend change
-                if (df['close'].iloc[i] > df['upper_band'].iloc[i] and 
-                    df['close'].iloc[i-1] <= df['upper_band'].iloc[i-1]):
-                    trend[i] = 1
-                
-                # Check for bearish trend change
-                elif (df['close'].iloc[i] < df['lower_band'].iloc[i] and 
-                    df['close'].iloc[i-1] >= df['lower_band'].iloc[i-1]):
-                    trend[i] = -1
-            
-            df['trend'] = trend
-            
-            # Fill NaN values
-            df['zlema'] = df['zlema'].bfill()
-            
-            self.logger.debug(f"✅ Zero Lag EMA indicators added successfully")
-            return df
-            
-        except Exception as e:
-            self.logger.error(f"❌ Error adding Zero Lag EMA indicators: {e}")
-            return df
-
-    
     def _add_two_pole_oscillator_indicators(self, df: pd.DataFrame) -> pd.DataFrame:
         """
         Add Two-Pole Oscillator indicators to DataFrame
@@ -929,10 +843,6 @@ class DataFetcher:
             if 'behavior' in required_indicators:
                 self.logger.debug("🔄 Adding behavior analysis")
                 df_enhanced = self.behavior_analyzer.add_behavior_analysis(df_enhanced, pair)
-
-            if 'zero_lag_ema' in required_indicators:
-                self.logger.debug("🔄 Adding Zero Lag EMA indicators")
-                df_enhanced = self._add_zero_lag_indicators(df_enhanced)
 
             if 'bb_supertrend' in required_indicators:
                 self.logger.debug("🔄 Adding BB+Supertrend indicators")
