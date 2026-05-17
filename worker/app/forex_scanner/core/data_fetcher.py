@@ -1584,20 +1584,14 @@ class DataFetcher:
             # For 1m requests, use 1m directly
             source_tf = tf_minutes
         
-        # Use validated preferred prices for trading safety
-        # Optimize data fetching: for large requests (backtesting), get most recent data
-        # For normal requests (live trading), use simple chronological order
-        use_recent_data_optimization = self.batch_size > 3000  # Likely backtesting
-        
-        if use_recent_data_optimization:
-            # Backtesting mode: fetch most recent data within lookback period
-            query = """
+        # Fetch most recent data within the lookback window, ordered chronologically
+        query = """
                 WITH recent_data AS (
-                    SELECT 
-                        pfp.start_time, 
-                        ic.open, 
-                        ic.high, 
-                        ic.low, 
+                    SELECT
+                        pfp.start_time,
+                        ic.open,
+                        ic.high,
+                        ic.low,
                         pfp.preferred_price as close,
                         ic.ltv,
                         pfp.preferred_source as data_source,
@@ -1606,8 +1600,8 @@ class DataFetcher:
                         is_price_safe_for_trading(pfp.epic, pfp.timeframe, pfp.start_time, 10.0) as is_safe_for_trading
                     FROM preferred_forex_prices pfp
                     JOIN ig_candles ic ON (
-                        pfp.epic = ic.epic 
-                        AND pfp.timeframe = ic.timeframe 
+                        pfp.epic = ic.epic
+                        AND pfp.timeframe = ic.timeframe
                         AND pfp.start_time = ic.start_time
                         AND pfp.preferred_source = ic.data_source
                     )
@@ -1619,34 +1613,7 @@ class DataFetcher:
                 )
                 SELECT * FROM recent_data ORDER BY start_time ASC
             """
-        else:
-            # Live trading mode: simple chronological order (original behavior)
-            query = """
-                SELECT 
-                    pfp.start_time, 
-                    ic.open, 
-                    ic.high, 
-                    ic.low, 
-                    pfp.preferred_price as close,
-                    ic.ltv,
-                    pfp.preferred_source as data_source,
-                    pfp.quality_score,
-                    -- Add safety validation flag
-                    is_price_safe_for_trading(pfp.epic, pfp.timeframe, pfp.start_time, 10.0) as is_safe_for_trading
-                FROM preferred_forex_prices pfp
-                JOIN ig_candles ic ON (
-                    pfp.epic = ic.epic 
-                    AND pfp.timeframe = ic.timeframe 
-                    AND pfp.start_time = ic.start_time
-                    AND pfp.preferred_source = ic.data_source
-                )
-                WHERE pfp.epic = :epic
-                AND pfp.timeframe = :timeframe
-                AND pfp.start_time >= :since
-                ORDER BY pfp.start_time ASC
-                LIMIT :limit
-            """
-        
+
         try:
             self.logger.debug(f"🔍 Fetching {epic} data since {tz_manager.format_time_for_display(since_utc)}")
             
