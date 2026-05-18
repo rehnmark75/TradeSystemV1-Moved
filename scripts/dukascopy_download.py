@@ -22,9 +22,9 @@ Key design points
   skips already-downloaded epics. Delete a CSV to re-fetch.
 - **Week-chunked**. Each fetch call covers 1 week (~10k bars) to stay
   well under the library's 30k-row default cap and give progress output.
-- **Gold is tagged with a distinct epic**. Dukascopy XAUUSD ≠ IG
-  CS.D.CFEGOLD.CEE.IP pricing, so it lands as
-  CS.D.CFEGOLD.DUKAS.IP to avoid polluting IG's live gold series.
+- **Metals use distinct epics**. Dukascopy XAUUSD/XAGUSD ≠ IG live
+  pricing, so gold lands as CS.D.CFEGOLD.DUKAS.IP and silver as
+  CS.D.CFDSILVER.DUKAS.IP to avoid polluting the live series.
 
 Usage
 -----
@@ -80,6 +80,7 @@ try:
         INSTRUMENT_FX_CROSSES_GBP_JPY,
         INSTRUMENT_FX_CROSSES_EUR_GBP,
         INSTRUMENT_FX_METALS_XAU_USD,
+        INSTRUMENT_FX_METALS_XAG_USD,
     )
 except ImportError as e:
     sys.stderr.write(
@@ -115,8 +116,9 @@ EPIC_MAPPINGS: List[EpicMapping] = [
     EpicMapping("CS.D.GBPJPY.MINI.IP", INSTRUMENT_FX_CROSSES_GBP_JPY, "GBPJPY"),
     # Other crosses
     EpicMapping("CS.D.EURGBP.MINI.IP", INSTRUMENT_FX_CROSSES_EUR_GBP, "EURGBP"),
-    # Metals — distinct epic to avoid mixing Dukascopy XAUUSD with IG CFEGOLD pricing
-    EpicMapping("CS.D.CFEGOLD.DUKAS.IP", INSTRUMENT_FX_METALS_XAU_USD, "XAUUSD (gold)"),
+    # Metals — distinct epics to avoid mixing Dukascopy pricing with IG live series
+    EpicMapping("CS.D.CFEGOLD.DUKAS.IP",  INSTRUMENT_FX_METALS_XAU_USD, "XAUUSD (gold)"),
+    EpicMapping("CS.D.CFDSILVER.DUKAS.IP", INSTRUMENT_FX_METALS_XAG_USD, "XAGUSD (silver)"),
 ]
 
 EPIC_INDEX = {m.epic: m for m in EPIC_MAPPINGS}
