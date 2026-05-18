@@ -1338,6 +1338,15 @@ class BacktestScanner:
                 processed_signal = self._prepare_signal(signal)
                 processed_signal['scanner_version'] = self.scanner_version
 
+                # Rejected signals (pipeline validation failed) must not be simulated or
+                # fed into the adaptive-state window — they are real rejects, not trades.
+                if processed_signal.get('rejected'):
+                    processed_signal.setdefault('trade_result', 'REJECTED')
+                    processed_signal.setdefault('is_winner', False)
+                    processed_signal.setdefault('is_loser', False)
+                    processed_signals.append(processed_signal)
+                    continue
+
                 # Add trailing stop simulation for realistic trade outcomes
                 enhanced_signal = self._add_trade_simulation(processed_signal, timestamp)
 
@@ -1405,6 +1414,7 @@ class BacktestScanner:
                 max_bars=200,
                 strategy=strategy,
                 logger=self.logger,
+                minutes_per_bar=self._timeframe_to_minutes(self.timeframe),
             )
             self.logger.debug(f"📊 BacktestTrailingEngine ready for {epic} (scalp={self._use_scalping_mode})")
 
@@ -1599,8 +1609,9 @@ class BacktestScanner:
                     # Make DataFrame timezone-aware
                     full_df[timestamp_col] = full_df[timestamp_col].dt.tz_localize('UTC')
 
-            # Filter for future data only (after signal timestamp)
-            future_df = full_df[full_df[timestamp_col] > signal_timestamp].copy()
+            # Include signal candle at index 0 so BacktestTrailingEngine's signal_idx+1
+            # slice starts at the first post-entry bar (not the second).
+            future_df = full_df[full_df[timestamp_col] >= signal_timestamp].copy()
 
             # Limit to max_bars
             if len(future_df) > max_bars:

@@ -138,12 +138,14 @@ class BacktestTrailingEngine:
         max_bars: int = 200,
         strategy: str = 'DEFAULT',
         logger: Optional[logging.Logger] = None,
+        minutes_per_bar: int = 15,
         # Accept but ignore old-simulator kwargs for drop-in compatibility
         **_kwargs,
     ):
         self.epic = epic
         self.is_scalp_trade = is_scalp_trade
         self.max_bars = max_bars
+        self.minutes_per_bar = minutes_per_bar
         self.strategy = strategy
         self.logger = logger or logging.getLogger(__name__)
         self._config_override = config_override or {}
@@ -205,7 +207,7 @@ class BacktestTrailingEngine:
             # Exit price and timestamps
             if sim['exit_bar'] is not None and sim['exit_bar'] < len(future_df):
                 exit_price = future_df.iloc[sim['exit_bar']]['close']
-                holding_minutes = (sim['exit_bar'] + 1) * 15
+                holding_minutes = (sim['exit_bar'] + 1) * self.minutes_per_bar
                 exit_timestamp = None
                 if signal_timestamp:
                     try:
@@ -217,7 +219,7 @@ class BacktestTrailingEngine:
                         pass
             else:
                 exit_price = future_df.iloc[-1]['close'] if len(future_df) > 0 else entry_price
-                holding_minutes = max_lookback * 15
+                holding_minutes = max_lookback * self.minutes_per_bar
                 exit_timestamp = None
 
             final_profit = sim['final_profit']

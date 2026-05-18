@@ -249,10 +249,17 @@ class BacktestTradingOrchestrator:
 
         try:
             # Step 1: Signal validation (PIPELINE MODE ONLY)
+            # Skip if BacktestScanner already ran _apply_full_pipeline on this signal to
+            # avoid double-validation (stateful validators would see every signal twice).
             if self.pipeline_mode and self.trade_validator:
-                self.logger.info(f"🔄 PIPELINE MODE: Validating signal through TradeValidator for {signal.get('epic', 'unknown')}")
-                validation_passed, validation_message = self.trade_validator.validate_signal_for_trading(signal)
-                self.logger.info(f"🔄 PIPELINE MODE: Validation result: {validation_passed}, message: {validation_message}")
+                if signal.get('validation_passed') is True:
+                    validation_passed = True
+                    validation_message = signal.get('validation_message', 'Pre-validated by scanner pipeline')
+                    self.logger.info(f"🔄 PIPELINE MODE: Skipping re-validation for {signal.get('epic', 'unknown')} (already validated upstream)")
+                else:
+                    self.logger.info(f"🔄 PIPELINE MODE: Validating signal through TradeValidator for {signal.get('epic', 'unknown')}")
+                    validation_passed, validation_message = self.trade_validator.validate_signal_for_trading(signal)
+                    self.logger.info(f"🔄 PIPELINE MODE: Validation result: {validation_passed}, message: {validation_message}")
             else:
                 # Basic mode: Skip validation for fast parameter optimization
                 self.logger.info(f"🚀 BASIC MODE: Skipping TradeValidator validation for {signal.get('epic', 'unknown')} (pipeline_mode={self.pipeline_mode}, trade_validator={self.trade_validator is not None})")
