@@ -1126,18 +1126,32 @@ async def ig_place_order(
                     }
                     logger.info(f"✅ Using fallback confirmation: Deal ID {deal_id}, Entry: {entry_price}")
                 else:
-                    # Position not found in fallback
+                    # Position not found in fallback — but IG already has the order (dealReference exists).
+                    # Return 409 so task-worker treats this as non-retryable and does NOT place another order.
                     logger.error("❌ Fallback failed - position not found in open positions")
                     raise HTTPException(
-                        status_code=500, 
-                        detail=f"Deal confirmation failed and position not found in fallback check. Deal reference: {deal_reference}"
+                        status_code=409,
+                        detail={
+                            "status": "skipped",
+                            "message": f"Order placed at broker (ref: {deal_reference}) but confirmation unavailable — not retrying to avoid duplicate",
+                            "reason": "confirmation_failed_order_placed",
+                            "deal_reference": deal_reference,
+                        }
                     )
-                    
+
+            except HTTPException:
+                raise  # Re-raise the 409 we just built above
             except Exception as fallback_error:
                 logger.error(f"❌ Fallback position check failed: {str(fallback_error)}")
+                # IG already has the order — return 409 so task-worker does not retry and place a duplicate
                 raise HTTPException(
-                    status_code=500, 
-                    detail=f"Deal confirmation failed and fallback check failed. Deal reference: {deal_reference}"
+                    status_code=409,
+                    detail={
+                        "status": "skipped",
+                        "message": f"Order placed at broker (ref: {deal_reference}) but confirmation and fallback both failed — not retrying to avoid duplicate",
+                        "reason": "confirmation_failed_order_placed",
+                        "deal_reference": deal_reference,
+                    }
                 )
         
         # Extract deal information

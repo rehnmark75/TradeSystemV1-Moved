@@ -691,6 +691,7 @@ class OrderExecutor:
                 self.logger.info(f"⏳ {error_msg}")
             else:
                 self.logger.error(f"❌ {error_msg}")
+                self._send_telegram_order_failed(signal, alert_id, error_msg)
 
             # v2.20.0 FIX: Update alert status on exception (was being skipped, leaving alerts stuck as 'pending')
             if alert_id:
@@ -1732,6 +1733,53 @@ class OrderExecutor:
         except Exception as e:
             self.logger.error(f"❌ Failed to update alert status: {e}")
             return False
+
+    def _send_telegram_order_failed(self, signal: Dict, alert_id: int, error_msg: str) -> None:
+        """Send a Telegram notification when an order execution fails.
+
+        Uses ORDER_FAILURE_TELEGRAM_ENABLED env var as an on/off switch.
+        Silently swallows all errors so a Telegram outage never masks the order failure.
+        """
+        import os
+        if os.environ.get('ORDER_FAILURE_TELEGRAM_ENABLED', 'true').lower() != 'true':
+            return
+
+        token = os.environ.get('TELEGRAM_BOT_TOKEN', '')
+        chat_id = os.environ.get('TELEGRAM_CHAT_ID', '')
+        if not token or not chat_id:
+            return
+
+        try:
+            env = os.environ.get('TRADING_ENVIRONMENT', 'demo').upper()
+            env_prefix = '🔴 LIVE' if env == 'LIVE' else '🟢 DEMO'
+
+            epic = signal.get('epic', 'UNKNOWN')
+            pair = epic.replace('CS.D.', '').replace('.MINI.IP', '').replace('.CEEM.IP', '').replace('.CEE.IP', '')
+            direction = signal.get('signal_type', 'UNKNOWN').upper()
+            strategy = signal.get('strategy', 'UNKNOWN')
+            confidence = signal.get('confidence_score', 0)
+
+            # Trim error to keep the message readable
+            reason = error_msg[:300] + '…' if len(error_msg) > 300 else error_msg
+
+            text = (
+                f"[{env_prefix}] ❌ Order Execution Failed\n\n"
+                f"Pair: {pair}\n"
+                f"Direction: {direction}\n"
+                f"Strategy: {strategy}\n"
+                f"Confidence: {confidence:.1%}\n"
+                f"Alert ID: {alert_id}\n\n"
+                f"Reason: {reason}"
+            )
+
+            import requests as _requests
+            _requests.post(
+                f"https://api.telegram.org/bot{token}/sendMessage",
+                json={"chat_id": chat_id, "text": text},
+                timeout=5,
+            )
+        except Exception:
+            pass  # Telegram failure must never propagate
 
     def check_working_order_expiry(self) -> int:
         """Check for expired working orders and update status.
