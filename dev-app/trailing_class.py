@@ -1794,7 +1794,8 @@ class EnhancedTradeProcessor:
             )
 
             if isinstance(success, dict) and success.get("status") == "updated":
-                trade.sl_price = guaranteed_sl
+                _ig_stop = success.get("actualStop") or success.get("sentPayload", {}).get("stopLevel")
+                trade.sl_price = normalize_ig_stop_for_db(float(_ig_stop), trade.symbol) if _ig_stop else guaranteed_sl
                 trade.guaranteed_profit_lock_applied = True
                 trade.guaranteed_profit_lock_timestamp = datetime.utcnow()
                 trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
@@ -1948,7 +1949,8 @@ class EnhancedTradeProcessor:
                     )
 
                     if isinstance(success, dict) and success.get("status") == "updated":
-                        trade.sl_price = early_be_stop
+                        _ig_stop = success.get("actualStop") or success.get("sentPayload", {}).get("stopLevel")
+                        trade.sl_price = normalize_ig_stop_for_db(float(_ig_stop), trade.symbol) if _ig_stop else early_be_stop
                         trade.early_be_executed = True
                         trade.early_be_time = datetime.utcnow()
                         trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
@@ -2013,7 +2015,8 @@ class EnhancedTradeProcessor:
                                 )
 
                                 if isinstance(success, dict) and success.get("status") == "updated":
-                                    trade.sl_price = time_protect_stop
+                                    _ig_stop = success.get("actualStop") or success.get("sentPayload", {}).get("stopLevel")
+                                    trade.sl_price = normalize_ig_stop_for_db(float(_ig_stop), trade.symbol) if _ig_stop else time_protect_stop
                                     trade.time_protection_executed = True
                                     trade.stop_limit_changes_count = (trade.stop_limit_changes_count or 0) + 1
 
@@ -2028,6 +2031,14 @@ class EnhancedTradeProcessor:
                                 trade.time_protection_executed = True
 
             # --- STEP 1: Break-even logic ---
+            # Pre-compute partial close eligibility here so it can be evaluated
+            # independently of the moved_to_breakeven flag (fix: partial close was
+            # unreachable when BE triggered first on a lower threshold).
+            _pc_enable = trailing_config.get('enable_partial_close', True)
+            _pc_size = trailing_config.get('partial_close_size', 0.5)
+            _pc_trigger = self.config.partial_close_trigger_points
+            _is_profitable_for_partial_close = profit_points >= _pc_trigger
+
             # ✅ CRITICAL FIX: Skip break-even logic if already profit_protected
             if trade.status == "profit_protected":
                 self.logger.info(f"🛡️ [PROFIT PROTECTED] Trade {trade.id}: Skipping break-even check, already protected at +10pts")
@@ -2045,40 +2056,41 @@ class EnhancedTradeProcessor:
                     self.logger.error(f"❌ [DB COMMIT FAILED] Trade {trade.id}: {type(commit_error).__name__}: {str(commit_error)}")
                     raise
                 # Don't change status if already profit_protected
-            elif not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
-                self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
-                            f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
+            elif (not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven) or \
+                 (not getattr(trade, 'partial_close_executed', False) and _pc_enable and _is_profitable_for_partial_close):
+                if not getattr(trade, 'moved_to_breakeven', False) and is_profitable_for_breakeven:
+                    self.logger.info(f"🎯 [BREAK-EVEN TRIGGER] Trade {trade.id}: "
+                                f"Profit {profit_points}pts >= trigger {break_even_trigger_points}pts")
+                else:
+                    self.logger.info(f"🎯 [PARTIAL CLOSE TRIGGER (post-BE)] Trade {trade.id}: "
+                                f"Profit {profit_points}pts >= partial close trigger {_pc_trigger}pts, BE already moved")
 
                 # ========== PARTIAL CLOSE CHECK (separate from break-even) ==========
                 # Partial close now triggers at partial_close_trigger_points (default 13 pips)
                 # NOT at break-even trigger
-                enable_partial_close = trailing_config.get('enable_partial_close', True)
-                partial_close_size = trailing_config.get('partial_close_size', 0.5)
-                # v3.2.0: Use self.config (ATR-adaptive) for partial close trigger
-                partial_close_trigger = self.config.partial_close_trigger_points
+                enable_partial_close = _pc_enable
+                partial_close_size = _pc_size
+                partial_close_trigger = _pc_trigger
                 partial_close_succeeded = False
 
-                # Check if profit is sufficient for partial close (separate threshold from BE)
-                is_profitable_for_partial_close = profit_points >= partial_close_trigger
-
-                if enable_partial_close and is_profitable_for_partial_close:
+                if enable_partial_close and _is_profitable_for_partial_close:
                     self.logger.info(f"💰 [PARTIAL CLOSE TRIGGER] Trade {trade.id}: "
                                 f"Profit {profit_points}pts >= partial close trigger {partial_close_trigger}pts")
-                    # ✅ CRITICAL FIX: ALWAYS check database first with row lock to prevent race conditions
-                    # The passed-in trade object may be stale/detached - never trust its partial_close_executed value
+                    # Fresh DB read to get authoritative partial_close_executed value.
+                    # No row lock: holding a lock across the async IG network call blocks
+                    # the event loop; partial_close_executed serves as the idempotency key.
                     try:
-                        # Get fresh trade with row lock - this is the authoritative source
-                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id, TradeLog.environment == TRADING_ENVIRONMENT).with_for_update(nowait=False).first()
+                        refreshed_trade = db.query(TradeLog).filter(TradeLog.id == trade.id, TradeLog.environment == TRADING_ENVIRONMENT).first()
                         if not refreshed_trade:
                             self.logger.error(f"❌ [PARTIAL CLOSE] Trade {trade.id}: Could not find trade in database")
                             raise Exception("Trade not found in database")
 
-                        # ✅ ALWAYS check the DATABASE value, not the passed-in object
+                        # Always check the DB value, not the potentially stale passed-in object
                         if refreshed_trade.partial_close_executed:
-                            self.logger.info(f"⏭️ [PARTIAL CLOSE SKIP] Trade {trade.id}: Already executed (detected via database lock)")
+                            self.logger.info(f"⏭️ [PARTIAL CLOSE SKIP] Trade {trade.id}: Already executed (detected via fresh DB read)")
                             partial_close_succeeded = True  # Skip break-even logic
                         else:
-                            self.logger.info(f"💡 [PARTIAL CLOSE] Trade {trade.id}: Attempting to close {partial_close_size} position (WITH ROW LOCK)")
+                            self.logger.info(f"💡 [PARTIAL CLOSE] Trade {trade.id}: Attempting to close {partial_close_size} of position")
 
                             # Import partial close function
                             import asyncio
@@ -2088,13 +2100,21 @@ class EnhancedTradeProcessor:
                             # Get auth headers asynchronously
                             auth_headers = await get_ig_auth_headers()
 
+                            # partial_close_size is a fraction (e.g. 0.5 = close half the position).
+                            # Compute absolute lot sizes from the actual current position size.
+                            actual_position_size = float(refreshed_trade.current_size) if refreshed_trade.current_size else 1.0
+                            lots_to_close = round(actual_position_size * partial_close_size, 2)
+                            remaining_size = round(actual_position_size - lots_to_close, 2)
+                            self.logger.info(f"💡 [PARTIAL CLOSE SIZING] Trade {trade.id}: "
+                                           f"position={actual_position_size} lots, closing={lots_to_close} ({partial_close_size*100:.0f}%), "
+                                           f"keeping={remaining_size}")
+
                             # Execute partial close asynchronously
-                            # ✅ FIX: Use refreshed_trade instead of detached trade object
                             partial_result = await partial_close_position(
                                 deal_id=refreshed_trade.deal_id,
                                 epic=refreshed_trade.symbol,
                                 direction=refreshed_trade.direction,
-                                size_to_close=partial_close_size,
+                                size_to_close=lots_to_close,
                                 auth_headers=auth_headers
                             )
 
@@ -2110,10 +2130,10 @@ class EnhancedTradeProcessor:
                             if partial_result.get("success"):
                                 # ✅ Partial close succeeded!
                                 self.logger.info(f"✅ [PARTIAL CLOSE SUCCESS] Trade {trade.id} {trade.symbol}: "
-                                               f"Closed {partial_close_size}, keeping {1.0 - partial_close_size} with original SL")
+                                               f"Closed {lots_to_close} lots, keeping {remaining_size} lots with original SL")
 
-                                # Update trade tracking (using refreshed_trade to maintain lock)
-                                refreshed_trade.current_size = 1.0 - partial_close_size  # e.g., 0.5 remaining
+                                # Update trade tracking with actual remaining size
+                                refreshed_trade.current_size = remaining_size
                                 refreshed_trade.partial_close_executed = True
                                 refreshed_trade.partial_close_time = datetime.utcnow()
                                 refreshed_trade.status = "partial_closed"
@@ -2200,9 +2220,13 @@ class EnhancedTradeProcessor:
                 # ========== END PARTIAL CLOSE ATTEMPT ==========
 
                 # Only execute break-even stop move if partial close didn't succeed
+                # and break-even has not already been moved (we may have entered this block
+                # via the post-BE partial-close branch where moved_to_breakeven is already True).
                 if partial_close_succeeded:
                     # Skip break-even stop move entirely - partial close already executed
                     self.logger.info(f"⏭️ [SKIP BE STOP] Trade {trade.id}: Partial close succeeded, skipping break-even stop move")
+                elif getattr(trade, 'moved_to_breakeven', False):
+                    self.logger.debug(f"⏭️ [SKIP BE STOP] Trade {trade.id}: Break-even already moved, skipping BE stop move")
                 else:
                     # v3.2.0: Use ATR-adaptive stage1_lock_points for profit lock
                     # min_stop_distance_points is broker's min distance from CURRENT price (constraint)
@@ -2501,7 +2525,8 @@ class EnhancedTradeProcessor:
                                     old_sl = trade.sl_price
                                     old_status = trade.status
 
-                                    trade.sl_price = new_trail_level
+                                    _ig_stop = success.get("actualStop") or success.get("sentPayload", {}).get("stopLevel")
+                                    trade.sl_price = normalize_ig_stop_for_db(float(_ig_stop), trade.symbol) if _ig_stop else new_trail_level
                                     trade.status = "stage3_trailing"
                                     trade.last_trigger_price = current_price
                                     trade.trigger_time = datetime.utcnow()
@@ -2561,7 +2586,8 @@ class EnhancedTradeProcessor:
                                 if isinstance(success, dict) and success.get("status") == "updated":
                                     old_sl = trade.sl_price
                                     old_status = trade.status
-                                    trade.sl_price = stage2_stop
+                                    _ig_stop = success.get("actualStop") or success.get("sentPayload", {}).get("stopLevel")
+                                    trade.sl_price = normalize_ig_stop_for_db(float(_ig_stop), trade.symbol) if _ig_stop else stage2_stop
                                     trade.status = "stage2_profit_lock"
                                     trade.moved_to_stage2 = True  # ✅ NEW: Set flag to prevent re-execution
                                     trade.last_trigger_price = current_price
@@ -2628,7 +2654,8 @@ class EnhancedTradeProcessor:
                                 if isinstance(success, dict) and success.get("status") == "updated":
                                     old_sl = trade.sl_price
                                     old_status = trade.status
-                                    trade.sl_price = stage1_stop
+                                    _ig_stop = success.get("actualStop") or success.get("sentPayload", {}).get("stopLevel")
+                                    trade.sl_price = normalize_ig_stop_for_db(float(_ig_stop), trade.symbol) if _ig_stop else stage1_stop
                                     trade.status = "stage1_profit_lock"
                                     trade.moved_to_stage1 = True  # ✅ NEW: Set flag to prevent re-execution
                                     trade.last_trigger_price = current_price
@@ -2841,7 +2868,8 @@ class EnhancedTradeProcessor:
                     new_stop=new_stop_level,  # Use absolute level - no offset calculation needed
                     stop_offset_points=None,
                     limit_offset_points=None,
-                    dry_run=False
+                    dry_run=False,
+                    deal_id=getattr(trade, 'deal_id', None),
                 )
             else:
                 # Legacy offset-based mode (fallback)
@@ -2853,7 +2881,8 @@ class EnhancedTradeProcessor:
                     limit_offset_points=limit_points,
                     adjust_direction_stop=direction_stop,
                     adjust_direction_limit="increase",
-                    dry_run=False
+                    dry_run=False,
+                    deal_id=getattr(trade, 'deal_id', None),
                 )
 
             status = result.get("status", "unknown")
