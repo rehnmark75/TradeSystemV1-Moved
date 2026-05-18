@@ -218,6 +218,10 @@ def main():
                 processed_args.append(arg)
                 print(f"🔒 Signal Qualification: ACTIVE mode (blocks low-score signals)")
 
+            elif arg in ["--quiet", "-q"]:
+                processed_args.append(arg)
+                print("🔇 Quiet logging: ENABLED")
+
             elif arg == "--qual-min-score" and i + 1 < len(args):
                 processed_args.append(arg)
                 i += 1
@@ -425,6 +429,7 @@ Additional Options:
   --strategy NAME   Use specific strategy (full name)
   --timeframe 5m    Use different timeframe (1m, 5m, 15m, 30m, 1h, 4h, 1d)
   --verbose         Verbose output
+  --quiet, -q       Suppress routine strategy/filter logs for faster long backtests
 
 Parallel Execution (for faster long-period backtests):
   --parallel         Enable parallel execution (splits into chunks)

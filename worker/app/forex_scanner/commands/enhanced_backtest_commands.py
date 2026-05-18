@@ -52,7 +52,8 @@ class EnhancedBacktestCommands:
         config_override: dict = None,
         use_historical_intelligence: bool = True,
         return_results: bool = False,
-        multi_strategy_config: dict = None
+        multi_strategy_config: dict = None,
+        quiet: bool = False
     ):
         """
         Run enhanced backtest using the new integrated pipeline
@@ -70,6 +71,7 @@ class EnhancedBacktestCommands:
             csv_export: Path to CSV file for exporting all signals
             config_override: Dict of parameter overrides for this backtest only (backtest isolation)
             use_historical_intelligence: Use stored market intelligence instead of recalculating (Phase 3)
+            quiet: Suppress routine logs during orchestration while still showing final CLI summaries
             multi_strategy_config: Multi-strategy routing configuration (v3.0.0)
                 - enabled: bool - Enable multi-strategy routing
                 - enable_strategies: str - Comma-separated list of strategies to enable
@@ -194,14 +196,41 @@ class EnhancedBacktestCommands:
 
                 # Display results (unless return_results is True for silent mode)
                 if not return_results:
-                    self._display_backtest_results(
-                        execution_id,
-                        results,
-                        epic_list,
-                        show_signals,
-                        max_signals_display,
-                        csv_export
-                    )
+                    if quiet:
+                        root_logger = logging.getLogger()
+                        previous_root_level = root_logger.level
+                        previous_logger_level = self.logger.level
+                        previous_handler_levels = [
+                            (handler, handler.level)
+                            for handler in root_logger.handlers
+                        ]
+                        root_logger.setLevel(logging.INFO)
+                        self.logger.setLevel(logging.INFO)
+                        for handler, _ in previous_handler_levels:
+                            handler.setLevel(logging.INFO)
+                        try:
+                            self._display_backtest_results(
+                                execution_id,
+                                results,
+                                epic_list,
+                                show_signals,
+                                max_signals_display,
+                                csv_export
+                            )
+                        finally:
+                            root_logger.setLevel(previous_root_level)
+                            self.logger.setLevel(previous_logger_level)
+                            for handler, previous_level in previous_handler_levels:
+                                handler.setLevel(previous_level)
+                    else:
+                        self._display_backtest_results(
+                            execution_id,
+                            results,
+                            epic_list,
+                            show_signals,
+                            max_signals_display,
+                            csv_export
+                        )
 
             self.logger.info("✅ Enhanced backtest completed successfully")
 

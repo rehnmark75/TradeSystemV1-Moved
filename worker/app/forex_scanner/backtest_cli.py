@@ -40,10 +40,15 @@ class BacktestCLI:
         self.enhanced_backtest = EnhancedBacktestCommands()
         self.setup_logging()
 
-    def setup_logging(self, verbose: bool = False):
+    def setup_logging(self, verbose: bool = False, quiet: bool = False):
         """Setup logging configuration"""
         import sys
-        level = logging.DEBUG if verbose else logging.INFO
+        if quiet:
+            level = logging.ERROR
+        elif verbose:
+            level = logging.DEBUG
+        else:
+            level = logging.INFO
 
         # Force reconfigure logging to ensure output goes to stdout
         # This is necessary because other modules may have already configured logging
@@ -374,6 +379,12 @@ Signal Display Format:
             '--verbose', '-v',
             action='store_true',
             help='Verbose logging output'
+        )
+
+        parser.add_argument(
+            '--quiet', '-q',
+            action='store_true',
+            help='Suppress routine strategy/filter logging. Final CLI summaries are still printed.'
         )
 
         parser.add_argument(
@@ -1052,7 +1063,7 @@ Signal Display Format:
 
         try:
             # Setup logging level
-            self.setup_logging(args.verbose)
+            self.setup_logging(args.verbose, args.quiet)
 
             # Parse config overrides - snapshot takes precedence, then inline overrides
             config_override = None
@@ -1255,7 +1266,8 @@ Signal Display Format:
                 config_override=config_override,
                 use_historical_intelligence=use_historical_intelligence,
                 return_results=need_results,
-                multi_strategy_config=multi_strategy_config
+                multi_strategy_config=multi_strategy_config,
+                quiet=args.quiet
             )
 
             # Generate chart if requested (for standard backtest)
