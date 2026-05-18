@@ -448,7 +448,12 @@ class XAUGoldStrategy(StrategyInterface):
             "adx_value": float(adx_val),
             "volatility_state": "expansion" if atr_pct >= cfg.atr_expansion_pct else "normal",
             "monitor_only": cfg.is_monitor_only(epic),
+            "scalp_mode": False,
             "strategy_indicators": {
+                # Timeframe hints for chart generator: 4h macro + 1h BOS trigger + 15m OB/FVG entry
+                "tier1_ema": {"timeframe": "4h"},
+                "tier2_swing": {"timeframe": "1h"},
+                "tier3_entry": {"timeframe": "15m"},
                 "bias": bias,
                 "bos_from_price": bos.get("from_price"),
                 "bos_to_price": bos.get("to_price"),
@@ -793,7 +798,12 @@ class XAUGoldStrategy(StrategyInterface):
             "adx_value": float(adx_val),
             "volatility_state": "expansion" if atr_pct >= cfg.atr_expansion_pct else "normal",
             "monitor_only": cfg.is_monitor_only(epic),
+            "scalp_mode": False,
             "strategy_indicators": {
+                # Timeframe hints for chart generator: 4h macro + 1h BOS trigger + 15m OB/FVG entry
+                "tier1_ema": {"timeframe": "4h"},
+                "tier2_swing": {"timeframe": "1h"},
+                "tier3_entry": {"timeframe": "15m"},
                 "xau_playbook": best["setup"],
                 "xau_event_layer": True,
                 "htf_bias": htf_bias,

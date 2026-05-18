@@ -260,6 +260,13 @@ class ForexChartGenerator:
                     elif role == 'htf':
                         self._add_htf_bias_label(ax, df, signal)
 
+                # XAU_GOLD-specific overlays
+                if strategy_name == 'XAU_GOLD' and signal:
+                    if role in ('trigger', 'entry', 'htf'):
+                        self._add_bos_level(ax, df, signal)
+                    elif role == 'macro':
+                        self._add_xau_regime_label(ax, df, signal)
+
                 # Swing pivot labels (HH/HL/LH/LL) on the macro 4H panel
                 if role == 'macro' and signal:
                     macro_structure = signal.get('_macro_structure')
@@ -1470,6 +1477,73 @@ class ForexChartGenerator:
             )
         except Exception as e:
             logger.debug(f"_add_htf_bias_label error: {e}")
+
+    def _add_bos_level(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
+        """
+        Draw BOS from/to horizontal lines on the 1h trigger panel for XAU_GOLD signals.
+        Falls back to trigger_level for event-playbook signals that don't emit bos_from/to.
+        """
+        try:
+            indic = signal.get('strategy_indicators', {})
+            bos_from = indic.get('bos_from_price')
+            bos_to = indic.get('bos_to_price')
+            trigger_level = indic.get('trigger_level')
+            direction = signal.get('signal', '')
+
+            color = self.COLORS['bos_bull'] if direction == 'BUY' else self.COLORS['bos_bear']
+
+            if bos_from is not None:
+                ax.axhline(y=float(bos_from), color=color, linestyle='--', linewidth=1.0, alpha=0.6)
+                ax.annotate(
+                    'BOS origin', xy=(df.index[2], float(bos_from)),
+                    fontsize=7, color=color, va='bottom', ha='left',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000aa', edgecolor=color, linewidth=0.5),
+                )
+            if bos_to is not None:
+                ax.axhline(y=float(bos_to), color=color, linestyle='-', linewidth=1.2, alpha=0.8)
+                ax.annotate(
+                    'BOS level', xy=(df.index[2], float(bos_to)),
+                    fontsize=7, color=color, va='top', ha='left',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000aa', edgecolor=color, linewidth=0.5),
+                )
+            elif trigger_level is not None:
+                ax.axhline(y=float(trigger_level), color=color, linestyle='-', linewidth=1.2, alpha=0.8)
+                ax.annotate(
+                    'Trigger', xy=(df.index[2], float(trigger_level)),
+                    fontsize=7, color=color, va='top', ha='left',
+                    bbox=dict(boxstyle='round,pad=0.2', facecolor='#000000aa', edgecolor=color, linewidth=0.5),
+                )
+        except Exception as e:
+            logger.debug(f"_add_bos_level error: {e}")
+
+    def _add_xau_regime_label(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
+        """
+        Annotate the 4h macro panel with XAU_GOLD's regime and volatility state.
+        """
+        try:
+            regime = (signal.get('market_regime') or signal.get('market_regime_detected') or '').upper()
+            vol_state = (signal.get('volatility_state') or '').upper()
+            adx = signal.get('adx_value')
+
+            regime_colors = {'TRENDING': '#26a69a', 'RANGING': '#ff9800', 'EXPANSION': '#ef5350'}
+            color = regime_colors.get(regime, '#9e9e9e')
+
+            parts = [f"Regime: {regime}"] if regime else []
+            if vol_state:
+                parts.append(f"Vol: {vol_state}")
+            if adx is not None:
+                parts.append(f"ADX: {adx:.1f}")
+            if not parts:
+                return
+
+            ax.text(
+                0.01, 0.97, '  |  '.join(parts),
+                transform=ax.transAxes, fontsize=8, color=color, fontweight='bold',
+                va='top', ha='left',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='#000000cc', edgecolor=color, linewidth=0.8),
+            )
+        except Exception as e:
+            logger.debug(f"_add_xau_regime_label error: {e}")
 
     def generate_single_timeframe_chart(
         self,
