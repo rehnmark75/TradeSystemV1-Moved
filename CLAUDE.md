@@ -144,7 +144,7 @@ trade_scan.py (entry point)
         └── AlertHistoryManager (alerts/alert_history.py) - database
 ```
 
-**Note:** After January 2026 cleanup, only SMC Simple strategy is active. Legacy strategies (EMA, MACD, etc.) are archived in `forex_scanner/archive/disabled_strategies/`.
+**Note:** After January 2026 cleanup, legacy strategies (EMA, MACD, etc.) are archived in `forex_scanner/archive/disabled_strategies/`. Active strategies: SMC Simple and SMC Momentum (Gate 1 validated May 3 2026).
 
 ### Key Files Quick Reference
 
@@ -172,6 +172,7 @@ trade_scan.py (entry point)
 | Strategy | File | Instrument | Enable |
 |----------|------|------------|--------|
 | SMC Simple | `smc_simple_strategy.py` | FX majors/crosses | `SMC_SIMPLE_STRATEGY = True` (default) |
+| SMC Momentum | `smc_momentum_strategy.py` | FX majors/crosses | `smc_momentum_pair_overrides.is_enabled = true` |
 | XAU Gold | `xau_gold_strategy.py` | Gold (`CS.D.CFEGOLD.CEE.IP`) | `xau_gold_pair_overrides.is_enabled = true` |
 
 **Adding New Strategies:**
@@ -631,7 +632,7 @@ This file controls:
 - ✅ Cleaned config.py (1,413 → 733 lines, 48% reduction)
 - ✅ Implemented Strategy Registry pattern for easy extensibility
 - ✅ Created strategy and migration templates
-- ✅ Only SMC Simple strategy is active (database-driven configuration)
+- ✅ SMC Simple + SMC Momentum strategies active (database-driven configuration)
 
 **System Features:**
 - ✅ Dynamic parameter optimization system (database-driven)

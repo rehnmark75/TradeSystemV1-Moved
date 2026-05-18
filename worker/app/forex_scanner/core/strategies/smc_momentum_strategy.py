@@ -430,6 +430,8 @@ class SMCMomentumStrategy(StrategyInterface):
             "reward_pips": round(tp_pips, 1),
             "entry_type": "REJECTION_WICK",
             "trigger_type": "LIQUIDITY_SWEEP",
+            "nearest_support": sweep.pool_level if sweep.direction == "BUY" else None,
+            "nearest_resistance": sweep.pool_level if sweep.direction == "SELL" else None,
             "confidence_score": round(confidence, 4),
             "confidence": round(confidence, 4),
             "signal_timestamp": ts.isoformat(),
