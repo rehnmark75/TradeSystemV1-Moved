@@ -593,6 +593,7 @@ REASON: Analysis error - neutral assessment"""
                 smc_momentum,
                 impulse_fade,
                 smc_simple,
+                xau_gold,
             )
         except ImportError:
             from forex_scanner.alerts.analysis.prompts import (  # type: ignore[no-redef]
@@ -602,6 +603,7 @@ REASON: Analysis error - neutral assessment"""
                 smc_momentum,
                 impulse_fade,
                 smc_simple,
+                xau_gold,
             )
 
         strategy = signal.get('strategy', 'SMC_SIMPLE').upper()
@@ -615,6 +617,8 @@ REASON: Analysis error - neutral assessment"""
             return smc_momentum.build_prompt(signal, has_chart)
         if strategy == 'IMPULSE_FADE':
             return impulse_fade.build_prompt(signal, has_chart)
+        if strategy == 'XAU_GOLD':
+            return xau_gold.build_prompt(signal, has_chart)
         return smc_simple.build_prompt(signal, has_chart)
 
 
