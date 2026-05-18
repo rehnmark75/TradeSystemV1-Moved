@@ -48,7 +48,8 @@ async def adjust_stop_logic(
     adjust_direction_limit: str = "increase",
     new_stop: Optional[float] = None,
     new_limit: Optional[float] = None,
-    dry_run: bool = False
+    dry_run: bool = False,
+    deal_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Standalone adjust stop logic that can be called directly by internal services.
@@ -62,6 +63,8 @@ async def adjust_stop_logic(
         new_stop: Absolute new stop level
         new_limit: Absolute new limit level
         dry_run: If True, don't actually send to IG
+        deal_id: Preferred — match position by deal ID to avoid touching the wrong
+                 position when two force-open trades exist on the same epic.
 
     Returns:
         Dict with status, dealId, and response details
@@ -85,8 +88,15 @@ async def adjust_stop_logic(
             pos_resp.raise_for_status()
             positions = pos_resp.json()["positions"]
 
-        # Find matching position
-        match = next((p for p in positions if p["market"]["epic"] == epic), None)
+        # Find matching position — prefer deal_id so we never touch the wrong
+        # position when two force-open trades exist on the same epic.
+        if deal_id:
+            match = next((p for p in positions if p["position"]["dealId"] == deal_id), None)
+            if not match:
+                logger.warning(f"[ADJUST-STOP-SERVICE] deal_id {deal_id} not found in open positions, falling back to epic match")
+                match = next((p for p in positions if p["market"]["epic"] == epic), None)
+        else:
+            match = next((p for p in positions if p["market"]["epic"] == epic), None)
         if not match:
             # Update database to mark trades as closed
             with SessionLocal() as db:
@@ -348,7 +358,8 @@ def adjust_stop_sync(
     adjust_direction_limit: str = "increase",
     new_stop: Optional[float] = None,
     new_limit: Optional[float] = None,
-    dry_run: bool = False
+    dry_run: bool = False,
+    deal_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Synchronous wrapper for adjust_stop_logic.
@@ -377,7 +388,8 @@ def adjust_stop_sync(
                         adjust_direction_limit=adjust_direction_limit,
                         new_stop=new_stop,
                         new_limit=new_limit,
-                        dry_run=dry_run
+                        dry_run=dry_run,
+                        deal_id=deal_id,
                     )
                 )
             finally:
@@ -399,6 +411,7 @@ def adjust_stop_sync(
                 adjust_direction_limit=adjust_direction_limit,
                 new_stop=new_stop,
                 new_limit=new_limit,
-                dry_run=dry_run
+                dry_run=dry_run,
+                deal_id=deal_id,
             )
         )
