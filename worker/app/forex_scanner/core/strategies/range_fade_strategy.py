@@ -234,7 +234,7 @@ class RangeFadeStrategy(StrategyInterface):
         distance_to_low_pips = (latest_close - range_low) / pip
         distance_to_high_pips = (range_high - latest_close) / pip
 
-        htf_bias = self._get_htf_bias(df_4h)
+        htf_bias = self._get_htf_bias(df_4h, epic)
         if htf_bias is None:
             self._reject(epic, "no_htf_bias")
             return None
@@ -287,7 +287,7 @@ class RangeFadeStrategy(StrategyInterface):
         score = min(1.0, 0.45 * rsi_extremity + 0.35 * min(1.0, band_penetration) + 0.20 * range_proximity)
         confidence = round(cfg.min_confidence + score * (cfg.max_confidence - cfg.min_confidence), 3)
 
-        pip_size = 0.01 if "JPY" in pair.upper() else 0.0001
+        pip_size = 0.01 if "JPY" in epic.upper() else 0.0001
         sl_pips, tp_pips = self._resolve_sl_tp_pips(cfg, epic, band_width_pips)
         sl_distance = sl_pips * pip_size
         tp_distance = tp_pips * pip_size
@@ -351,27 +351,29 @@ class RangeFadeStrategy(StrategyInterface):
             },
         }
 
-        self._set_cooldown(epic)
-        self.logger.info(
-            "[RANGE_FADE] %s %s @ %.5f RSI=%.1f htf=%s conf=%.2f",
-            direction,
-            epic,
-            latest_close,
-            latest_rsi,
-            htf_bias,
-            confidence,
-        )
-
-        # LPF gate — strategy-side opt-in (LPF_ENABLED = True)
+        # LPF gate — run before arming cooldown so a blocked signal doesn't
+        # suppress the next valid setup for the full cooldown window.
         if getattr(self, 'LPF_ENABLED', True):
             try:
                 try:
                     from .lpf_gate import apply_lpf_gate
                 except ImportError:
                     from forex_scanner.core.strategies.lpf_gate import apply_lpf_gate
-                signal = apply_lpf_gate(signal, self.logger)
+                signal = apply_lpf_gate(signal, self.logger, backtest_timestamp=now)
             except Exception as _lpf_exc:
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
+
+        if signal is not None:
+            self._set_cooldown(epic)
+            self.logger.info(
+                "[RANGE_FADE] %s %s @ %.5f RSI=%.1f htf=%s conf=%.2f",
+                direction,
+                epic,
+                latest_close,
+                latest_rsi,
+                htf_bias,
+                confidence,
+            )
         return signal
 
     def _resolve_sl_tp_pips(
@@ -392,7 +394,7 @@ class RangeFadeStrategy(StrategyInterface):
         tp_pips = min(max(tp_raw, cfg.dynamic_tp_min_pips), cfg.dynamic_tp_max_pips)
         return round(float(sl_pips), 2), round(float(tp_pips), 2)
 
-    def _get_htf_bias(self, df_1h: Optional[pd.DataFrame]) -> Optional[str]:
+    def _get_htf_bias(self, df_1h: Optional[pd.DataFrame], epic: str = "") -> Optional[str]:
         if df_1h is None or len(df_1h) < self.config.htf_ema_period + self.config.htf_slope_bars + 5:
             return None
         close = df_1h["close"].astype(float)
@@ -406,7 +408,8 @@ class RangeFadeStrategy(StrategyInterface):
             return "bullish"
         if latest_close < latest_ema and latest_ema < slope_ref:
             return "bearish"
-        return "neutral" if self.config.allow_neutral_htf else None
+        allow_neutral = bool(self.config._override(epic, "allow_neutral_htf", self.config.allow_neutral_htf)) if epic else self.config.allow_neutral_htf
+        return "neutral" if allow_neutral else None
 
     def _resolve_now(self, df: pd.DataFrame) -> datetime:
         now = self._current_timestamp
@@ -501,7 +504,7 @@ class RangeFadeStrategy(StrategyInterface):
             now = now.to_pydatetime()
         if getattr(now, "tzinfo", None) is None:
             now = now.replace(tzinfo=timezone.utc)
-        self._cooldowns[epic] = now + timedelta(minutes=self.config.signal_cooldown_minutes)
+        self._cooldowns[epic] = now + timedelta(minutes=self.config.get_pair_signal_cooldown_minutes(epic))
 
     def _reject(self, epic: str, reason: str, direction: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
         stage = reason.upper()

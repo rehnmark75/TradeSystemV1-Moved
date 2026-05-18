@@ -1751,6 +1751,10 @@ class SignalDetector:
             if df_trigger is None or df_trigger.empty:
                 self.logger.debug(f"[RANGE_FADE] No {timeframe} data for {epic}")
                 return None
+            # Drop the still-forming latest bar so strategy iloc[-1] always
+            # reads a closed candle (matches backtest closed-candle semantics).
+            if len(df_trigger) > 1:
+                df_trigger = df_trigger.iloc[:-1]
 
             df_1h = self.data_fetcher.get_enhanced_data(
                 epic=epic,
@@ -1758,6 +1762,8 @@ class SignalDetector:
                 timeframe='1h',
                 lookback_hours=336,
             )
+            if df_1h is not None and len(df_1h) > 1:
+                df_1h = df_1h.iloc[:-1]
 
             signal = range_fade_strategy.detect_signal(
                 df_trigger=df_trigger,
