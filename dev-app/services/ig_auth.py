@@ -16,6 +16,11 @@ LOGIN_MAX_RETRIES = 3
 LOGIN_MAX_RETRIES_STARTUP = 1  # Reduced retries during startup to prevent blocking
 LOGIN_RETRY_BACKOFF = [2, 5, 10]  # Seconds to wait between retries
 
+# How long to back off after a 403 (IG maintenance / weekend closure).
+# 5 minutes: reduces ~450 attempts over 7.5h weekend window to ~90,
+# while keeping Monday-morning recovery latency under 5 minutes.
+LOGIN_FAILURE_BACKOFF_SECONDS = 300
+
 
 def _get_cache_for_url(api_url: str) -> dict:
     """Get or create token cache for specific API URL."""
@@ -25,7 +30,8 @@ def _get_cache_for_url(api_url: str) -> dict:
             "X-SECURITY-TOKEN": None,
             "ACCOUNT_ID": None,
             "STREAMING_URL": None,
-            "expires_at": 0
+            "expires_at": 0,
+            "failed_until": 0,  # epoch — non-zero means we are in backoff
         }
     return _token_caches[api_url]
 
@@ -45,6 +51,12 @@ async def ig_login(api_key: str, ig_pwd: str, ig_usr: str, api_url: str = API_BA
     """
     # Use URL-specific cache to avoid demo/production token collision
     cache = _get_cache_for_url(api_url)
+
+    # Respect backoff set by a recent 403 failure (IG maintenance / weekend closure)
+    if cache.get("failed_until", 0) > time.time():
+        remaining = int(cache["failed_until"] - time.time())
+        env_type = "PRODUCTION" if "api.ig.com" in api_url else "DEMO"
+        raise Exception(f"IG login backoff active ({env_type}, {remaining}s remaining) — IG may be in maintenance")
 
     if cache["CST"] and time.time() < cache["expires_at"]:
         env_type = "PRODUCTION" if "api.ig.com" in api_url else "DEMO"
@@ -127,6 +139,7 @@ async def ig_login(api_key: str, ig_pwd: str, ig_usr: str, api_url: str = API_BA
                 cache["ACCOUNT_ID"] = account_id
                 cache["STREAMING_URL"] = streaming_url
                 cache["expires_at"] = time.time() + cache_ttl
+                cache["failed_until"] = 0  # clear any prior 403 backoff
 
                 return {
                     "CST": cst,
@@ -147,7 +160,11 @@ async def ig_login(api_key: str, ig_pwd: str, ig_usr: str, api_url: str = API_BA
         except httpx.HTTPStatusError as e:
             # Don't retry on 4xx errors (bad credentials, etc.)
             if 400 <= e.response.status_code < 500:
-                print(f"❌ IG login failed ({env_type}): {e.response.status_code} - {e.response.text}")
+                if e.response.status_code == 403:
+                    cache["failed_until"] = time.time() + LOGIN_FAILURE_BACKOFF_SECONDS
+                    print(f"⚠️ IG login 403 ({env_type}) — backoff {LOGIN_FAILURE_BACKOFF_SECONDS}s (maintenance window?)")
+                else:
+                    print(f"❌ IG login failed ({env_type}): {e.response.status_code} - {e.response.text}")
                 raise
             last_error = e
             if attempt < max_retries - 1:
