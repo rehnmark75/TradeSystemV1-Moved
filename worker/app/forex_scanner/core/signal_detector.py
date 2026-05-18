@@ -579,7 +579,7 @@ class SignalDetector:
         if 'GOLD' not in e and 'XAU' not in e:
             return False
         try:
-            return XAUGoldConfigService.get_instance().is_pair_enabled(epic)
+            return XAUGoldConfigService.get_instance().get_config().is_pair_enabled(epic)
         except Exception as e:
             self.logger.error(f"❌ [XAU_GOLD] Config lookup failed for {epic}; failing closed: {e}")
             return False

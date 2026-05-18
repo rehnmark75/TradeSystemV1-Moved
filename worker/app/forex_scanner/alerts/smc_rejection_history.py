@@ -91,6 +91,16 @@ class SMCRejectionHistoryManager:
     STAGE_REGIME_BREAKOUT = 'REGIME_BREAKOUT'  # Breakout regime blocked (40% WR historically)
     # MFI momentum filter (direction-aware oversold/overbought + slope gate)
     STAGE_MFI_FILTER = 'MFI_FILTER'  # MFI rising on sell / falling on buy / extreme level
+    # Scalp-specific quality gates
+    STAGE_SCALP_SPREAD = 'SCALP_SPREAD'  # Spread too wide for scalp entry
+    STAGE_SCALP_ATR_QUALITY = 'SCALP_ATR_QUALITY'  # ATR quality below scalp threshold
+    STAGE_SCALP_QUALIFICATION = 'SCALP_QUALIFICATION'  # General scalp qualification failure
+    STAGE_VOLATILITY_STATE = 'VOLATILITY_STATE'  # Volatility state incompatible with signal
+    STAGE_CONFIDENCE_QUALITY_BAND = 'CONFIDENCE_QUALITY_BAND'  # Confidence in low-quality band
+    STAGE_IMPULSE_QUALITY = 'IMPULSE_QUALITY'  # Impulse quality below minimum threshold
+    STAGE_DIRECTION_QUALITY_GATE = 'DIRECTION_QUALITY_GATE'  # MACD/direction quality gate
+    STAGE_ADAPTIVE_BUCKET_GATE = 'ADAPTIVE_BUCKET_GATE'  # Adaptive win-rate bucket gate
+    STAGE_EPIC_REGIME_HEALTH_GATE = 'EPIC_REGIME_HEALTH_GATE'  # Per-epic regime health gate
 
     VALID_STAGES = [
         STAGE_SESSION, STAGE_COOLDOWN, STAGE_TIER1_EMA, STAGE_TIER2_SWING,
@@ -116,6 +126,10 @@ class SMCRejectionHistoryManager:
         STAGE_REGIME_BREAKOUT,
         # MFI momentum filter
         STAGE_MFI_FILTER,
+        # Scalp quality gates
+        STAGE_SCALP_SPREAD, STAGE_SCALP_ATR_QUALITY, STAGE_SCALP_QUALIFICATION,
+        STAGE_VOLATILITY_STATE, STAGE_CONFIDENCE_QUALITY_BAND, STAGE_IMPULSE_QUALITY,
+        STAGE_DIRECTION_QUALITY_GATE, STAGE_ADAPTIVE_BUCKET_GATE, STAGE_EPIC_REGIME_HEALTH_GATE,
     ]
 
     def __init__(self, db_manager, config=None):

@@ -625,6 +625,14 @@ class AlertHistoryManager:
                 # Apply conversion to all alert_data values
                 alert_data = {k: convert_numpy_to_python(v) for k, v in alert_data.items()}
 
+                # JSON-serialize any remaining dict/list values — psycopg2 cannot adapt
+                # them directly for json/jsonb/text[] columns (e.g. confluence_details,
+                # market_structure_analysis, order_flow_analysis).
+                alert_data = {
+                    k: (json.dumps(v) if v else None) if isinstance(v, (dict, list)) else v
+                    for k, v in alert_data.items()
+                }
+
                 cursor.execute(insert_query, alert_data)
                 alert_id = cursor.fetchone()[0]
                 
