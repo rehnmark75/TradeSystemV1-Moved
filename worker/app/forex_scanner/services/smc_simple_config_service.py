@@ -203,6 +203,24 @@ class SMCSimpleConfig:
     adaptive_bucket_gate_max_confidence: Optional[float] = None
     adaptive_bucket_gate_cache_ttl_seconds: int = 300
 
+    # DYNAMIC SCALP HOUR GATE (active guardrail)
+    # Overlays static per-pair blocked hours with recent realized performance.
+    # It can release recovered static hours, block newly weak hours, and allow
+    # sparse probes so blocked hours can gather fresh forward-test evidence.
+    scalp_hour_gate_enabled: bool = True
+    scalp_hour_gate_mode: str = 'ACTIVE'  # MONITORING or ACTIVE
+    scalp_hour_gate_window: int = 24
+    scalp_hour_gate_min_trades: int = 8
+    scalp_hour_gate_lookback_days: int = 45
+    scalp_hour_gate_block_profit_factor: float = 0.75
+    scalp_hour_gate_block_expectancy_pips: float = -0.15
+    scalp_hour_gate_release_profit_factor: float = 1.05
+    scalp_hour_gate_release_expectancy_pips: float = 0.0
+    scalp_hour_gate_probe_rate: float = 0.10
+    scalp_hour_gate_cache_ttl_seconds: int = 300
+    scalp_hour_gate_seed_execution_id: Optional[int] = None
+    scalp_hour_gate_seed_strategy_name: str = 'SMC_SIMPLE'
+
     # DIRECTION QUALITY GATE (opt-in, runs in backtest and live)
     direction_quality_gate_enabled: bool = False
     direction_quality_gate_mode: str = 'MONITORING'
@@ -2102,6 +2120,18 @@ class SMCSimpleConfigService:
             'adaptive_bucket_gate_exploration_rate',
             'adaptive_bucket_gate_max_confidence',
             'adaptive_bucket_gate_cache_ttl_seconds',
+            # DYNAMIC SCALP HOUR GATE (active guardrail)
+            'scalp_hour_gate_enabled', 'scalp_hour_gate_mode',
+            'scalp_hour_gate_window', 'scalp_hour_gate_min_trades',
+            'scalp_hour_gate_lookback_days',
+            'scalp_hour_gate_block_profit_factor',
+            'scalp_hour_gate_block_expectancy_pips',
+            'scalp_hour_gate_release_profit_factor',
+            'scalp_hour_gate_release_expectancy_pips',
+            'scalp_hour_gate_probe_rate',
+            'scalp_hour_gate_cache_ttl_seconds',
+            'scalp_hour_gate_seed_execution_id',
+            'scalp_hour_gate_seed_strategy_name',
             # DIRECTION QUALITY GATE (opt-in, runs in backtest and live)
             'direction_quality_gate_enabled', 'direction_quality_gate_mode',
             'direction_quality_gate_target_epics',
@@ -2152,6 +2182,10 @@ class SMCSimpleConfigService:
             'adaptive_bucket_gate_window', 'adaptive_bucket_gate_min_trades',
             'adaptive_bucket_gate_min_pip_samples',
             'adaptive_bucket_gate_cache_ttl_seconds',
+            # Dynamic scalp hour gate int fields
+            'scalp_hour_gate_window', 'scalp_hour_gate_min_trades',
+            'scalp_hour_gate_lookback_days', 'scalp_hour_gate_cache_ttl_seconds',
+            'scalp_hour_gate_seed_execution_id',
             'direction_quality_bull_block_start_hour',
             'direction_quality_bull_block_end_hour',
             'direction_quality_bear_block_start_hour',

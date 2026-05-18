@@ -2763,9 +2763,53 @@ class SMCSimpleStrategy:
             # ================================================================
             if self._config_service:
                 blocked_hours = self._config_service.get_pair_scalp_blocked_hours_utc(epic)
-                if blocked_hours:
-                    current_hour = candle_timestamp.hour if candle_timestamp else datetime.now().hour
-                    if current_hour in blocked_hours:
+                current_hour = candle_timestamp.hour if candle_timestamp else datetime.utcnow().hour
+                try:
+                    try:
+                        from .scalp_hour_gate import evaluate_scalp_hour_gate
+                    except ImportError:
+                        from forex_scanner.core.strategies.scalp_hour_gate import evaluate_scalp_hour_gate
+
+                    hour_decision = evaluate_scalp_hour_gate(
+                        epic=epic,
+                        pair=pair,
+                        hour_utc=current_hour,
+                        static_blocked_hours=blocked_hours or [],
+                        config=getattr(self, '_db_config', None),
+                        signal_timestamp=candle_timestamp,
+                        backtest_mode=self._backtest_mode,
+                        environment=_TRADING_ENVIRONMENT,
+                    )
+                    if hour_decision.dynamic_released:
+                        self.logger.info(f"   ✅ {hour_decision.reason}")
+                    elif hour_decision.probe:
+                        self.logger.info(f"   🧪 {hour_decision.reason}")
+                    elif hour_decision.dynamic_blocked or hour_decision.static_blocked:
+                        self.logger.info(f"   {'❌' if not hour_decision.allowed else '👁️'} {hour_decision.reason}")
+
+                    if not hour_decision.allowed:
+                        rejection_reason = hour_decision.reason
+                        context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
+                                                              ema_result=ema_result, swing_result=swing_result,
+                                                              pullback_result=pullback_result, direction=direction)
+                        context.update({
+                            'hour': current_hour,
+                            'blocked_hours': blocked_hours or [],
+                            **hour_decision.as_context(),
+                        })
+                        self._track_rejection(
+                            stage='SCALP_ENTRY_FILTER',
+                            reason=rejection_reason,
+                            epic=epic,
+                            pair=pair,
+                            candle_timestamp=candle_timestamp,
+                            direction=direction,
+                            context=context
+                        )
+                        return None
+                except Exception as hour_gate_exc:
+                    self.logger.warning("Dynamic scalp hour gate error; falling back to static blocked hours: %s", hour_gate_exc)
+                    if blocked_hours and current_hour in blocked_hours:
                         rejection_reason = f"Scalp filter: Hour {current_hour} UTC is blocked for {pair} (blocked hours: {blocked_hours})"
                         self.logger.info(f"   ❌ {rejection_reason}")
                         context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
@@ -4260,13 +4304,6 @@ class SMCSimpleStrategy:
             self.logger.info(f"\n   {signal['description']}")
             self.logger.info(f"{'='*70}\n")
 
-            # Cooldown handling differs between live and backtest modes:
-            # - BACKTEST: Update in-memory cooldown immediately (no external validation pipeline)
-            # - LIVE: Cooldowns read directly from alert_history database (single source of truth)
-            #   No in-memory update needed - database is updated when alert is saved
-            if self._backtest_mode:
-                self._update_cooldown_backtest(pair, candle_dt)
-
             # ================================================================
             # PERFORMANCE METRICS: Calculate enhanced metrics for analysis
             # ================================================================
@@ -4557,6 +4594,14 @@ class SMCSimpleStrategy:
                     signal = apply_lpf_gate(signal, self.logger)
                 except Exception as _lpf_exc:
                     self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
+
+            # Cooldown handling differs between live and backtest modes:
+            # - BACKTEST: Update in-memory cooldown only after all strategy-side
+            #   gates have accepted the signal. Updating earlier lets rejected
+            #   candidates suppress later valid replay signals.
+            # - LIVE: Cooldowns read directly from alert_history database.
+            if self._backtest_mode:
+                self._update_cooldown_backtest(pair, candle_dt)
             return signal
 
         except Exception as e:
