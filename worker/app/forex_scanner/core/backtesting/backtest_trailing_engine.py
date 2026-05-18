@@ -344,35 +344,43 @@ class BacktestTrailingEngine:
 
         for bar_idx, (_, bar) in enumerate(future_df.iterrows()):
             high, low = float(bar['high']), float(bar['low'])
+            o, c = float(bar['open']), float(bar['close'])
+
+            # Intra-bar ordering heuristic: up-bar (close >= open) prints low first then high;
+            # down-bar prints high first then low.
+            # adverse_first = the price extreme hostile to the trade prints before the favorable one:
+            #   long  + up-bar   → low  first (adverse first) → True
+            #   long  + down-bar → high first (favorable first) → False
+            #   short + up-bar   → low  first (favorable first) → False
+            #   short + down-bar → high first (adverse first) → True
+            up_bar = c >= o
+            adverse_first = (is_long == up_bar)
 
             if is_long:
-                # Worst-case: check if low hits SL BEFORE checking high triggers stage transitions.
-                # Rationale: intra-bar order unknown; conservative assumption prevents over-optimism.
-                if low <= current_sl:
-                    exit_pnl = (current_sl - fill_price) * self.pip_multiplier
-                    exit_reason = 'TRAILING_STOP' if (be_done or s1_done) else 'STOP_LOSS'
-                    exit_bar = bar_idx
-                    trade_closed = True
-                    break
-
                 profit_pts = (high - fill_price) * self.pip_multiplier
                 loss_pts   = (fill_price - low) * self.pip_multiplier
                 best_price_this_bar = high
-
-            else:  # SELL
-                if high >= current_sl:
-                    exit_pnl = (fill_price - current_sl) * self.pip_multiplier
-                    exit_reason = 'TRAILING_STOP' if (be_done or s1_done) else 'STOP_LOSS'
-                    exit_bar = bar_idx
-                    trade_closed = True
-                    break
-
+                sl_hit = low <= current_sl
+                sl_pnl = (current_sl - fill_price) * self.pip_multiplier
+                tp_hit = high >= current_tp
+            else:
                 profit_pts = (fill_price - low) * self.pip_multiplier
                 loss_pts   = (high - fill_price) * self.pip_multiplier
                 best_price_this_bar = low
+                sl_hit = high >= current_sl
+                sl_pnl = (fill_price - current_sl) * self.pip_multiplier
+                tp_hit = low <= current_tp
 
             best_profit = max(best_profit, profit_pts)
             worst_loss  = max(worst_loss,  loss_pts)
+
+            # Adverse-first bars: SL check before stage updates and TP
+            if adverse_first and sl_hit:
+                exit_pnl = sl_pnl
+                exit_reason = 'TRAILING_STOP' if (be_done or s1_done) else 'STOP_LOSS'
+                exit_bar = bar_idx
+                trade_closed = True
+                break
 
             if (
                 early_failure_enabled
@@ -430,13 +438,24 @@ class BacktestTrailingEngine:
                               else best_price_this_bar + s3_atr_mult * atr)
                     current_sl = _advance_sl(current_sl, new_sl, is_long)
 
-            # TP hit check (after stage updates — gives the best realistic fill)
-            if (is_long and high >= current_tp) or (not is_long and low <= current_tp):
+            # TP check (after stage updates)
+            if tp_hit:
                 exit_pnl = (current_tp - fill_price if is_long else fill_price - current_tp) * self.pip_multiplier
                 exit_reason = 'PROFIT_TARGET'
                 exit_bar = bar_idx
                 trade_closed = True
                 break
+
+            # Favorable-first bars: SL check after stages & TP, against the (possibly advanced) SL
+            if not adverse_first and sl_hit:
+                # Recompute sl_hit against the updated current_sl after stage transitions
+                sl_hit_updated = (low <= current_sl) if is_long else (high >= current_sl)
+                if sl_hit_updated:
+                    exit_pnl = (current_sl - fill_price if is_long else fill_price - current_sl) * self.pip_multiplier
+                    exit_reason = 'TRAILING_STOP' if (be_done or s1_done) else 'STOP_LOSS'
+                    exit_bar = bar_idx
+                    trade_closed = True
+                    break
 
         # Timeout: close at last bar close
         if not trade_closed:
