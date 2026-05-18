@@ -498,7 +498,7 @@ class OrderManager:
                 converted_signal = self._convert_signal_for_order_executor(signal)
                 order_result = self.order_executor.execute_signal_order(converted_signal)
                 
-                if order_result and order_result.get('status') not in ['error', 'failed']:
+                if order_result and order_result.get('status') in ['success', 'pending', 'executed']:
                     self.logger.info(f"✅ Order executed successfully via OrderExecutor: {epic}")
                     if alert_id:
                         self.logger.info(f"✅ Execution completed for alert_id: {alert_id}")
@@ -521,9 +521,12 @@ class OrderManager:
                     return execution_record
                 else:
                     error_msg = order_result.get('message', 'Unknown error') if order_result else 'No result returned'
-                    # Log cooldown messages as info, not error (expected behavior)
+                    status_str = order_result.get('status', '') if order_result else ''
+                    # Log expected non-execution outcomes at info, errors at error
                     if "cooldown" in error_msg.lower():
                         self.logger.info(f"⏳ Epic in cooldown: {error_msg}")
+                    elif status_str in ['blocked', 'skipped']:
+                        self.logger.info(f"🚫 Order not executed ({status_str}): {error_msg}")
                     else:
                         self.logger.error(f"❌ OrderExecutor failed: {error_msg}")
                     _record_block(alert_id, _reason_from_executor_error(error_msg))
