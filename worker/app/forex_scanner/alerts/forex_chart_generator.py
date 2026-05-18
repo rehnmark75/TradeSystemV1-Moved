@@ -54,7 +54,7 @@ class ForexChartGenerator:
     """
 
     # Chart configuration
-    DEFAULT_BARS = {'4h': 100, '15m': 100, '5m': 60}
+    DEFAULT_BARS = {'4h': 100, '1h': 80, '15m': 100, '5m': 60}
     CHART_SIZE = (16, 12)  # Width x Height in inches
     DPI = 150  # Resolution for clear details
 
@@ -198,6 +198,8 @@ class ForexChartGenerator:
                 fontsize=14, fontweight='bold', y=0.98
             )
 
+            strategy_name = (signal.get('strategy', '') or '').upper() if signal else ''
+
             # Plot each timeframe
             for i, tf in enumerate(available_tfs):
                 df = self._prepare_dataframe(candles[tf], tf)
@@ -250,6 +252,13 @@ class ForexChartGenerator:
                 # SMC annotations (swing levels, BOS) on trigger + entry panels
                 if smc_data and is_trigger_or_entry:
                     self._add_smc_annotations(ax, df, signal, smc_data, tf, role=role)
+
+                # RANGE_FADE-specific overlays
+                if strategy_name == 'RANGE_FADE' and signal:
+                    if role == 'entry':
+                        self._add_bollinger_bands(ax, df, signal)
+                    elif role == 'htf':
+                        self._add_htf_bias_label(ax, df, signal)
 
                 # Swing pivot labels (HH/HL/LH/LL) on the macro 4H panel
                 if role == 'macro' and signal:
@@ -432,10 +441,13 @@ class ForexChartGenerator:
             if timeframe == '4h':
                 n_labels = 5  # Show ~5 labels for 4H
                 date_format = '%m/%d %H:%M'
+            elif timeframe == '1h':
+                n_labels = 6  # Show ~6 labels for 1H
+                date_format = '%m/%d %H:%M'
             elif timeframe == '15m':
                 n_labels = 6  # Show ~6 labels for 15M
                 date_format = '%H:%M'
-            else:  # 5m
+            else:  # 5m / 1m
                 n_labels = 8  # Show ~8 labels for 5M
                 date_format = '%H:%M'
 
@@ -1371,6 +1383,93 @@ class ForexChartGenerator:
 
         except Exception as e:
             logger.warning(f"Error adding Fib zone: {e}")
+
+    def _add_bollinger_bands(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
+        """
+        Draw Bollinger Band lines on the entry panel for RANGE_FADE signals.
+
+        Reads bb_upper/bb_mid/bb_lower directly from strategy_indicators (pre-computed
+        at signal time) and draws them as horizontal reference lines with a shaded channel.
+        Also annotates which band the entry is fading.
+        """
+        try:
+            si = signal.get('strategy_indicators', {}) or {}
+            bb_upper = si.get('bb_upper')
+            bb_mid = si.get('bb_mid')
+            bb_lower = si.get('bb_lower')
+
+            if not bb_upper or not bb_lower:
+                return
+
+            x_max = len(df) - 1
+
+            # Upper band — red dashed
+            ax.axhline(y=bb_upper, color='#ef5350', linestyle='--', linewidth=1.8, alpha=0.9, label='BB Upper')
+            ax.annotate(
+                f'BB↑ {bb_upper:.5f}',
+                xy=(x_max * 0.02, bb_upper),
+                fontsize=7, color='#ef5350', fontweight='bold', va='bottom', alpha=0.95,
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='#ef5350', alpha=0.8, linewidth=1)
+            )
+
+            # Middle band — grey dotted
+            if bb_mid:
+                ax.axhline(y=bb_mid, color='#9e9e9e', linestyle=':', linewidth=1.2, alpha=0.7, label='BB Mid')
+
+            # Lower band — green dashed
+            ax.axhline(y=bb_lower, color='#26a69a', linestyle='--', linewidth=1.8, alpha=0.9, label='BB Lower')
+            ax.annotate(
+                f'BB↓ {bb_lower:.5f}',
+                xy=(x_max * 0.02, bb_lower),
+                fontsize=7, color='#26a69a', fontweight='bold', va='top', alpha=0.95,
+                bbox=dict(boxstyle='round,pad=0.2', facecolor='white', edgecolor='#26a69a', alpha=0.8, linewidth=1)
+            )
+
+            # Shade the BB channel (subtle)
+            ax.axhspan(bb_lower, bb_upper, alpha=0.05, color='#607d8b')
+
+            # Label which band is being faded
+            entry = signal.get('entry_price') or signal.get('price')
+            if entry:
+                dist_upper = abs(float(entry) - float(bb_upper))
+                dist_lower = abs(float(entry) - float(bb_lower))
+                fading_upper = dist_upper < dist_lower
+                touch_price = bb_upper if fading_upper else bb_lower
+                touch_color = '#ef5350' if fading_upper else '#26a69a'
+                fade_label = 'FADING UPPER BAND' if fading_upper else 'FADING LOWER BAND'
+                ax.annotate(
+                    fade_label,
+                    xy=(x_max - 5, touch_price),
+                    fontsize=8, fontweight='bold', color='white',
+                    ha='right', va='center',
+                    bbox=dict(boxstyle='round,pad=0.3', facecolor=touch_color, edgecolor='white', alpha=0.92)
+                )
+
+        except Exception as e:
+            logger.warning(f"Error adding Bollinger Bands overlay: {e}")
+
+    def _add_htf_bias_label(self, ax, df: pd.DataFrame, signal: Dict[str, Any]) -> None:
+        """
+        Annotate the 1h HTF panel with the computed EMA bias for RANGE_FADE.
+
+        The strategy fades 5m stretches *in the direction* of the 1h bias, so the
+        analyst needs to see clearly which way the bias is pointing on this panel.
+        """
+        try:
+            si = signal.get('strategy_indicators', {}) or {}
+            htf_bias = (si.get('htf_bias') or '').upper()
+            if not htf_bias:
+                return
+            color_map = {'BULLISH': '#26a69a', 'BEARISH': '#ef5350', 'NEUTRAL': '#9e9e9e'}
+            color = color_map.get(htf_bias, '#9e9e9e')
+            ax.text(
+                0.01, 0.97, f'1H Bias: {htf_bias}',
+                transform=ax.transAxes,
+                fontsize=9, fontweight='bold', color=color, va='top',
+                bbox=dict(boxstyle='round,pad=0.3', facecolor='#1a1a2e', alpha=0.82, edgecolor=color, linewidth=1.5)
+            )
+        except Exception as e:
+            logger.debug(f"_add_htf_bias_label error: {e}")
 
     def generate_single_timeframe_chart(
         self,

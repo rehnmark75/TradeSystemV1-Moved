@@ -321,6 +321,7 @@ class RangeFadeStrategy(StrategyInterface):
             "market_regime": "range_fade",
             "regime": "range_fade",
             "monitor_only": cfg.is_pair_monitor_only(epic),
+            "scalp_mode": False,
             "adx": adx_val,
             "adx_htf": self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None,
             "rsi": latest_rsi,
@@ -343,6 +344,10 @@ class RangeFadeStrategy(StrategyInterface):
                 "range_low": range_low,
                 "distance_to_low_pips": round(distance_to_low_pips, 2),
                 "distance_to_high_pips": round(distance_to_high_pips, 2),
+                # Timeframe hints for chart generator: 4h macro + 1h HTF bias + 5m entry
+                "tier1_ema": {"timeframe": "1h"},
+                "tier2_swing": {"timeframe": "5m"},  # same as entry → deduplicates to 3 panels
+                "tier3_entry": {"timeframe": "5m"},
             },
         }
 
