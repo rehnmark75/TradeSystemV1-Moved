@@ -1279,8 +1279,13 @@ class SMCSimpleStrategy:
         self.scalp_reversal_min_runway_pips = pair_config.get('reversal_min_runway_pips', self.scalp_reversal_min_runway_pips)
 
         # v2.32.2: Per-pair RSI entry threshold overrides
-        # Without this, parameter_overrides JSONB values are ignored and global defaults (0/100) are used
+        # Always reset to global defaults first to prevent cross-pair contamination when the
+        # shared strategy instance is reused across pairs — only-set-if-exists guards leak the
+        # previous pair's override into pairs that have no override of their own.
         if self._db_config:
+            self.scalp_entry_rsi_sell_min = getattr(self._db_config, 'scalp_entry_rsi_sell_min', 0.0)
+            self.scalp_entry_rsi_buy_max = getattr(self._db_config, 'scalp_entry_rsi_buy_max', 100.0)
+            self.scalp_min_ema_distance_pips = getattr(self._db_config, 'scalp_min_ema_distance_pips', 0.0)
             rsi_sell_min = self._db_config.get_for_pair(epic, 'scalp_entry_rsi_sell_min')
             if rsi_sell_min is not None:
                 self.scalp_entry_rsi_sell_min = float(rsi_sell_min)
@@ -2288,6 +2293,7 @@ class SMCSimpleStrategy:
             # - Only HTF-aligned + momentum entries were profitable (40% win rate)
             # v2.24.0: PATTERN and DIVERGENCE entries are allowed (alternative entries)
             # ================================================================
+            rsi_value = None  # Initialized here so confidence scoring at line ~3434 is safe in non-scalp mode
             if self.scalp_mode_enabled:
                 # Filter 1: Momentum-only (block pullback entries, allow PATTERN/DIVERGENCE/CONTINUATION)
                 allowed_entry_types = ['MOMENTUM', 'CONTINUATION', 'PATTERN', 'DIVERGENCE']
@@ -6244,7 +6250,11 @@ class SMCSimpleStrategy:
         """
         if isinstance(timestamp, pd.Timestamp):
             hour = timestamp.hour
+        elif isinstance(timestamp, datetime):
+            hour = timestamp.hour
         else:
+            # Fallback for unexpected types (e.g., integer index) — log and use current time
+            self.logger.warning(f"_check_session: unexpected timestamp type {type(timestamp)}, falling back to wall-clock hour")
             hour = datetime.now().hour
 
         # Load session hours from scanner_global_config database (NO FALLBACK)
