@@ -7,6 +7,7 @@ Maintains same interface as OrderManager for compatibility
 
 import logging
 import json
+import math
 from typing import Dict, List, Optional, Tuple, Any
 from datetime import datetime, timezone
 from decimal import Decimal
@@ -383,6 +384,54 @@ class BacktestOrderLogger:
         except (ValueError, TypeError):
             return None
 
+    def _to_indicator_value(self, value: Any) -> Any:
+        """Convert dynamic signal metrics into JSON-safe scalar values."""
+        if value is None:
+            return None
+        if isinstance(value, bool):
+            return value
+        if isinstance(value, Decimal):
+            value = float(value)
+        elif hasattr(value, "item"):
+            try:
+                value = value.item()
+            except (ValueError, TypeError):
+                pass
+        if isinstance(value, (int, float)):
+            if isinstance(value, float) and not math.isfinite(value):
+                return None
+            return float(value)
+        if isinstance(value, str):
+            return value
+        return str(value)
+
+    def _extract_condition_buckets(self, values: Dict[str, Any]) -> List[str]:
+        buckets = []
+        atr_pct = self._to_decimal(values.get('atr_percentile'))
+        bb_pct = self._to_decimal(values.get('bb_width_percentile'))
+        regime = str(values.get('market_regime_detected') or values.get('market_regime') or '').lower()
+        volatility_state = str(values.get('volatility_state') or '').lower()
+        entry_quality = self._to_decimal(values.get('entry_quality_score'))
+        momentum = self._to_decimal(values.get('entry_candle_momentum'))
+        mtf = self._to_decimal(values.get('mtf_confluence_score'))
+        er = self._to_decimal(values.get('efficiency_ratio'))
+
+        if atr_pct is not None and bb_pct is not None and atr_pct < 50 and bb_pct < 50:
+            buckets.append('vol_compressed')
+        if (atr_pct is not None and atr_pct >= 70) or (bb_pct is not None and bb_pct >= 70):
+            buckets.append('vol_expanded')
+        if regime == 'high_volatility' and volatility_state == 'extreme':
+            buckets.append('regime_extreme')
+        if entry_quality is not None and entry_quality < Decimal('0.50'):
+            buckets.append('low_quality')
+        if momentum is not None and momentum < Decimal('0.50'):
+            buckets.append('low_momentum')
+        if mtf is not None and mtf < Decimal('0.35'):
+            buckets.append('low_confluence')
+        if er is not None and er < Decimal('0.20'):
+            buckets.append('low_efficiency')
+        return buckets
+
     def _extract_indicator_values(self, signal: Dict[str, Any]) -> Dict[str, Any]:
         """Extract technical indicator values from signal"""
         indicator_values = {}
@@ -393,21 +442,49 @@ class BacktestOrderLogger:
             'macd_line', 'macd_signal', 'macd_histogram',
             'rsi', 'atr', 'bollinger_upper', 'bollinger_lower',
             'support_level', 'resistance_level',
-            'momentum_score', 'trend_strength'
+            'momentum_score', 'trend_strength',
+            # SMC_SIMPLE dynamic condition fields. These are computed at signal
+            # time and make later bucket analysis explainable without schema churn.
+            'efficiency_ratio', 'market_regime_detected', 'market_regime',
+            'regime_confidence', 'bb_width_percentile', 'atr_percentile',
+            'volatility_state', 'entry_quality_score',
+            'distance_from_optimal_fib', 'entry_candle_momentum',
+            'mtf_confluence_score', 'htf_candle_position',
+            'all_timeframes_aligned', 'volume_at_swing_break',
+            'volume_trend', 'volume_quality_score', 'adx_value',
+            'adx_plus_di', 'adx_minus_di', 'adx_trend_strength',
+            'kama_value', 'kama_er', 'kama_trend', 'kama_signal',
+            'bb_upper', 'bb_lower', 'bb_middle', 'bb_width',
+            'bb_percent_b', 'price_vs_bb', 'stoch_k', 'stoch_d',
+            'stoch_zone', 'supertrend_value', 'supertrend_direction',
+            'rsi_zone', 'price_vs_ema_200', 'ema_stack_order',
+            'candle_body_pips', 'candle_upper_wick_pips',
+            'candle_lower_wick_pips', 'candle_type',
+            'swing_significance', 'mfi_value', 'mfi_slope', 'sweep_score',
         ]
 
         for field in indicator_fields:
             if field in signal:
                 value = signal[field]
                 if value is not None:
-                    try:
-                        indicator_values[field] = float(value)
-                    except (ValueError, TypeError):
-                        indicator_values[field] = str(value)
+                    indicator_values[field] = self._to_indicator_value(value)
 
         # Extract nested indicator data
         if 'indicators' in signal and isinstance(signal['indicators'], dict):
             indicator_values.update(signal['indicators'])
+
+        performance_metrics = signal.get('performance_metrics')
+        if isinstance(performance_metrics, dict):
+            compact_metrics = {}
+            for field in indicator_fields:
+                if field not in performance_metrics:
+                    continue
+                value = performance_metrics[field]
+                if value is not None:
+                    compact_metrics[field] = self._to_indicator_value(value)
+            if compact_metrics:
+                indicator_values.update({k: v for k, v in compact_metrics.items() if k not in indicator_values})
+                indicator_values['performance_metrics'] = compact_metrics
 
         strategy_indicators = signal.get('strategy_indicators')
         if isinstance(strategy_indicators, dict):
@@ -440,14 +517,15 @@ class BacktestOrderLogger:
                 if value is None:
                     compact_strategy[field] = None
                     continue
-                try:
-                    compact_strategy[field] = float(value)
-                except (ValueError, TypeError):
-                    compact_strategy[field] = value
+                compact_strategy[field] = self._to_indicator_value(value)
 
             if compact_strategy:
                 indicator_values.update(compact_strategy)
                 indicator_values['strategy'] = compact_strategy
+
+        condition_buckets = self._extract_condition_buckets(indicator_values)
+        if condition_buckets:
+            indicator_values['condition_buckets'] = condition_buckets
 
         return indicator_values
 

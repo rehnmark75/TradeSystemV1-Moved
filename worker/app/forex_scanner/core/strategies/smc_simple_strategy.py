@@ -818,6 +818,27 @@ class SMCSimpleStrategy:
             'scalp_sl_pips': 'scalp_sl_pips',
             'scalp_min_confidence': 'scalp_min_confidence',
             'scalp_cooldown_minutes': 'scalp_cooldown_minutes',
+            'scalp_hour_gate_bucket_mode': 'scalp_hour_gate_bucket_mode',
+            'scalp_hour_gate_seed_execution_id': 'scalp_hour_gate_seed_execution_id',
+            'scalp_condition_hour_gate_enabled': 'scalp_condition_hour_gate_enabled',
+            'scalp_condition_hour_gate_mode': 'scalp_condition_hour_gate_mode',
+            'scalp_condition_hour_gate_target_epics': 'scalp_condition_hour_gate_target_epics',
+            'scalp_condition_hour_gate_compression_buckets': 'scalp_condition_hour_gate_compression_buckets',
+            'scalp_condition_hour_gate_compression_atr_max': 'scalp_condition_hour_gate_compression_atr_max',
+            'scalp_condition_hour_gate_compression_bb_max': 'scalp_condition_hour_gate_compression_bb_max',
+            'scalp_condition_hour_gate_extreme_buckets': 'scalp_condition_hour_gate_extreme_buckets',
+            'scalp_condition_hour_gate_extreme_regime': 'scalp_condition_hour_gate_extreme_regime',
+            'scalp_condition_hour_gate_extreme_volatility_state': 'scalp_condition_hour_gate_extreme_volatility_state',
+            'scalp_condition_hour_gate_dynamic_enabled': 'scalp_condition_hour_gate_dynamic_enabled',
+            'scalp_condition_hour_gate_static_fallback_enabled': 'scalp_condition_hour_gate_static_fallback_enabled',
+            'scalp_condition_hour_gate_dynamic_min_trades': 'scalp_condition_hour_gate_dynamic_min_trades',
+            'scalp_condition_hour_gate_dynamic_block_profit_factor': 'scalp_condition_hour_gate_dynamic_block_profit_factor',
+            'scalp_condition_hour_gate_dynamic_block_expectancy_pips': 'scalp_condition_hour_gate_dynamic_block_expectancy_pips',
+            'scalp_condition_hour_gate_expanded_percentile_min': 'scalp_condition_hour_gate_expanded_percentile_min',
+            'scalp_condition_hour_gate_low_quality_max': 'scalp_condition_hour_gate_low_quality_max',
+            'scalp_condition_hour_gate_low_momentum_max': 'scalp_condition_hour_gate_low_momentum_max',
+            'scalp_condition_hour_gate_low_confluence_max': 'scalp_condition_hour_gate_low_confluence_max',
+            'scalp_condition_hour_gate_low_efficiency_max': 'scalp_condition_hour_gate_low_efficiency_max',
 
             # v2.22.0: Scalp Entry Filters (for backtest parameter testing)
             'scalp_momentum_only_filter': 'scalp_momentum_only_filter',
@@ -895,6 +916,11 @@ class SMCSimpleStrategy:
 
                 old_value = getattr(self, attr_name, None)
                 setattr(self, attr_name, value)
+                if (
+                    (param.startswith('scalp_hour_gate_') or param.startswith('scalp_condition_hour_gate_'))
+                    and getattr(self, '_db_config', None) is not None
+                ):
+                    setattr(self._db_config, param, value)
                 self.logger.info(f"   [OVERRIDE] {param}: {old_value} → {value}")
                 overrides_applied += 1
 
@@ -2767,6 +2793,55 @@ class SMCSimpleStrategy:
             # Block signals during specific hours that perform poorly for this pair
             # Example: AUDUSD hours 0,5,6,22,23 UTC have 0-9% win rate
             # ================================================================
+            _pre_metrics = None
+            _pre_market_regime = 'unknown'
+            _condition_hour_gate_context = {}
+            _condition_hour_gate_enabled = False
+            if self._using_database_config and self._db_config:
+                _condition_hour_gate_enabled = self._get_pair_param(
+                    epic,
+                    'scalp_condition_hour_gate_enabled',
+                    getattr(self._db_config, 'scalp_condition_hour_gate_enabled', True)
+                )
+                if isinstance(_condition_hour_gate_enabled, str):
+                    _condition_hour_gate_enabled = _condition_hour_gate_enabled.strip().lower() in {'1', 'true', 'yes', 'on', 'active'}
+                _condition_targets = self._get_pair_param(
+                    epic,
+                    'scalp_condition_hour_gate_target_epics',
+                    getattr(self._db_config, 'scalp_condition_hour_gate_target_epics', 'CS.D.EURUSD.CEEM.IP')
+                )
+                if _condition_targets:
+                    _target_epics = {item.strip() for item in str(_condition_targets).split(',') if item.strip()}
+                    _condition_hour_gate_enabled = bool(_condition_hour_gate_enabled) and epic in _target_epics
+
+            if _condition_hour_gate_enabled:
+                try:
+                    from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
+                        get_performance_metrics_calculator
+                    )
+                    _calc = get_performance_metrics_calculator(self.logger)
+                    _pre_metrics = _calc.calculate_metrics(
+                        df_entry=entry_df,
+                        df_trigger=df_trigger,
+                        df_htf=df_4h,
+                        signal_data={'signal_type': direction},
+                        epic=epic
+                    )
+                    _pre_market_regime = _pre_metrics.market_regime
+                    _condition_hour_gate_context = {
+                        'market_regime_detected': _pre_metrics.market_regime,
+                        'volatility_state': _pre_metrics.volatility_state,
+                        'atr_percentile': _pre_metrics.atr_percentile,
+                        'bb_width_percentile': _pre_metrics.bb_width_percentile,
+                        'efficiency_ratio': _pre_metrics.efficiency_ratio,
+                        'entry_quality_score': _pre_metrics.entry_quality_score,
+                        'entry_candle_momentum': _pre_metrics.entry_candle_momentum,
+                        'mtf_confluence_score': _pre_metrics.mtf_confluence_score,
+                        'adx_value': _pre_metrics.adx_value,
+                    }
+                except Exception as _e:
+                    self.logger.debug(f"Condition-aware hour gate metrics failed: {_e}")
+
             if self._config_service:
                 blocked_hours = self._config_service.get_pair_scalp_blocked_hours_utc(epic)
                 current_hour = candle_timestamp.hour if candle_timestamp else datetime.utcnow().hour
@@ -2780,17 +2855,19 @@ class SMCSimpleStrategy:
                         epic=epic,
                         pair=pair,
                         hour_utc=current_hour,
+                        signal_direction=direction,
                         static_blocked_hours=blocked_hours or [],
                         config=getattr(self, '_db_config', None),
                         signal_timestamp=candle_timestamp,
                         backtest_mode=self._backtest_mode,
                         environment=_TRADING_ENVIRONMENT,
+                        condition_context=_condition_hour_gate_context,
                     )
                     if hour_decision.dynamic_released:
                         self.logger.info(f"   ✅ {hour_decision.reason}")
                     elif hour_decision.probe:
                         self.logger.info(f"   🧪 {hour_decision.reason}")
-                    elif hour_decision.dynamic_blocked or hour_decision.static_blocked:
+                    elif hour_decision.condition_blocked or hour_decision.dynamic_blocked or hour_decision.static_blocked:
                         self.logger.info(f"   {'❌' if not hour_decision.allowed else '👁️'} {hour_decision.reason}")
 
                     if not hour_decision.allowed:
@@ -2800,6 +2877,7 @@ class SMCSimpleStrategy:
                                                               pullback_result=pullback_result, direction=direction)
                         context.update({
                             'hour': current_hour,
+                            'signal_direction': direction,
                             'blocked_hours': blocked_hours or [],
                             **hour_decision.as_context(),
                         })
@@ -2927,8 +3005,6 @@ class SMCSimpleStrategy:
             # so multipliers can adjust base levels. Result is cached and reused
             # later at line ~3976 to avoid double-computation.
             # ================================================================
-            _pre_metrics = None
-            _pre_market_regime = 'unknown'
             _regime_sl_tp_enabled = (
                 self._using_database_config
                 and self._db_config
@@ -2950,7 +3026,7 @@ class SMCSimpleStrategy:
             else:
                 _blocked_volatility_states = []
 
-            if _regime_sl_tp_enabled or _blocked_volatility_states:
+            if (_regime_sl_tp_enabled or _blocked_volatility_states) and _pre_metrics is None:
                 try:
                     from forex_scanner.core.strategies.helpers.smc_performance_metrics import (
                         get_performance_metrics_calculator

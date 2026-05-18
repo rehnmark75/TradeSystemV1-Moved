@@ -209,6 +209,7 @@ class SMCSimpleConfig:
     # sparse probes so blocked hours can gather fresh forward-test evidence.
     scalp_hour_gate_enabled: bool = True
     scalp_hour_gate_mode: str = 'ACTIVE'  # MONITORING or ACTIVE
+    scalp_hour_gate_bucket_mode: str = 'hour'  # hour, hour4, direction, direction_hour, direction_hour4
     scalp_hour_gate_window: int = 24
     scalp_hour_gate_min_trades: int = 8
     scalp_hour_gate_lookback_days: int = 45
@@ -220,6 +221,25 @@ class SMCSimpleConfig:
     scalp_hour_gate_cache_ttl_seconds: int = 300
     scalp_hour_gate_seed_execution_id: Optional[int] = None
     scalp_hour_gate_seed_strategy_name: str = 'SMC_SIMPLE'
+    scalp_condition_hour_gate_enabled: bool = True
+    scalp_condition_hour_gate_mode: str = 'ACTIVE'
+    scalp_condition_hour_gate_target_epics: str = 'CS.D.EURUSD.CEEM.IP'
+    scalp_condition_hour_gate_compression_buckets: str = 'BULL:h00_03,BULL:h08_11'
+    scalp_condition_hour_gate_compression_atr_max: float = 50.0
+    scalp_condition_hour_gate_compression_bb_max: float = 50.0
+    scalp_condition_hour_gate_extreme_buckets: str = 'BEAR:h08_11'
+    scalp_condition_hour_gate_extreme_regime: str = 'high_volatility'
+    scalp_condition_hour_gate_extreme_volatility_state: str = 'extreme'
+    scalp_condition_hour_gate_dynamic_enabled: bool = True
+    scalp_condition_hour_gate_static_fallback_enabled: bool = True
+    scalp_condition_hour_gate_dynamic_min_trades: int = 8
+    scalp_condition_hour_gate_dynamic_block_profit_factor: float = 0.75
+    scalp_condition_hour_gate_dynamic_block_expectancy_pips: float = -0.25
+    scalp_condition_hour_gate_expanded_percentile_min: float = 70.0
+    scalp_condition_hour_gate_low_quality_max: float = 0.50
+    scalp_condition_hour_gate_low_momentum_max: float = 0.50
+    scalp_condition_hour_gate_low_confluence_max: float = 0.35
+    scalp_condition_hour_gate_low_efficiency_max: float = 0.20
 
     # DIRECTION QUALITY GATE (opt-in, runs in backtest and live)
     direction_quality_gate_enabled: bool = False
@@ -2122,6 +2142,7 @@ class SMCSimpleConfigService:
             'adaptive_bucket_gate_cache_ttl_seconds',
             # DYNAMIC SCALP HOUR GATE (active guardrail)
             'scalp_hour_gate_enabled', 'scalp_hour_gate_mode',
+            'scalp_hour_gate_bucket_mode',
             'scalp_hour_gate_window', 'scalp_hour_gate_min_trades',
             'scalp_hour_gate_lookback_days',
             'scalp_hour_gate_block_profit_factor',
@@ -2132,6 +2153,25 @@ class SMCSimpleConfigService:
             'scalp_hour_gate_cache_ttl_seconds',
             'scalp_hour_gate_seed_execution_id',
             'scalp_hour_gate_seed_strategy_name',
+            'scalp_condition_hour_gate_enabled',
+            'scalp_condition_hour_gate_mode',
+            'scalp_condition_hour_gate_target_epics',
+            'scalp_condition_hour_gate_compression_buckets',
+            'scalp_condition_hour_gate_compression_atr_max',
+            'scalp_condition_hour_gate_compression_bb_max',
+            'scalp_condition_hour_gate_extreme_buckets',
+            'scalp_condition_hour_gate_extreme_regime',
+            'scalp_condition_hour_gate_extreme_volatility_state',
+            'scalp_condition_hour_gate_dynamic_enabled',
+            'scalp_condition_hour_gate_static_fallback_enabled',
+            'scalp_condition_hour_gate_dynamic_min_trades',
+            'scalp_condition_hour_gate_dynamic_block_profit_factor',
+            'scalp_condition_hour_gate_dynamic_block_expectancy_pips',
+            'scalp_condition_hour_gate_expanded_percentile_min',
+            'scalp_condition_hour_gate_low_quality_max',
+            'scalp_condition_hour_gate_low_momentum_max',
+            'scalp_condition_hour_gate_low_confluence_max',
+            'scalp_condition_hour_gate_low_efficiency_max',
             # DIRECTION QUALITY GATE (opt-in, runs in backtest and live)
             'direction_quality_gate_enabled', 'direction_quality_gate_mode',
             'direction_quality_gate_target_epics',
@@ -2186,6 +2226,7 @@ class SMCSimpleConfigService:
             'scalp_hour_gate_window', 'scalp_hour_gate_min_trades',
             'scalp_hour_gate_lookback_days', 'scalp_hour_gate_cache_ttl_seconds',
             'scalp_hour_gate_seed_execution_id',
+            'scalp_condition_hour_gate_dynamic_min_trades',
             'direction_quality_bull_block_start_hour',
             'direction_quality_bull_block_end_hour',
             'direction_quality_bear_block_start_hour',
