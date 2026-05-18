@@ -46,7 +46,8 @@ ACTIVE_EPICS = [
     "CS.D.USDCHF.MINI.IP",
     "CS.D.EURUSD.CEEM.IP",
     # Commodities & Crypto (verified tradeable on demo - Jan 2026)
-    "CS.D.CFEGOLD.CEE.IP"   # Spot Gold ($1)
+    "CS.D.CFEGOLD.CEE.IP" ,  # Spot Gold ($1)
+    "CS.D.CFDSILVER.CFM.IP" # Silver Mini contract
 ]
 
 # Additional available epics (currently disabled)
