@@ -222,6 +222,7 @@ class RangeFadeStrategy(StrategyInterface):
             return None
 
         adx_val = self._get_adx(df)
+        adx_htf_val = self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None
 
         prior_high = high.rolling(range_lookback_bars).max().shift(1)
         prior_low = low.rolling(range_lookback_bars).min().shift(1)
@@ -284,6 +285,16 @@ class RangeFadeStrategy(StrategyInterface):
             )
             return None
 
+        htf_adx_ceil = cfg.get_pair_htf_adx_ceiling(epic)
+        if adx_htf_val is not None and htf_adx_ceil > 0 and adx_htf_val > htf_adx_ceil:
+            self._reject(
+                epic,
+                "htf_adx_ceiling",
+                direction=direction,
+                details={"adx_htf": round(adx_htf_val, 1), "htf_ceiling": htf_adx_ceil},
+            )
+            return None
+
         score = min(1.0, 0.45 * rsi_extremity + 0.35 * min(1.0, band_penetration) + 0.20 * range_proximity)
         confidence = round(cfg.min_confidence + score * (cfg.max_confidence - cfg.min_confidence), 3)
 
@@ -323,7 +334,7 @@ class RangeFadeStrategy(StrategyInterface):
             "monitor_only": cfg.is_pair_monitor_only(epic),
             "scalp_mode": False,
             "adx": adx_val,
-            "adx_htf": self._get_adx(df_4h) if df_4h is not None and len(df_4h) >= 30 else None,
+            "adx_htf": adx_htf_val,
             "rsi": latest_rsi,
             "strategy_indicators": {
                 "bb_upper": latest_upper,

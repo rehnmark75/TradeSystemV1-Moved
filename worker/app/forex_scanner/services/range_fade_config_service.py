@@ -77,6 +77,7 @@ class RangeFadeConfig:
     adx_ceiling: float = 25.0
     buy_adx_ceiling: Optional[float] = None
     sell_adx_ceiling: Optional[float] = None
+    htf_adx_ceiling: float = 999.0
     min_macd_histogram_pips: float = 0.0
     min_confidence: float = 0.52
     max_confidence: float = 0.84
@@ -167,6 +168,9 @@ class RangeFadeConfig:
 
     def get_pair_min_macd_histogram_pips(self, epic: str) -> float:
         return float(self._override(epic, "min_macd_histogram_pips", self.min_macd_histogram_pips))
+
+    def get_pair_htf_adx_ceiling(self, epic: str) -> float:
+        return float(self._override(epic, "htf_adx_ceiling", self.htf_adx_ceiling))
 
     def get_pair_adx_ceiling(self, epic: str, direction: str) -> float:
         direction_key = f"{direction.lower()}_adx_ceiling"
