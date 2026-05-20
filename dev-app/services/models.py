@@ -133,6 +133,12 @@ class TradeLog(Base):
     vsl_mae_price = Column(Float, nullable=True)  # Price at worst point
     vsl_mae_timestamp = Column(DateTime, nullable=True)  # When worst was reached
 
+    # Failed followthrough exit — set when guard fires in active mode
+    failed_followthrough_exit    = Column(Boolean, default=False)
+    failed_followthrough_exit_at = Column(DateTime, nullable=True)
+    failed_followthrough_mfe_pips = Column(Float, nullable=True)
+    failed_followthrough_mae_pips = Column(Float, nullable=True)
+
     # Trading environment (live/demo) — distinguishes real vs paper trades
     environment = Column(String(10), default='demo')
 

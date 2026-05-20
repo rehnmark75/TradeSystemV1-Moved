@@ -898,6 +898,18 @@ class TradeMonitor:
                 # Track peak profit (MFE) and max adverse excursion (MAE) every cycle
                 self._update_peak_and_mae(trade, current_price, db)
 
+                # Post-entry guard evaluation (failed followthrough, etc.)
+                # Returns True if an active guard closed the trade — skip trailing.
+                try:
+                    from services.trade_management_guard_service import evaluate_guards_for_trade
+                    guard_closed = await evaluate_guards_for_trade(
+                        trade, current_price, db, self._trading_headers
+                    )
+                    if guard_closed:
+                        return True
+                except Exception as guard_error:
+                    self.logger.error(f"[GUARD ERROR] Trade {trade.id}: {guard_error}")
+
                 if ENHANCED_PROCESSOR_AVAILABLE and hasattr(self.trade_processor, 'process_trade_with_combined_validation'):
                     # Use enhanced processor with validation
                     success = await self.trade_processor.process_trade_with_combined_validation(
