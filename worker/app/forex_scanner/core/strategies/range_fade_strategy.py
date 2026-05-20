@@ -601,16 +601,17 @@ class RangeFadeStrategy(StrategyInterface):
                            EXTRACT(HOUR FROM ah.created_at)::int AS signal_hour
                     FROM trade_log tl
                     JOIN alert_history ah ON ah.id = tl.alert_id
-                    WHERE ah.epic = %s
+                    WHERE ah.epic = :epic
                       AND ah.strategy = 'RANGE_FADE'
                       AND tl.status IN ('closed', 'CLOSED')
                       AND tl.closed_at IS NOT NULL
                     ORDER BY ah.created_at DESC
                     LIMIT 1
                 """
-                rows = self.db_manager.execute_query(query, (epic,))
-                if rows:
-                    pips_gained, signal_hour = rows[0]
+                rows = self.db_manager.execute_query(query, {"epic": epic})
+                if rows is not None and not rows.empty:
+                    pips_gained = rows.iloc[0]["pips_gained"]
+                    signal_hour = rows.iloc[0]["signal_hour"]
                     if pips_gained is not None and float(pips_gained) < 0:
                         prev_session = self._session_key(int(signal_hour))
                         if prev_session == current_session:
