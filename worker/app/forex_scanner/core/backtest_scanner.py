@@ -1510,6 +1510,13 @@ class BacktestScanner:
             if (is_winner or is_loser) and hasattr(self.signal_detector, 'smc_simple_strategy') and self.signal_detector.smc_simple_strategy:
                 self.signal_detector.smc_simple_strategy.record_backtest_outcome(epic, bool(is_winner))
 
+            # Feed outcome back to RANGE_FADE strategy for same-session post-loss blocking
+            if is_winner or is_loser:
+                range_fade_strategy = self.signal_detector._strategies.get('RANGE_FADE')
+                if range_fade_strategy is not None and hasattr(range_fade_strategy, 'mark_signal_outcome'):
+                    signal_hour = signal_timestamp.hour if signal_timestamp else 0
+                    range_fade_strategy.mark_signal_outcome(epic, bool(is_loser), signal_hour)
+
             return enhanced_signal
 
         except Exception as e:

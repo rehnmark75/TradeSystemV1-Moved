@@ -96,6 +96,7 @@ class RangeFadeStrategy(StrategyInterface):
         self.config = base_config
         apply_config_overrides(self.config, self._config_override)
         self._cooldowns: Dict[str, datetime] = {}
+        self._post_loss_session_blocks: Dict[str, str] = {}  # epic → blocked session key
         self._current_timestamp: Optional[datetime] = None
         self._rej_counts: Dict[str, int] = {}
         self._rej_last_log: datetime = datetime.now(timezone.utc)
@@ -134,6 +135,7 @@ class RangeFadeStrategy(StrategyInterface):
 
     def reset_cooldowns(self) -> None:
         self._cooldowns.clear()
+        self._post_loss_session_blocks.clear()
 
     def detect_signal(
         self,
@@ -163,6 +165,10 @@ class RangeFadeStrategy(StrategyInterface):
             return None
 
         now = self._resolve_now(df)
+        if not self._check_post_loss_session_block(epic, now):
+            self._reject(epic, "post_loss_session_block")
+            return None
+
         if not cfg.is_session_allowed(now.hour, epic):
             self._reject(epic, "session_blocked")
             return None
@@ -516,6 +522,70 @@ class RangeFadeStrategy(StrategyInterface):
         if getattr(now, "tzinfo", None) is None:
             now = now.replace(tzinfo=timezone.utc)
         self._cooldowns[epic] = now + timedelta(minutes=self.config.get_pair_signal_cooldown_minutes(epic))
+
+    @staticmethod
+    def _session_key(hour: int) -> str:
+        if hour >= 22 or hour < 6:
+            return "Asian"
+        if hour < 12:
+            return "London"
+        if hour < 16:
+            return "Overlap"
+        if hour < 21:
+            return "NY"
+        return "Late"
+
+    def mark_signal_outcome(self, epic: str, was_loss: bool, signal_hour: int) -> None:
+        """Call after a trade resolves. Sets a same-session block if the trade was a loss."""
+        if was_loss:
+            self._post_loss_session_blocks[epic] = self._session_key(signal_hour)
+        elif epic in self._post_loss_session_blocks:
+            del self._post_loss_session_blocks[epic]
+
+    def _check_post_loss_session_block(self, epic: str, now: datetime) -> bool:
+        """
+        Returns False (block) when the most recent RANGE_FADE signal for this epic was
+        a loss in the same session bucket as the current hour.
+
+        In backtest mode (no db_manager), falls back to the in-memory state set by
+        mark_signal_outcome(). In live mode also queries trade_log as a safety net.
+        """
+        if not self.config.is_post_loss_session_block_enabled(epic):
+            return True
+
+        current_session = self._session_key(now.hour)
+
+        # In-memory check (works in both backtest and live)
+        if self._post_loss_session_blocks.get(epic) == current_session:
+            return False
+
+        # Live-only DB check: most recent closed RANGE_FADE trade for this epic
+        if self.db_manager is not None:
+            try:
+                query = """
+                    SELECT tl.pips_gained,
+                           EXTRACT(HOUR FROM ah.created_at)::int AS signal_hour
+                    FROM trade_log tl
+                    JOIN alert_history ah ON ah.id = tl.alert_id
+                    WHERE ah.epic = %s
+                      AND ah.strategy = 'RANGE_FADE'
+                      AND tl.status IN ('closed', 'CLOSED')
+                      AND tl.closed_at IS NOT NULL
+                    ORDER BY ah.created_at DESC
+                    LIMIT 1
+                """
+                rows = self.db_manager.execute_query(query, (epic,))
+                if rows:
+                    pips_gained, signal_hour = rows[0]
+                    if pips_gained is not None and float(pips_gained) < 0:
+                        prev_session = self._session_key(int(signal_hour))
+                        if prev_session == current_session:
+                            self._post_loss_session_blocks[epic] = current_session
+                            return False
+            except Exception as exc:
+                self.logger.debug("[RANGE_FADE] post_loss_session DB check failed: %s", exc)
+
+        return True
 
     def _reject(self, epic: str, reason: str, direction: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
         stage = reason.upper()

@@ -106,6 +106,7 @@ class RangeFadeConfig:
     sell_allowed_hours_utc: str = ""
     buy_allowed_htf_biases: str = ""
     sell_allowed_htf_biases: str = ""
+    post_loss_session_block_enabled: bool = False
 
     pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     backtest_overrides: Dict[str, Any] = field(default_factory=dict)
@@ -217,6 +218,12 @@ class RangeFadeConfig:
             return False
         blocked = self.get_pair_blocked_hours(epic) | self.get_pair_blocked_hours(epic, direction)
         return hour_utc not in blocked
+
+    def is_post_loss_session_block_enabled(self, epic: str) -> bool:
+        raw = self._override(epic, "post_loss_session_block_enabled", self.post_loss_session_block_enabled)
+        if isinstance(raw, bool):
+            return raw
+        return str(raw).lower() in ("true", "1", "yes")
 
     def is_htf_bias_allowed(self, epic: str, direction: str, htf_bias: str) -> bool:
         default = "bullish,neutral" if direction.upper() == "BUY" else "bearish,neutral"
