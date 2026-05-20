@@ -5,9 +5,12 @@ export const dynamic = "force-dynamic";
 
 type Row = Record<string, any>;
 
-function parseDate(value: string | null) {
+function parseDate(value: string | null, boundary: "start" | "end" = "start") {
   if (!value) return null;
-  const parsed = new Date(value);
+  const dateOnly = /^\d{4}-\d{2}-\d{2}$/.test(value);
+  const parsed = dateOnly
+    ? new Date(`${value}T${boundary === "end" ? "23:59:59.999" : "00:00:00.000"}Z`)
+    : new Date(value);
   return Number.isNaN(parsed.valueOf()) ? null : parsed;
 }
 
@@ -47,8 +50,8 @@ export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const env = searchParams.get("env") || "demo";
   const source = (searchParams.get("source") || "comprehensive").toLowerCase();
-  const startParam = parseDate(searchParams.get("start"));
-  const endParam = parseDate(searchParams.get("end"));
+  const startParam = parseDate(searchParams.get("start"), "start");
+  const endParam = parseDate(searchParams.get("end"), "end");
   const { start, end } = resolveRange(startParam, endParam);
 
   try {
