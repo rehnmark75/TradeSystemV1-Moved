@@ -29,7 +29,7 @@ CREATE TABLE smc_rejection_outcomes (
     analysis_timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 
     -- Original rejection context (denormalized for query performance)
-    rejection_stage VARCHAR(20) NOT NULL,
+    rejection_stage VARCHAR(50) NOT NULL,
     attempted_direction VARCHAR(10) NOT NULL,  -- 'BULL' or 'BEAR'
     market_session VARCHAR(20),
     market_hour INTEGER,
