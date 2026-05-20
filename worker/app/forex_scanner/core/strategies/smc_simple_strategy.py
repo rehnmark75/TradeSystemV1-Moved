@@ -3096,9 +3096,15 @@ class SMCSimpleStrategy:
                 has_backtest_tp_override = self._config_override and 'fixed_take_profit_pips' in self._config_override
 
                 if self.scalp_mode_enabled:
-                    # SCALP MODE: Check for per-pair optimized SL/TP first (highest priority)
+                    # SCALP MODE: config_override takes highest priority (backtest ablation)
+                    has_scalp_sl_override = self._config_override and 'scalp_sl_pips' in self._config_override
+                    has_scalp_tp_override = self._config_override and 'scalp_tp_pips' in self._config_override
+                    if has_scalp_sl_override or has_scalp_tp_override:
+                        fixed_sl_pips = self._config_override.get('scalp_sl_pips', self.scalp_sl_pips)
+                        fixed_tp_pips = self._config_override.get('scalp_tp_pips', self.scalp_tp_pips)
+                        self.logger.info(f"   🧪 Using BACKTEST OVERRIDE SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f}")
                     # v2.29.0: Per-pair scalp SL/TP based on ATR analysis
-                    if self._using_database_config and self._db_config:
+                    elif self._using_database_config and self._db_config:
                         pair_scalp_sl = self._db_config.get_pair_scalp_sl(epic)
                         pair_scalp_tp = self._db_config.get_pair_scalp_tp(epic)
 
