@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -95,7 +95,7 @@ class RangeFadeStrategy(StrategyInterface):
         base_config = config or get_range_fade_config(profile_name)
         self.config = base_config
         apply_config_overrides(self.config, self._config_override)
-        self._cooldowns: Dict[str, datetime] = {}
+        self._cooldowns: Dict[Tuple[str, str], datetime] = {}  # (epic, direction) → unblock_time
         self._post_loss_session_blocks: Dict[str, str] = {}  # epic → blocked session key
         self._current_timestamp: Optional[datetime] = None
         self._rej_counts: Dict[str, int] = {}
@@ -160,10 +160,6 @@ class RangeFadeStrategy(StrategyInterface):
             self._reject(epic, "pair_disabled")
             return None
 
-        if not self._check_cooldown(epic):
-            self._reject(epic, "cooldown")
-            return None
-
         now = self._resolve_now(df)
         if not self._check_post_loss_session_block(epic, now):
             self._reject(epic, "post_loss_session_block")
@@ -197,8 +193,12 @@ class RangeFadeStrategy(StrategyInterface):
         if None in (latest_upper, latest_lower, latest_mid, latest_rsi, latest_atr, latest_macd_histogram, latest_bar_range):
             self._reject(epic, "indicator_nan")
             return None
-        rsi_oversold = cfg.get_pair_rsi_oversold(epic)
-        rsi_overbought = cfg.get_pair_rsi_overbought(epic)
+
+        er_period = cfg.get_pair_er_period(epic)
+        latest_er = self._compute_er(close, er_period)
+
+        rsi_oversold = cfg.get_pair_rsi_oversold(epic, "BUY")
+        rsi_overbought = cfg.get_pair_rsi_overbought(epic, "SELL")
         range_proximity_pips = cfg.get_pair_range_proximity_pips(epic)
         min_band_width_pips = cfg.get_pair_min_band_width_pips(epic)
         max_band_width_pips = cfg.get_pair_max_band_width_pips(epic)
@@ -275,6 +275,9 @@ class RangeFadeStrategy(StrategyInterface):
         if direction is None:
             self._reject(epic, "no_trigger")
             return None
+        if not self._check_cooldown(epic, direction):
+            self._reject(epic, "cooldown", direction=direction)
+            return None
         if not cfg.is_direction_allowed(epic, direction):
             self._reject(epic, "direction_blocked", direction=direction)
             return None
@@ -298,6 +301,16 @@ class RangeFadeStrategy(StrategyInterface):
                 "htf_adx_ceiling",
                 direction=direction,
                 details={"adx_htf": round(adx_htf_val, 1), "htf_ceiling": htf_adx_ceil},
+            )
+            return None
+
+        er_ceil = cfg.get_pair_er_ceiling(epic, direction)
+        if latest_er is not None and er_ceil < 999.0 and latest_er > er_ceil:
+            self._reject(
+                epic,
+                "er_ceiling",
+                direction=direction,
+                details={"er": latest_er, "ceiling": er_ceil},
             )
             return None
 
@@ -342,6 +355,7 @@ class RangeFadeStrategy(StrategyInterface):
             "adx": adx_val,
             "adx_htf": adx_htf_val,
             "rsi": latest_rsi,
+            "efficiency_ratio": latest_er,
             "strategy_indicators": {
                 "bb_upper": latest_upper,
                 "bb_lower": latest_lower,
@@ -381,7 +395,7 @@ class RangeFadeStrategy(StrategyInterface):
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
 
         if signal is not None:
-            self._set_cooldown(epic)
+            self._set_cooldown(epic, direction)
             self.logger.info(
                 "[RANGE_FADE] %s %s @ %.5f RSI=%.1f htf=%s conf=%.2f",
                 direction,
@@ -472,6 +486,18 @@ class RangeFadeStrategy(StrategyInterface):
         macd_signal = macd_line.ewm(span=9, adjust=False).mean()
         return macd_line, macd_signal, macd_line - macd_signal
 
+    @staticmethod
+    def _compute_er(close: pd.Series, period: int = 14) -> Optional[float]:
+        """Kaufman Efficiency Ratio: 1.0 = clean trend, 0.0 = choppy/ranging."""
+        if len(close) < period + 1:
+            return None
+        vals = close.values
+        direction = abs(float(vals[-1]) - float(vals[-period - 1]))
+        volatility = sum(abs(float(vals[-i]) - float(vals[-i - 1])) for i in range(1, period + 1))
+        if volatility == 0:
+            return 0.0
+        return round(direction / volatility, 4)
+
     def _get_adx(self, df: Optional[pd.DataFrame]) -> Optional[float]:
         if df is None or len(df) < 20:
             return None
@@ -502,26 +528,34 @@ class RangeFadeStrategy(StrategyInterface):
         except Exception:
             return None
 
-    def _check_cooldown(self, epic: str) -> bool:
-        if epic not in self._cooldowns:
+    def _check_cooldown(self, epic: str, direction: str) -> bool:
+        key = (epic, direction.upper())
+        if key not in self._cooldowns:
             return True
         now = self._current_timestamp or datetime.now(timezone.utc)
         if isinstance(now, pd.Timestamp):
             now = now.to_pydatetime()
         if getattr(now, "tzinfo", None) is None:
             now = now.replace(tzinfo=timezone.utc)
-        if now >= self._cooldowns[epic]:
-            del self._cooldowns[epic]
+        if now >= self._cooldowns[key]:
+            del self._cooldowns[key]
             return True
         return False
 
-    def _set_cooldown(self, epic: str) -> None:
+    def _set_cooldown(self, epic: str, direction: str) -> None:
         now = self._current_timestamp or datetime.now(timezone.utc)
         if isinstance(now, pd.Timestamp):
             now = now.to_pydatetime()
         if getattr(now, "tzinfo", None) is None:
             now = now.replace(tzinfo=timezone.utc)
-        self._cooldowns[epic] = now + timedelta(minutes=self.config.get_pair_signal_cooldown_minutes(epic))
+        same_dir = direction.upper()
+        opp_dir = "SELL" if same_dir == "BUY" else "BUY"
+        same_mins = self.config.get_pair_same_direction_cooldown_minutes(epic)
+        opp_mins = self.config.get_pair_signal_cooldown_minutes(epic)
+        if same_mins > 0:
+            self._cooldowns[(epic, same_dir)] = now + timedelta(minutes=same_mins)
+        if opp_mins > 0:
+            self._cooldowns[(epic, opp_dir)] = now + timedelta(minutes=opp_mins)
 
     @staticmethod
     def _session_key(hour: int) -> str:

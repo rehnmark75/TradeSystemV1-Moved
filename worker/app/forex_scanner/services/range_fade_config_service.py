@@ -78,6 +78,10 @@ class RangeFadeConfig:
     buy_adx_ceiling: Optional[float] = None
     sell_adx_ceiling: Optional[float] = None
     htf_adx_ceiling: float = 999.0
+    er_ceiling: float = 999.0
+    buy_er_ceiling: Optional[float] = None
+    sell_er_ceiling: Optional[float] = None
+    er_period: int = 14
     min_macd_histogram_pips: float = 0.0
     min_confidence: float = 0.52
     max_confidence: float = 0.84
@@ -137,16 +141,30 @@ class RangeFadeConfig:
     def get_pair_signal_cooldown_minutes(self, epic: str) -> int:
         return int(self._override(epic, "signal_cooldown_minutes", self.signal_cooldown_minutes))
 
+    def get_pair_same_direction_cooldown_minutes(self, epic: str) -> int:
+        """Cooldown applied to the same direction after a signal fires.
+        Defaults to signal_cooldown_minutes so existing pairs are unaffected."""
+        return int(self._override(epic, "same_direction_cooldown_minutes",
+                                  self.get_pair_signal_cooldown_minutes(epic)))
+
     def get_pair_fixed_stop_loss_pips(self, epic: str) -> float:
         return float(self._override(epic, "fixed_stop_loss_pips", self.fixed_stop_loss_pips))
 
     def get_pair_fixed_take_profit_pips(self, epic: str) -> float:
         return float(self._override(epic, "fixed_take_profit_pips", self.fixed_take_profit_pips))
 
-    def get_pair_rsi_oversold(self, epic: str) -> int:
+    def get_pair_rsi_oversold(self, epic: str, direction: str = "") -> int:
+        if direction:
+            direction_val = self._override(epic, f"{direction.lower()}_rsi_oversold", None)
+            if direction_val is not None:
+                return int(direction_val)
         return int(self._override(epic, "rsi_oversold", self.rsi_oversold))
 
-    def get_pair_rsi_overbought(self, epic: str) -> int:
+    def get_pair_rsi_overbought(self, epic: str, direction: str = "") -> int:
+        if direction:
+            direction_val = self._override(epic, f"{direction.lower()}_rsi_overbought", None)
+            if direction_val is not None:
+                return int(direction_val)
         return int(self._override(epic, "rsi_overbought", self.rsi_overbought))
 
     def get_pair_bb_mult(self, epic: str) -> float:
@@ -179,6 +197,16 @@ class RangeFadeConfig:
         if direction_value not in (None, ""):
             return float(direction_value)
         return float(self._override(epic, "adx_ceiling", self.adx_ceiling))
+
+    def get_pair_er_ceiling(self, epic: str, direction: str) -> float:
+        direction_key = f"{direction.lower()}_er_ceiling"
+        direction_value = self._override(epic, direction_key, getattr(self, direction_key, None))
+        if direction_value not in (None, ""):
+            return float(direction_value)
+        return float(self._override(epic, "er_ceiling", self.er_ceiling))
+
+    def get_pair_er_period(self, epic: str) -> int:
+        return int(self._override(epic, "er_period", self.er_period))
 
     def get_pair_blocked_hours(self, epic: str, direction: str = "") -> set:
         key = f"{direction.lower()}_blocked_hours_utc" if direction else "blocked_hours_utc"
