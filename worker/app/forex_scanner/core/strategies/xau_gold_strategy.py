@@ -317,6 +317,16 @@ class XAUGoldStrategy(StrategyInterface):
             self._reject(epic, "regime_expansion", f"atr_pct={atr_pct:.1f}")
             return None
 
+        # DI alignment gate: block when momentum (DI) contradicts HTF bias
+        if bool(getattr(cfg, "di_alignment_gate_enabled", True)):
+            plus_di, minus_di = self._compute_di(df_trigger)
+            if bias == "bearish" and plus_di > minus_di:
+                self._reject(epic, "di_misaligned_sell", f"+DI={plus_di:.1f} > -DI={minus_di:.1f}")
+                return None
+            if bias == "bullish" and minus_di > plus_di:
+                self._reject(epic, "di_misaligned_buy", f"-DI={minus_di:.1f} > +DI={plus_di:.1f}")
+                return None
+
         # Tier 2: BOS on 1H aligned with bias — detect fresh OR use cached state
         fresh_bos = self._detect_bos(df_trigger, bias)
         if fresh_bos is not None:
@@ -366,6 +376,16 @@ class XAUGoldStrategy(StrategyInterface):
         # RSI neutrality on trigger
         rsi_val = float(df_trigger["rsi_14"].iloc[-1])
         rsi_neutral = cfg.rsi_neutral_min <= rsi_val <= cfg.rsi_neutral_max
+
+        # RSI directional floor: SELL into oversold / BUY into overbought are losing setups
+        rsi_sell_floor = float(getattr(cfg, "rsi_sell_floor", 45.0))
+        rsi_buy_ceiling = float(getattr(cfg, "rsi_buy_ceiling", 80.0))
+        if bias == "bearish" and rsi_val < rsi_sell_floor:
+            self._reject(epic, "rsi_sell_floor", f"rsi={rsi_val:.1f} < floor={rsi_sell_floor:.1f}")
+            return None
+        if bias == "bullish" and rsi_val > rsi_buy_ceiling:
+            self._reject(epic, "rsi_buy_ceiling", f"rsi={rsi_val:.1f} > ceiling={rsi_buy_ceiling:.1f}")
+            return None
 
         # DXY confluence is not wired yet; weight is zeroed in DB config to keep
         # the confidence scale honest. Setting False has no effect while w_dxy_confluence=0.
@@ -520,6 +540,35 @@ class XAUGoldStrategy(StrategyInterface):
             df["macd_hist"] = m["hist"]
         return df
 
+    def _compute_di(self, df: pd.DataFrame) -> Tuple[float, float]:
+        """Return (plus_di, minus_di) scalars for the most recent bar using Wilder smoothing."""
+        period = self.config.adx_period
+        if len(df) < period + 1:
+            return 0.0, 0.0
+        high = df["high"]
+        low = df["low"]
+        close = df["close"]
+        prev_close = close.shift(1)
+        tr = pd.concat(
+            [(high - low), (high - prev_close).abs(), (low - prev_close).abs()], axis=1
+        ).max(axis=1)
+        up_move = high.diff()
+        down_move = -low.diff()
+        plus_dm = pd.Series(
+            np.where((up_move > down_move) & (up_move > 0), up_move, 0.0), index=df.index
+        )
+        minus_dm = pd.Series(
+            np.where((down_move > up_move) & (down_move > 0), down_move, 0.0), index=df.index
+        )
+        alpha = 1.0 / period
+        tr_s = tr.ewm(alpha=alpha, adjust=False).mean()
+        plus_s = plus_dm.ewm(alpha=alpha, adjust=False).mean()
+        minus_s = minus_dm.ewm(alpha=alpha, adjust=False).mean()
+        denom = float(tr_s.iloc[-1])
+        if denom <= 0:
+            return 0.0, 0.0
+        return 100.0 * float(plus_s.iloc[-1]) / denom, 100.0 * float(minus_s.iloc[-1]) / denom
+
     def _enrich_event_frame(self, df: pd.DataFrame) -> pd.DataFrame:
         df = df.copy()
         df = _ensure_col(df, "ema_21", _ema(df["close"], 21))
@@ -668,6 +717,7 @@ class XAUGoldStrategy(StrategyInterface):
 
         htf_bias = self._htf_bias(df_4h)
         regime, adx_val, atr_pct = self._regime(df_4h, df_trigger)
+        plus_di, minus_di = self._compute_di(df_trigger)
         ema_distance_pips = abs(close - float(row["ema_21"])) / pip
 
         scored = []
@@ -694,6 +744,29 @@ class XAUGoldStrategy(StrategyInterface):
                     "range_break_asian_ranging",
                     f"hour_utc={hour_utc} regime={regime}",
                 )
+                filtered_candidates += 1
+                continue
+
+            # DI alignment gate: block when momentum (DI) contradicts direction
+            if bool(getattr(cfg, "di_alignment_gate_enabled", True)):
+                if direction == "SELL" and plus_di > minus_di:
+                    self._reject(epic, "di_misaligned_sell", f"+DI={plus_di:.1f} > -DI={minus_di:.1f}")
+                    filtered_candidates += 1
+                    continue
+                if direction == "BUY" and minus_di > plus_di:
+                    self._reject(epic, "di_misaligned_buy", f"-DI={minus_di:.1f} > +DI={plus_di:.1f}")
+                    filtered_candidates += 1
+                    continue
+
+            # RSI directional floor: SELL into oversold is a losing setup for gold
+            rsi_sell_floor = float(getattr(cfg, "rsi_sell_floor", 45.0))
+            if direction == "SELL" and rsi_val < rsi_sell_floor:
+                self._reject(epic, "rsi_sell_floor", f"rsi={rsi_val:.1f} < floor={rsi_sell_floor:.1f}")
+                filtered_candidates += 1
+                continue
+            rsi_buy_ceiling = float(getattr(cfg, "rsi_buy_ceiling", 80.0))
+            if direction == "BUY" and rsi_val > rsi_buy_ceiling:
+                self._reject(epic, "rsi_buy_ceiling", f"rsi={rsi_val:.1f} > ceiling={rsi_buy_ceiling:.1f}")
                 filtered_candidates += 1
                 continue
 
