@@ -52,6 +52,9 @@ CONFIG_FIELDS = (
     'enable_partial_close',
     'partial_close_trigger_points',
     'partial_close_size',
+    'time_protection_buffer_pips',
+    'time_protection_min_profit_pips',
+    'time_protection_minutes',
 )
 
 

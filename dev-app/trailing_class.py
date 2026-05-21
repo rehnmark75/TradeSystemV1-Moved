@@ -1973,9 +1973,12 @@ class EnhancedTradeProcessor:
             time_protection = TIME_BASED_PROTECTION
 
             if time_protection.get('enabled', True) and not getattr(trade, 'time_protection_executed', False):
-                min_profit_for_time = time_protection.get('min_profit_pips', 5)
-                time_threshold_mins = time_protection.get('time_threshold_minutes', 30)
-                protection_buffer = time_protection.get('protection_buffer_pips', 2)
+                min_profit_for_time = (trailing_config.get('time_protection_min_profit_pips')
+                                       or time_protection.get('min_profit_pips', 5))
+                time_threshold_mins = (trailing_config.get('time_protection_minutes')
+                                       or time_protection.get('time_threshold_minutes', 30))
+                protection_buffer = (trailing_config.get('time_protection_buffer_pips')
+                                     or time_protection.get('protection_buffer_pips', 2))
 
                 # Check if trade is in profit
                 if profit_points >= min_profit_for_time:
