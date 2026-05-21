@@ -745,13 +745,12 @@ Signal Display Format:
         Returns:
             Dict of scalp mode config overrides
         """
-        # Default scalp TP (previously read from config_virtual_stop_backtest, VSL deprecated Jan 2026)
-        _DEFAULT_SCALP_TP_PIPS = 10.0
-
-        # Get scalp TP from overrides or use default
-        scalp_tp = _DEFAULT_SCALP_TP_PIPS
-        if existing_overrides and 'scalp_tp_pips' in existing_overrides:
-            scalp_tp = existing_overrides['scalp_tp_pips']
+        # Only inject scalp_sl_pips/scalp_tp_pips when explicitly provided via --override.
+        # If absent, the strategy falls through to per-pair DB config (scalp_sl_pips/scalp_tp_pips
+        # columns in smc_simple_pair_overrides), then global scalp defaults. Injecting a hardcoded
+        # default here would bypass the per-pair DB lookup in the strategy's priority chain.
+        explicit_scalp_sl = existing_overrides.get('scalp_sl_pips') if existing_overrides else None
+        explicit_scalp_tp = existing_overrides.get('scalp_tp_pips') if existing_overrides else None
 
         # Get scalp offset from CLI arg, existing overrides, or use default (1 pip for scalp mode)
         default_scalp_offset = 1.0  # Default scalp offset is 1 pip (tighter than normal 3 pips)
@@ -773,12 +772,17 @@ Signal Display Format:
 
         overrides = {
             'scalp_mode_enabled': True,
-            'scalp_tp_pips': scalp_tp,
             'scalp_limit_offset_pips': offset,  # Limit order offset for momentum confirmation
             'limit_expiry_minutes': expiry,  # Limit order expiry time
             'use_vsl_mode': False,  # VSL DEPRECATED (Jan 2026) - use ATR trailing instead
             'use_atr_trailing': True,  # v3.2.0: ATR-adaptive trailing enabled by default in scalp mode
         }
+
+        # Only forward explicit --override scalp_sl/tp values; absent = let strategy use per-pair DB
+        if explicit_scalp_sl is not None:
+            overrides['scalp_sl_pips'] = explicit_scalp_sl
+        if explicit_scalp_tp is not None:
+            overrides['scalp_tp_pips'] = explicit_scalp_tp
 
         # Add tier settings if overridden
         if scalp_htf is not None:
