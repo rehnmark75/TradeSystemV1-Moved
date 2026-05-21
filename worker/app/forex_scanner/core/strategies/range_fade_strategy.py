@@ -304,6 +304,16 @@ class RangeFadeStrategy(StrategyInterface):
             )
             return None
 
+        er_floor = cfg.get_pair_er_floor(epic)
+        if latest_er is not None and er_floor > 0.0 and latest_er < er_floor:
+            self._reject(
+                epic,
+                "er_floor",
+                direction=direction,
+                details={"er": round(latest_er, 3), "floor": er_floor},
+            )
+            return None
+
         er_ceil = cfg.get_pair_er_ceiling(epic, direction)
         if latest_er is not None and er_ceil < 999.0 and latest_er > er_ceil:
             self._reject(
@@ -365,6 +375,7 @@ class RangeFadeStrategy(StrategyInterface):
                 "macd_histogram_pips": round(macd_histogram_pips, 2),
                 "min_macd_histogram_pips": min_macd_histogram_pips,
                 "adx_ceiling": adx_ceil,
+                "adx_htf": adx_htf_val,
                 "dynamic_sl_tp_enabled": cfg.dynamic_sl_tp_enabled,
                 "allowed_directions": cfg._override(epic, "allowed_directions", cfg.allowed_directions),
                 "rsi": latest_rsi,

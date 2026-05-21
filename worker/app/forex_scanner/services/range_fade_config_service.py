@@ -78,6 +78,7 @@ class RangeFadeConfig:
     buy_adx_ceiling: Optional[float] = None
     sell_adx_ceiling: Optional[float] = None
     htf_adx_ceiling: float = 999.0
+    er_floor: float = 0.0
     er_ceiling: float = 999.0
     buy_er_ceiling: Optional[float] = None
     sell_er_ceiling: Optional[float] = None
@@ -197,6 +198,9 @@ class RangeFadeConfig:
         if direction_value not in (None, ""):
             return float(direction_value)
         return float(self._override(epic, "adx_ceiling", self.adx_ceiling))
+
+    def get_pair_er_floor(self, epic: str) -> float:
+        return float(self._override(epic, "er_floor", self.er_floor))
 
     def get_pair_er_ceiling(self, epic: str, direction: str) -> float:
         direction_key = f"{direction.lower()}_er_ceiling"
