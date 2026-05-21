@@ -75,6 +75,15 @@ const STRATEGIES = {
     defaultGlobalEnabled: false,
     defaultMonitorOnly: true,
   },
+  "fa-or-atr-trail": {
+    label: "FA_OR_ATR_TRAIL",
+    globalTable: "fa_or_atr_trail_global_config",
+    overrideTable: "fa_or_atr_trail_pair_overrides",
+    configSetColumn: "config_set",
+    overrideConfigJoin: false,
+    defaultGlobalEnabled: false,
+    defaultMonitorOnly: true,
+  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -96,6 +105,10 @@ function addGlobalPairSources(pairs: Set<string>, globalConfig: Record<string, u
   if (pairPipValues && typeof pairPipValues === "object" && !Array.isArray(pairPipValues)) {
     Object.keys(pairPipValues).forEach((epic) => pairs.add(epic));
   }
+}
+
+function isKvGlobalTable(tableName: string) {
+  return tableName === "smc_momentum_global_config" || tableName === "fa_or_atr_trail_global_config";
 }
 
 function countOverrides(row: Record<string, unknown>) {
@@ -175,11 +188,25 @@ async function loadGlobal(strategy: typeof STRATEGIES[keyof typeof STRATEGIES], 
       FROM ${strategy.globalTable}
       WHERE ${clauses.join(" AND ")}
       ORDER BY updated_at DESC, id DESC
-      LIMIT 1
+      ${isKvGlobalTable(strategy.globalTable) ? "" : "LIMIT 1"}
     `,
     values,
   );
-  return result.rows[0] ?? null;
+  if (!isKvGlobalTable(strategy.globalTable)) {
+    return result.rows[0] ?? null;
+  }
+  if (!result.rows.length) return null;
+  const flat: Record<string, unknown> = {};
+  for (const row of result.rows) {
+    if (!row.parameter_name) continue;
+    let value: unknown = row.parameter_value;
+    const valueType = String(row.value_type ?? "string").toLowerCase();
+    if (valueType === "bool") value = String(value).toLowerCase() === "true";
+    else if (valueType === "int") value = parseInt(String(value), 10);
+    else if (valueType === "float") value = parseFloat(String(value));
+    flat[row.parameter_name] = value;
+  }
+  return flat;
 }
 
 async function loadOverrides(

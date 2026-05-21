@@ -38,6 +38,7 @@ try:
     from services.range_fade_config_service import RangeFadeConfigService
     from services.smc_momentum_config_service import SMCMomentumConfigService
     from services.impulse_fade_config_service import ImpulseFadeConfigService
+    from services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -45,6 +46,7 @@ except ImportError:
     from forex_scanner.services.range_fade_config_service import RangeFadeConfigService
     from forex_scanner.services.smc_momentum_config_service import SMCMomentumConfigService
     from forex_scanner.services.impulse_fade_config_service import ImpulseFadeConfigService
+    from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
 
 
 class SignalDetector:
@@ -117,6 +119,16 @@ class SignalDetector:
         # Per-pair is_enabled flags in impulse_fade_pair_overrides gate execution.
         self.impulse_fade_enabled = True
 
+        # FA_OR_ATR_TRAIL is config-gated for forward testing. Pair rows decide
+        # active vs monitor-only; scanner_global_config decides whether the
+        # strategy is part of the demo/live scan set.
+        try:
+            scanner_cfg = get_scanner_config()
+            self.fa_or_atr_trail_enabled = scanner_cfg.is_strategy_enabled("FA_OR_ATR_TRAIL")
+        except Exception as e:
+            self.logger.warning(f"⚠️ FA_OR_ATR_TRAIL config check failed; disabled: {e}")
+            self.fa_or_atr_trail_enabled = False
+
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
         self._strategy_router = None
@@ -182,6 +194,7 @@ class SignalDetector:
                 'RANGE_FADE': 'range_fade_strategy',
                 'XAU_GOLD': 'xau_gold_strategy',
                 'IMPULSE_FADE': 'impulse_fade_strategy',
+                'FA_OR_ATR_TRAIL': 'fa_or_atr_trail_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -240,12 +253,15 @@ class SignalDetector:
             'MR': 'MEAN_REVERSION',
             'XAU': 'XAU_GOLD',
             'GOLD': 'XAU_GOLD',
+            'FAOR': 'FA_OR_ATR_TRAIL',
+            'FA_OR': 'FA_OR_ATR_TRAIL',
+            'ATR_TRAIL': 'FA_OR_ATR_TRAIL',
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
-        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM', 'IMPULSE_FADE'}
+        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM', 'IMPULSE_FADE', 'FA_OR_ATR_TRAIL'}
         if canonical not in known:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM, IMPULSE_FADE."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM, IMPULSE_FADE, FA_OR_ATR_TRAIL."
 
         if canonical == 'SMC_SIMPLE':
             # SMC Simple has its own lazy-load path; just arm the flag.
@@ -927,6 +943,30 @@ class SignalDetector:
                     self.logger.error(f"❌ [IMPULSE_FADE] Error for {epic}: {e}")
                     individual_results['impulse_fade'] = None
 
+            if (self.fa_or_atr_trail_enabled
+                    and not self._is_gold_epic(epic)
+                    and FAORATRTrailConfigService.get_instance().get_config().is_pair_enabled(epic)):
+                try:
+                    self.logger.debug(f"🔍 [FA_OR_ATR_TRAIL] Starting detection for {epic}")
+                    _fa_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _fa_ts = _fa_bt_time if _fa_bt_time is not None else datetime.now(timezone.utc)
+                    fa_signal = self.detect_fa_or_atr_trail_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_fa_ts
+                    )
+                    individual_results['fa_or_atr_trail'] = fa_signal
+                    if fa_signal:
+                        all_signals.append(fa_signal)
+                        mode = "MONITOR" if fa_signal.get("monitor_only") else "ACTIVE"
+                        self.logger.info(
+                            f"✅ [FA_OR_ATR_TRAIL:{mode}] Signal detected for {epic}: "
+                            f"{fa_signal.get('signal')} @ {fa_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [FA_OR_ATR_TRAIL] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [FA_OR_ATR_TRAIL] Error for {epic}: {e}")
+                    individual_results['fa_or_atr_trail'] = None
+
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
@@ -976,6 +1016,9 @@ class SignalDetector:
         'XAU': 'XAU_GOLD',
         'GOLD': 'XAU_GOLD',
         'SWEEP': 'SMC_MOMENTUM',
+        'FAOR': 'FA_OR_ATR_TRAIL',
+        'FA_OR': 'FA_OR_ATR_TRAIL',
+        'ATR_TRAIL': 'FA_OR_ATR_TRAIL',
     }
 
     def _detect_single_strategy(
@@ -1007,6 +1050,8 @@ class SignalDetector:
                 signal = self.detect_smc_momentum_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'IMPULSE_FADE':
                 signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'FA_OR_ATR_TRAIL':
+                signal = self.detect_fa_or_atr_trail_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
@@ -1829,4 +1874,49 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting impulse-fade signals for {epic}: {e}")
+            return None
+
+    def detect_fa_or_atr_trail_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the FA_OR_ATR_TRAIL strategy (15m only)."""
+        try:
+            strategy = self._get_strategy('FA_OR_ATR_TRAIL')
+            if strategy is None:
+                return None
+
+            df_15m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='15m',
+                lookback_hours=336,
+            )
+            df_15m = self._filter_incomplete_candles(df_15m, '15m')
+            if df_15m is None or df_15m.empty:
+                self.logger.debug(f"[FA_OR_ATR_TRAIL] No 15m data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_15m,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_15m)
+
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting FA_OR_ATR_TRAIL signals for {epic}: {e}")
             return None

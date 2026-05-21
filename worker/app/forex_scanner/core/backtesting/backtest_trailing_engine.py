@@ -299,6 +299,9 @@ class BacktestTrailingEngine:
         future_df: pd.DataFrame,
         signal: Dict[str, Any],
     ) -> Dict[str, Any]:
+        if signal.get('fa_or_atr_trail_enabled'):
+            return self._run_fa_or_atr_trail_simulation(entry_price, is_long, future_df, signal)
+
         cfg = self._pair_cfg
         point_value = 1.0 / self.pip_multiplier
 
@@ -487,6 +490,116 @@ class BacktestTrailingEngine:
             's1_triggered':   s1_done,
             's2_triggered':   s2_done,
             's3_triggered':   s3_active,
+        }
+
+    def _run_fa_or_atr_trail_simulation(
+        self,
+        entry_price: float,
+        is_long: bool,
+        future_df: pd.DataFrame,
+        signal: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        """Simulate the simple ATR trail used by FA_OR_ATR_TRAIL research.
+
+        The strategy supplies initial risk/target and trail trigger/distance in
+        pips. This branch intentionally avoids the generic multi-stage trailing
+        config so backtests reflect the strategy-specific exit model.
+        """
+        point_value = 1.0 / self.pip_multiplier
+        entry_cost = (self.spread_pips + self.slippage_pips) * point_value
+        fill_price = entry_price + entry_cost if is_long else entry_price - entry_cost
+
+        risk_pips = float(signal.get('risk_pips') or 0)
+        reward_pips = float(signal.get('reward_pips') or 0)
+        trail_trigger_pips = float(signal.get('fa_or_trail_trigger_pips') or 0)
+        trail_distance_pips = float(signal.get('fa_or_trail_distance_pips') or 0)
+
+        if risk_pips <= 0:
+            risk_pips = 12.0
+        if reward_pips <= 0:
+            reward_pips = 20.0
+        if trail_trigger_pips <= 0:
+            trail_trigger_pips = max(1.0, reward_pips * 0.125)
+        if trail_distance_pips <= 0:
+            trail_distance_pips = max(0.5, risk_pips * 0.0833)
+
+        if is_long:
+            current_sl = fill_price - risk_pips * point_value
+            current_tp = fill_price + reward_pips * point_value
+            best_price = fill_price
+        else:
+            current_sl = fill_price + risk_pips * point_value
+            current_tp = fill_price - reward_pips * point_value
+            best_price = fill_price
+
+        best_profit = 0.0
+        worst_loss = 0.0
+        exit_pnl = 0.0
+        exit_bar = None
+        exit_reason = 'TIMEOUT'
+        stage_reached = 0
+
+        for bar_idx, (_, bar) in enumerate(future_df.iterrows()):
+            high = float(bar['high'])
+            low = float(bar['low'])
+
+            if is_long:
+                best_price = max(best_price, high)
+                best_profit = max(best_profit, (best_price - fill_price) * self.pip_multiplier)
+                worst_loss = max(worst_loss, (fill_price - low) * self.pip_multiplier)
+                if best_profit >= trail_trigger_pips:
+                    current_sl = max(current_sl, best_price - trail_distance_pips * point_value)
+                    stage_reached = 1
+                if low <= current_sl:
+                    exit_pnl = (current_sl - fill_price) * self.pip_multiplier
+                    exit_reason = 'TRAILING_STOP' if stage_reached else 'STOP_LOSS'
+                    exit_bar = bar_idx
+                    break
+                if high >= current_tp:
+                    exit_pnl = (current_tp - fill_price) * self.pip_multiplier
+                    exit_reason = 'PROFIT_TARGET'
+                    exit_bar = bar_idx
+                    break
+            else:
+                best_price = min(best_price, low)
+                best_profit = max(best_profit, (fill_price - best_price) * self.pip_multiplier)
+                worst_loss = max(worst_loss, (high - fill_price) * self.pip_multiplier)
+                if best_profit >= trail_trigger_pips:
+                    current_sl = min(current_sl, best_price + trail_distance_pips * point_value)
+                    stage_reached = 1
+                if high >= current_sl:
+                    exit_pnl = (fill_price - current_sl) * self.pip_multiplier
+                    exit_reason = 'TRAILING_STOP' if stage_reached else 'STOP_LOSS'
+                    exit_bar = bar_idx
+                    break
+                if low <= current_tp:
+                    exit_pnl = (fill_price - current_tp) * self.pip_multiplier
+                    exit_reason = 'PROFIT_TARGET'
+                    exit_bar = bar_idx
+                    break
+
+        if exit_bar is None and len(future_df) > 0:
+            final_price = float(future_df.iloc[-1]['close'])
+            exit_pnl = (final_price - fill_price if is_long else fill_price - final_price) * self.pip_multiplier
+
+        final_profit = max(exit_pnl, 0.0)
+        final_loss = abs(min(exit_pnl, 0.0))
+        return {
+            'trade_outcome': _classify_outcome(exit_reason, exit_pnl),
+            'exit_reason': exit_reason,
+            'exit_pnl': exit_pnl,
+            'exit_bar': exit_bar,
+            'final_profit': final_profit,
+            'final_loss': final_loss,
+            'best_profit_pips': best_profit,
+            'worst_loss_pips': worst_loss,
+            'is_winner': exit_pnl > 0,
+            'is_loser': exit_pnl < 0,
+            'be_triggered': stage_reached > 0,
+            's1_triggered': stage_reached > 0,
+            's2_triggered': False,
+            's3_triggered': False,
+            'stage_reached': stage_reached,
         }
 
 

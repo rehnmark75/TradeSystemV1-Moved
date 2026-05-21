@@ -23,6 +23,7 @@ from .range_fade_strategy import (
     create_eurusd_range_fade_strategy,  # back-compat alias
 )
 from .smc_momentum_strategy import SMCMomentumStrategy
+from .fa_or_atr_trail_strategy import FAORATRTrailStrategy, create_fa_or_atr_trail_strategy
 from .signal_result import SignalResult
 from .strategy_registry import (
     StrategyRegistry,
@@ -48,6 +49,8 @@ __all__ = [
     'create_range_fade_strategy',
     'create_eurusd_range_fade_strategy',  # back-compat alias
     'SMCMomentumStrategy',
+    'FAORATRTrailStrategy',
+    'create_fa_or_atr_trail_strategy',
 
     # Registry
     'StrategyRegistry',
