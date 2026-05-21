@@ -1655,7 +1655,12 @@ class TradeValidator:
             nearest_support = details.get('nearest_support')
             nearest_resistance = details.get('nearest_resistance')
             current_price = details.get('current_price')
-            pip_size = 0.01 if 'JPY' in epic.upper() else 0.0001
+            if 'CFEGOLD' in epic.upper():
+                pip_size = 0.1
+            elif 'JPY' in epic.upper():
+                pip_size = 0.01
+            else:
+                pip_size = 0.0001
 
             # Calculate distances in pips
             distance_to_support_pips = 0.0

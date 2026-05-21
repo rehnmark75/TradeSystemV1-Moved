@@ -426,6 +426,7 @@ class XAUGoldStrategy(StrategyInterface):
             "epic": epic,
             "pair": pair or "XAUUSD",
             "entry_price": entry_price,
+            "price": entry_price,
             "stop_loss_pips": float(sl_pips),
             "take_profit_pips": float(tp_pips),
             # BacktestScanner reads risk_pips / reward_pips for trade simulation;
@@ -684,6 +685,18 @@ class XAUGoldStrategy(StrategyInterface):
                 filtered_candidates += 1
                 continue
 
+            # range_break_2h in Asian session (23-06 UTC) while ranging is low-edge noise
+            hour_utc = current_time.hour
+            is_asian = hour_utc >= 23 or hour_utc <= 5
+            if cand["setup"] == "range_break_2h" and regime == "ranging" and is_asian:
+                self._reject(
+                    epic,
+                    "range_break_asian_ranging",
+                    f"hour_utc={hour_utc} regime={regime}",
+                )
+                filtered_candidates += 1
+                continue
+
             score = float(cand["base"])
             aligned = (direction == "BUY" and htf_bias == "bullish") or (
                 direction == "SELL" and htf_bias == "bearish"
@@ -782,6 +795,7 @@ class XAUGoldStrategy(StrategyInterface):
             "epic": epic,
             "pair": pair or "XAUUSD",
             "entry_price": close,
+            "price": close,
             "stop_loss_pips": float(sl_pips),
             "take_profit_pips": float(tp_pips),
             "risk_pips": float(sl_pips),

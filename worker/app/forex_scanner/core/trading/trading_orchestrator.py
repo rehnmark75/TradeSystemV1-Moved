@@ -851,6 +851,83 @@ class TradingOrchestrator:
             self.logger.debug(f"Intelligence score calculation error: {e}")
             return 0.5  # Neutral score
 
+    def _mark_alert_monitor_only(self, alert_id: int, signal: Dict) -> None:
+        """Stamp an already-saved alert as monitor-only even if execution is disabled."""
+        if not alert_id or not self.alert_history:
+            return
+
+        try:
+            strategy_name = signal.get('strategy', 'Unknown')
+            reason = f"monitor_only_strategy:{strategy_name}"
+
+            def update_operation(conn, cursor):
+                cursor.execute(
+                    """
+                    UPDATE alert_history
+                       SET order_status = COALESCE(order_status, 'pending'),
+                           block_reason = COALESCE(block_reason, %s),
+                           notes = CASE
+                               WHEN notes IS NULL OR notes = '' THEN %s
+                               WHEN notes NOT LIKE '%%[RAW_MONITOR_PERSISTED]%%' THEN notes || ' ' || %s
+                               ELSE notes
+                           END,
+                           updated_at = NOW()
+                     WHERE id = %s
+                    """,
+                    (
+                        reason,
+                        "[RAW_MONITOR_PERSISTED]",
+                        "[RAW_MONITOR_PERSISTED]",
+                        alert_id,
+                    ),
+                )
+
+            self.alert_history._execute_with_connection(
+                update_operation,
+                "mark monitor-only alert",
+            )
+        except Exception as e:
+            self.logger.warning(f"⚠️ Failed to mark alert #{alert_id} monitor-only: {e}")
+
+    def _persist_raw_monitor_only_signals(self, signals: List[Dict]) -> int:
+        """
+        Persist strategy-level monitor-only signals immediately after raw detection.
+
+        Monitor-only strategies are forward-test data. Saving them before intelligence,
+        validation, risk, and Claude prevents accepted strategy signals from being
+        lost when later execution-oriented stages short-circuit.
+        """
+        if not signals:
+            return 0
+
+        saved_count = 0
+        for signal in signals:
+            if not isinstance(signal, dict):
+                continue
+            if not signal.get('monitor_only', False):
+                continue
+            if signal.get('alert_id'):
+                continue
+
+            signal['data_source'] = signal.get('data_source', 'raw_monitor_signal')
+            signal['monitor_persistence_stage'] = 'raw_detection'
+            signal['claude_analyzed'] = signal.get('claude_analyzed', False)
+            signal['claude_skip_reason'] = signal.get('claude_skip_reason', 'signal_monitor_only')
+
+            alert_id = self._save_signal_to_database(signal)
+            if alert_id:
+                self._mark_alert_monitor_only(alert_id, signal)
+                saved_count += 1
+                self.logger.info(
+                    "💾 Raw monitor-only signal persisted before filters: %s %s (%s) alert_id=%s",
+                    signal.get('epic', 'Unknown'),
+                    signal.get('signal_type', signal.get('signal', 'Unknown')),
+                    signal.get('strategy', 'Unknown'),
+                    alert_id,
+                )
+
+        return saved_count
+
     def _save_signal_to_database(self, signal: Dict, claude_result = None) -> Optional[int]:
         """
         Save signal to alert_history table with ALL columns populated
@@ -1286,6 +1363,15 @@ class TradingOrchestrator:
                 if not isinstance(signal, dict):
                     self.logger.error(f"❌ Signal #{i+1} is not a dictionary, got {type(signal)}: {signal}")
                     continue
+
+                if signal.get('alert_id'):
+                    saved_count += 1
+                    self.logger.debug(
+                        "✅ Signal #%d already saved with ID: %s",
+                        i + 1,
+                        signal.get('alert_id'),
+                    )
+                    continue
                 
                 # Get Claude result for this signal if available
                 claude_result = claude_results.get(i)
@@ -1374,6 +1460,14 @@ class TradingOrchestrator:
                 return []
             
             self.logger.info(f"📊 Scanner detected {len(raw_signals)} signals")
+
+            raw_monitor_saved = self._persist_raw_monitor_only_signals(raw_signals)
+            if raw_monitor_saved:
+                self.logger.info(
+                    "💾 Raw monitor-only persistence: %d/%d scanner signals saved before filters",
+                    raw_monitor_saved,
+                    len(raw_signals),
+                )
             
             # 2. Apply INTELLIGENCE FILTERING (orchestrator responsibility)
             intelligence_filtered_signals = self._apply_intelligence_filtering(raw_signals)
