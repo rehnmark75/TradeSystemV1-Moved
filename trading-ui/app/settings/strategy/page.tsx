@@ -77,7 +77,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade" | "fa-or-atr-trail";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade" | "fa-or-atr-trail" | "donchian-turtle";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -209,6 +209,22 @@ const STRATEGIES: Record<StrategyKey, {
       "USDJPY Filter",
       "Indicators",
       "Risk Management",
+      "Cooldown",
+      "Other",
+    ],
+  },
+  "donchian-turtle": {
+    label: "DONCHIAN_TURTLE",
+    apiBase: "/api/settings/strategy/donchian-turtle",
+    draftKey: "donchian-turtle-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/donchian-turtle/effective",
+    columnEndpoint: "/api/settings/strategy/donchian-turtle/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "Channel Parameters",
+      "Direction",
+      "Risk Management",
+      "Confidence",
       "Cooldown",
       "Other",
     ],
@@ -897,7 +913,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade", "fa-or-atr-trail"] as const).map((key) => {
+        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade", "fa-or-atr-trail", "donchian-turtle"] as const).map((key) => {
           const summary = statusSummary[key];
           const counts = summary?.counts;
           return (

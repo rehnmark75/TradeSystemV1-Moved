@@ -1403,6 +1403,21 @@ class BacktestScanner:
                 logger=self.logger,
             )
             self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP) ready for {epic} (SMC_MOMENTUM)")
+        elif strategy == 'DONCHIAN_TURTLE':
+            # DONCHIAN_TURTLE uses fixed SL/TP — the intraday scalp trailing configs
+            # (BE at ~15 pips, Stage 1 at ~25 pips) would exit trend trades far too
+            # early. Hard SL = 2×ATR (~50 pips) and TP = 200-pip safety cap; trades
+            # run until one is hit. 500 bars = ~21 days on 1H, enough for multi-day trends.
+            simulator = TrailingStopSimulator(
+                epic=epic,
+                target_pips=200.0,      # placeholder — overridden per-signal via reward_pips
+                initial_stop_pips=50.0, # placeholder — overridden per-signal via risk_pips
+                max_bars=500,
+                use_fixed_sl_tp=True,
+                strategy=strategy,
+                logger=self.logger,
+            )
+            self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP, 500 bars) ready for {epic} (DONCHIAN_TURTLE)")
         else:
             # New engine: uses live PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS.
             # Scalp mode uses SCALP_TRAILING_CONFIGS with full progressive trailing

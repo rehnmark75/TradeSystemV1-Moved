@@ -84,6 +84,15 @@ const STRATEGIES = {
     defaultGlobalEnabled: false,
     defaultMonitorOnly: true,
   },
+  "donchian-turtle": {
+    label: "DONCHIAN_TURTLE",
+    globalTable: "donchian_turtle_global_config",
+    overrideTable: "donchian_turtle_pair_overrides",
+    configSetColumn: undefined,
+    overrideConfigJoin: false,
+    defaultGlobalEnabled: false,
+    defaultMonitorOnly: true,
+  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
