@@ -30,6 +30,14 @@ except ImportError:
         get_donchian_turtle_config,
     )
 
+try:
+    from ...alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment,misc]
+
 from .strategy_registry import StrategyInterface, register_strategy
 
 logger = logging.getLogger(__name__)
@@ -88,10 +96,44 @@ class DonchianTurtleStrategy(StrategyInterface):
     def __init__(self, config_override: Optional[Dict[str, Any]] = None, **kwargs) -> None:
         self._config_override = config_override
         self._last_signal_time: Dict[str, datetime] = {}
+        self._rej_mgr = None
+        db_manager = kwargs.get("db_manager")
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("DONCHIAN_TURTLE", db_manager)
+            except Exception as exc:
+                logger.warning("[DONCHIAN_TURTLE] rejection manager init failed: %s", exc)
 
     # ------------------------------------------------------------------
     # StrategyInterface
     # ------------------------------------------------------------------
+
+    def flush_rejections(self) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
+
+    def _reject(
+        self,
+        stage: str,
+        reason: str,
+        epic: str,
+        pair: str,
+        direction: Optional[str] = None,
+        hour_utc: Optional[int] = None,
+        scan_timestamp: Optional[datetime] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        if self._rej_mgr is not None:
+            self._rej_mgr.reject(
+                stage=stage,
+                reason=reason,
+                epic=epic,
+                pair=pair,
+                direction=direction,
+                hour_utc=hour_utc,
+                scan_timestamp=scan_timestamp,
+                details=details,
+            )
 
     def detect_signal(
         self,
@@ -121,15 +163,21 @@ class DonchianTurtleStrategy(StrategyInterface):
             if current_timestamp is None:
                 current_timestamp = datetime.now(timezone.utc)
 
+            hour_utc = current_timestamp.hour
+
             # Cooldown check
             cooldown_minutes = config.get_pair_cooldown_minutes(epic)
             last = self._last_signal_time.get(epic)
             if last is not None:
                 elapsed = (current_timestamp - last).total_seconds() / 60
                 if elapsed < cooldown_minutes:
-                    logger.debug(
-                        "[DONCHIAN_TURTLE] %s cooldown: %.0f / %d min",
-                        pair, elapsed, cooldown_minutes,
+                    self._reject(
+                        "COOLDOWN",
+                        f"elapsed={elapsed:.0f}m < {cooldown_minutes}m",
+                        epic, pair,
+                        hour_utc=hour_utc,
+                        scan_timestamp=current_timestamp,
+                        details={"elapsed_minutes": round(elapsed, 1), "cooldown_minutes": cooldown_minutes},
                     )
                     return None
 
@@ -141,15 +189,17 @@ class DonchianTurtleStrategy(StrategyInterface):
 
             min_bars = max(entry_bars, exit_bars, atr_period) + 5
             if df_trigger is None or len(df_trigger) < min_bars:
-                logger.debug(
-                    "[DONCHIAN_TURTLE] %s insufficient data (%d bars, need %d)",
-                    pair, len(df_trigger) if df_trigger is not None else 0, min_bars,
+                n = len(df_trigger) if df_trigger is not None else 0
+                self._reject(
+                    "INSUFFICIENT_DATA",
+                    f"bars={n} < required={min_bars}",
+                    epic, pair,
+                    hour_utc=hour_utc,
+                    scan_timestamp=current_timestamp,
+                    details={"bars_available": n, "bars_required": min_bars},
                 )
                 return None
 
-            # Use all rows up to and including the last completed candle.
-            # iloc[-1] is the most recent bar (may be incomplete intra-hour);
-            # entry logic reads the last closed bar via channel computed on prior bars.
             close = df_trigger["close"].iloc[-1]
             high_series = df_trigger["high"]
             low_series = df_trigger["low"]
@@ -162,14 +212,19 @@ class DonchianTurtleStrategy(StrategyInterface):
             atr_series = _compute_atr(df_trigger, atr_period)
             atr_val = atr_series.iloc[-1]
             if pd.isna(atr_val) or atr_val <= 0:
-                logger.debug("[DONCHIAN_TURTLE] %s ATR unavailable", pair)
+                self._reject(
+                    "ATR_UNAVAILABLE",
+                    "ATR is NaN or zero",
+                    epic, pair,
+                    hour_utc=hour_utc,
+                    scan_timestamp=current_timestamp,
+                )
                 return None
 
             atr_pips = atr_val / pip
             sl_pips = round(atr_mult * atr_pips, 1)
-            tp_pips = config.get_pair_fixed_take_profit(epic)  # safety cap; trailing exits first
+            tp_pips = config.get_pair_fixed_take_profit(epic)
 
-            # Clamp SL to at least the config fallback (avoid absurdly tight stops on low-vol bars)
             fallback_sl = config.get_pair_fixed_stop_loss(epic)
             sl_pips = max(sl_pips, fallback_sl * 0.5)
 
@@ -188,9 +243,18 @@ class DonchianTurtleStrategy(StrategyInterface):
                 target_price = entry_price - tp_pips * pip
 
             if direction is None:
-                logger.debug(
-                    "[DONCHIAN_TURTLE] %s no breakout (close=%.5f entry_high=%.5f entry_low=%.5f)",
-                    pair, close, entry_high, entry_low,
+                self._reject(
+                    "NO_BREAKOUT",
+                    f"close={close:.5f} inside channel [{entry_low:.5f}, {entry_high:.5f}]",
+                    epic, pair,
+                    hour_utc=hour_utc,
+                    scan_timestamp=current_timestamp,
+                    details={
+                        "close": round(close, 5),
+                        "entry_high": round(entry_high, 5),
+                        "entry_low": round(entry_low, 5),
+                        "long_only": config.long_only,
+                    },
                 )
                 return None
 
@@ -200,9 +264,19 @@ class DonchianTurtleStrategy(StrategyInterface):
             min_conf = config.get_pair_min_confidence(epic)
             max_conf = config.get_pair_max_confidence(epic)
             if not (min_conf <= confidence <= max_conf):
-                logger.debug(
-                    "[DONCHIAN_TURTLE] %s confidence %.2f outside [%.2f, %.2f]",
-                    pair, confidence, min_conf, max_conf,
+                self._reject(
+                    "CONFIDENCE_GATE",
+                    f"confidence={confidence:.3f} outside [{min_conf:.3f}, {max_conf:.3f}]",
+                    epic, pair,
+                    direction=direction,
+                    hour_utc=hour_utc,
+                    scan_timestamp=current_timestamp,
+                    details={
+                        "confidence": confidence,
+                        "min_confidence": min_conf,
+                        "max_confidence": max_conf,
+                        "atr_pips": round(atr_pips, 1),
+                    },
                 )
                 return None
 
@@ -253,10 +327,8 @@ class DonchianTurtleStrategy(StrategyInterface):
     ) -> float:
         """
         Simple confidence score (0–1):
-        - Breakout strength relative to channel width
+        - Breakout strength relative to ATR
         - Recent candle body momentum alignment
-
-        Confidence is used only as a soft gate against very weak breakouts.
         """
         try:
             close = df["close"].iloc[-1]
@@ -279,7 +351,7 @@ class DonchianTurtleStrategy(StrategyInterface):
             strength = min(breakout_pips / max(atr_pips * 0.5, 1.0), 1.0)
             confidence = 0.50 + 0.40 * strength
 
-            # Momentum: last 3 candles aligned with direction adds +0.10
+            # Momentum: last 3 candles aligned with direction adds +0.05
             bodies = (df["close"] - df["open"]).iloc[-4:-1]
             if direction == "BUY" and (bodies > 0).sum() >= 2:
                 confidence += 0.05
