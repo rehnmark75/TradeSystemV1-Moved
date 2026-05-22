@@ -39,6 +39,7 @@ try:
     from services.smc_momentum_config_service import SMCMomentumConfigService
     from services.impulse_fade_config_service import ImpulseFadeConfigService
     from services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
+    from services.donchian_turtle_config_service import DonchianTurtleConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -47,6 +48,7 @@ except ImportError:
     from forex_scanner.services.smc_momentum_config_service import SMCMomentumConfigService
     from forex_scanner.services.impulse_fade_config_service import ImpulseFadeConfigService
     from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
+    from forex_scanner.services.donchian_turtle_config_service import DonchianTurtleConfigService
 
 
 class SignalDetector:
@@ -129,6 +131,10 @@ class SignalDetector:
             self.logger.warning(f"⚠️ FA_OR_ATR_TRAIL config check failed; disabled: {e}")
             self.fa_or_atr_trail_enabled = False
 
+        # DONCHIAN_TURTLE runs concurrently (1H channel breakout, trend-following).
+        # Per-pair is_enabled flags in donchian_turtle_pair_overrides gate execution.
+        self.donchian_turtle_enabled = True
+
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
         self._strategy_router = None
@@ -195,6 +201,7 @@ class SignalDetector:
                 'XAU_GOLD': 'xau_gold_strategy',
                 'IMPULSE_FADE': 'impulse_fade_strategy',
                 'FA_OR_ATR_TRAIL': 'fa_or_atr_trail_strategy',
+                'DONCHIAN_TURTLE': 'donchian_turtle_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -259,9 +266,9 @@ class SignalDetector:
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
-        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM', 'IMPULSE_FADE', 'FA_OR_ATR_TRAIL'}
+        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM', 'IMPULSE_FADE', 'FA_OR_ATR_TRAIL', 'DONCHIAN_TURTLE'}
         if canonical not in known:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM, IMPULSE_FADE, FA_OR_ATR_TRAIL."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM, IMPULSE_FADE, FA_OR_ATR_TRAIL, DONCHIAN_TURTLE."
 
         if canonical == 'SMC_SIMPLE':
             # SMC Simple has its own lazy-load path; just arm the flag.
@@ -966,6 +973,30 @@ class SignalDetector:
                 except Exception as e:
                     self.logger.error(f"❌ [FA_OR_ATR_TRAIL] Error for {epic}: {e}")
                     individual_results['fa_or_atr_trail'] = None
+
+            if (self.donchian_turtle_enabled
+                    and not self._is_gold_epic(epic)
+                    and DonchianTurtleConfigService.get_instance().get_config().is_pair_enabled(epic)):
+                try:
+                    self.logger.debug(f"🔍 [DONCHIAN_TURTLE] Starting detection for {epic}")
+                    _dt_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _dt_ts = _dt_bt_time if _dt_bt_time is not None else datetime.now(timezone.utc)
+                    dt_signal = self.detect_donchian_turtle_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_dt_ts
+                    )
+                    individual_results['donchian_turtle'] = dt_signal
+                    if dt_signal:
+                        all_signals.append(dt_signal)
+                        mode = "MONITOR" if dt_signal.get("monitor_only") else "ACTIVE"
+                        self.logger.info(
+                            f"✅ [DONCHIAN_TURTLE:{mode}] Signal detected for {epic}: "
+                            f"{dt_signal.get('signal')} @ {dt_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [DONCHIAN_TURTLE] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [DONCHIAN_TURTLE] Error for {epic}: {e}")
+                    individual_results['donchian_turtle'] = None
 
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
@@ -1919,4 +1950,45 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting FA_OR_ATR_TRAIL signals for {epic}: {e}")
+            return None
+
+    def detect_donchian_turtle_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '1h',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the Donchian Turtle strategy (1H channel breakout)."""
+        try:
+            strategy = self._get_strategy('DONCHIAN_TURTLE')
+            if strategy is None:
+                return None
+
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=200,
+            )
+            if df_1h is None or df_1h.empty:
+                self.logger.debug(f"[DONCHIAN_TURTLE] No 1h data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_1h,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_1h)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting Donchian Turtle signals for {epic}: {e}")
             return None
