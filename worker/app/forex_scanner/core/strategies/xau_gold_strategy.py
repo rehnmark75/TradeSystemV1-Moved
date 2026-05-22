@@ -720,6 +720,15 @@ class XAUGoldStrategy(StrategyInterface):
         plus_di, minus_di = self._compute_di(df_trigger)
         ema_distance_pips = abs(close - float(row["ema_21"])) / pip
 
+        # Apply the same regime gate as the main path — event playbooks must
+        # also respect block_ranging; without this they bypass the gate entirely.
+        if cfg.block_ranging and regime in ("ranging", "neutral"):
+            self._reject(epic, "regime_not_trending", f"adx={adx_val:.1f} regime={regime} (event path)")
+            return None
+        if cfg.block_expansion and regime == "expansion":
+            self._reject(epic, "regime_expansion", f"atr_pct={atr_pct:.1f} (event path)")
+            return None
+
         scored = []
         filtered_candidates = 0
         for cand in candidates:
