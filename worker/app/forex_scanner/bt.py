@@ -71,7 +71,7 @@ def main():
             # Handle strategy shortcuts
             # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
             # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
-            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF", "FA_OR_ATR_TRAIL", "FAOR", "FA_OR", "ATR_TRAIL"]:
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF", "FA_OR_ATR_TRAIL", "FAOR", "FA_OR", "ATR_TRAIL", "DONCHIAN_TURTLE", "DONCHIAN", "TURTLE"]:
                 strategy_mapping = {
                     "SMC": "SMC_SIMPLE",
                     "SMC_SIMPLE": "SMC_SIMPLE",
@@ -93,6 +93,9 @@ def main():
                     "FAOR": "FA_OR_ATR_TRAIL",
                     "FA_OR": "FA_OR_ATR_TRAIL",
                     "ATR_TRAIL": "FA_OR_ATR_TRAIL",
+                    "DONCHIAN_TURTLE": "DONCHIAN_TURTLE",
+                    "DONCHIAN": "DONCHIAN_TURTLE",
+                    "TURTLE": "DONCHIAN_TURTLE",
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])

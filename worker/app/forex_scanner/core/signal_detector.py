@@ -1083,6 +1083,8 @@ class SignalDetector:
                 signal = self.detect_impulse_fade_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'FA_OR_ATR_TRAIL':
                 signal = self.detect_fa_or_atr_trail_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'DONCHIAN_TURTLE':
+                signal = self.detect_donchian_turtle_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
