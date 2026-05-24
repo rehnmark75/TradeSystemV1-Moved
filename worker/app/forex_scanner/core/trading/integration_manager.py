@@ -192,9 +192,6 @@ class IntegrationManager:
         CLAUDE_API_KEY is the ONLY setting from config.py (it's a secret/env variable).
         """
         try:
-            # ENHANCED: Import from unified alerts interface (handles modular/legacy automatically)
-            from alerts import ClaudeAnalyzer
-
             # Check if API key is available (from env_config - secrets only)
             api_key = getattr(env_config, 'CLAUDE_API_KEY', None)
             if not api_key:
@@ -202,13 +199,22 @@ class IntegrationManager:
                 self.integration_status['claude']['available'] = False
                 return
 
-            # ENHANCED: Initialize with database-driven configuration
-            self.claude_analyzer = ClaudeAnalyzer(
-                api_key=api_key,
-                auto_save=self._scanner_cfg.claude_auto_save,
-                save_directory=self._scanner_cfg.claude_save_directory,
-                data_fetcher=self.data_fetcher  # For vision analysis chart generation
-            )
+            # Route to agent analyzer when configured
+            raw_mode = (self._scanner_cfg.claude_analysis_mode or '').lower()
+            if raw_mode == 'agent':
+                from alerts.agent_analyzer import AgentClaudeAnalyzer
+                self.claude_analyzer = AgentClaudeAnalyzer(api_key=api_key)
+                self.logger.info("🤖 Claude analyzer: agent mode (agentic tool-use loop)")
+            else:
+                # ENHANCED: Import from unified alerts interface (handles modular/legacy automatically)
+                from alerts import ClaudeAnalyzer
+                # ENHANCED: Initialize with database-driven configuration
+                self.claude_analyzer = ClaudeAnalyzer(
+                    api_key=api_key,
+                    auto_save=self._scanner_cfg.claude_auto_save,
+                    save_directory=self._scanner_cfg.claude_save_directory,
+                    data_fetcher=self.data_fetcher  # For vision analysis chart generation
+                )
             
             # ENHANCED: Check which implementation was loaded
             implementation = getattr(self.claude_analyzer, 'implementation', 'unknown')
