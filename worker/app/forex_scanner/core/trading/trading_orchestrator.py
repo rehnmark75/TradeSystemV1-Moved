@@ -250,6 +250,12 @@ class TradingOrchestrator:
             if claude_analysis_mode is not None
             else self._scanner_cfg.claude_analysis_mode
         )
+
+        # Agent mode must run through IntegrationManager regardless of require_claude_approval
+        # or scalp overrides — it is a shadow observer and never blocks trades.
+        if self.claude_analysis_mode == 'agent':
+            self.enable_claude = True
+            self.logger.info("🤖 [AGENT MODE] Claude enabled in IntegrationManager for shadow analysis")
         self.claude_analysis_level = (
             claude_analysis_level
             if claude_analysis_level is not None

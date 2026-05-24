@@ -146,14 +146,15 @@ class IntegrationManager:
         Now supports advanced analysis modes
         """
         mode_mapping = {
-            'basic': 'minimal',     
-            'minimal': 'minimal',   
-            'simple': 'minimal',    
-            'full': 'full',         
-            'detailed': 'full',     
+            'basic': 'minimal',
+            'minimal': 'minimal',
+            'simple': 'minimal',
+            'full': 'full',
+            'detailed': 'full',
             'complete': 'full',
-            'institutional': 'full',  # NEW: Institutional mode maps to full analysis
-            'advanced': 'full'        # NEW: Advanced mode maps to full analysis
+            'institutional': 'full',
+            'advanced': 'full',
+            'agent': 'agent',     # Agent mode: agentic tool-use loop
         }
         
         mapped_mode = mode_mapping.get(config_mode.lower(), 'minimal')
@@ -344,11 +345,12 @@ class IntegrationManager:
         because TradeValidator already handles Claude analysis in that case.
         """
         # CRITICAL GUARD: Prevent duplicate Claude calls
-        # If TradeValidator handles Claude (require_claude_approval=True), skip this entirely
-        # Use database config (no fallback)
+        # If TradeValidator handles Claude (require_claude_approval=True), skip this entirely.
+        # Exception: agent mode is a shadow observer — it runs regardless and never blocks trades.
         require_claude_approval = self._scanner_cfg.require_claude_approval
+        agent_mode_active = self.claude_analysis_mode == 'agent'
 
-        if require_claude_approval:
+        if require_claude_approval and not agent_mode_active:
             self.logger.debug("🚫 IntegrationManager Claude BLOCKED: TradeValidator handles Claude analysis")
             return signals
 
@@ -365,8 +367,11 @@ class IntegrationManager:
             return signals
 
         # Guard: Skip Claude for disabled pairs and monitor-only pairs (saves API cost)
-        # SMC pair-table check applies only to SMC strategies; other strategies enforce
-        # their own enabled/monitor flags via their own config services upstream.
+        # Exception: agent mode runs on ALL enabled pairs including monitor-only — shadow
+        # observation is the point, and monitor_only pairs are exactly the ones we want to
+        # validate before promoting them.
+        agent_mode = self.claude_analysis_mode == 'agent'
+
         enabled_signals = []
         skipped_signals = []
         if _SMC_CONFIG_AVAILABLE:
@@ -377,15 +382,17 @@ class IntegrationManager:
                     strat = str(sig.get('strategy', '')).upper()
                     is_smc_simple = strat == 'SMC_SIMPLE'
                     skip_reason = None
-                    # Strategy-level monitor_only flag (set by strategy itself; covers any strategy)
-                    if sig.get('monitor_only', False):
-                        skip_reason = 'signal_monitor_only'
-                    elif is_smc_simple and epic and not smc_cfg.is_pair_enabled(epic):
+                    if not agent_mode:
+                        # Legacy path: skip monitor_only pairs to save API cost
+                        if sig.get('monitor_only', False):
+                            skip_reason = 'signal_monitor_only'
+                        elif is_smc_simple and epic:
+                            pair_overrides = smc_cfg._pair_overrides.get(epic, {})
+                            if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
+                                skip_reason = 'monitor_only'
+                    # Always skip truly disabled pairs regardless of mode
+                    if not skip_reason and is_smc_simple and epic and not smc_cfg.is_pair_enabled(epic):
                         skip_reason = 'pair_not_enabled'
-                    elif is_smc_simple and epic:
-                        pair_overrides = smc_cfg._pair_overrides.get(epic, {})
-                        if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
-                            skip_reason = 'monitor_only'
                     if skip_reason:
                         skipped_sig = sig.copy()
                         skipped_sig.update({'claude_analyzed': False, 'claude_skip_reason': skip_reason})
