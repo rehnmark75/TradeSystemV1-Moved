@@ -39,13 +39,15 @@ def pair_session_wr_recent(
     hour_bucket: int,
     regime: str,
     lookback_days: int = 30,
+    strategy: str = "",
 ) -> Dict:
     """
-    Return WR, PF, avg PnL, and trade count for (epic, hour_bucket, regime)
+    Return WR, PF, avg PnL, and trade count for (epic, hour_bucket, regime, strategy)
     over the last `lookback_days` days, joined from alert_history + trade_log.
 
     hour_bucket is the UTC hour of the signal (0-23). Pass -1 to aggregate all hours.
-    Pass empty string for regime to aggregate all regimes.
+    Pass empty string for regime or strategy to aggregate across all values.
+    Always pass strategy to avoid mixing results from different strategies on the same pair.
     """
     try:
         conn = _get_forex_conn()
@@ -55,6 +57,10 @@ def pair_session_wr_recent(
 
         conditions = ["ah.epic = %s", "ah.alert_timestamp >= %s"]
         params: List[Any] = [epic, since]
+
+        if strategy:
+            conditions.append("ah.strategy ILIKE %s")
+            params.append(strategy)
 
         if hour_bucket >= 0:
             conditions.append("EXTRACT(HOUR FROM ah.alert_timestamp)::int = %s")
@@ -102,6 +108,7 @@ def pair_session_wr_recent(
 
         return {
             "epic": epic,
+            "strategy": strategy or "all",
             "hour_bucket": hour_bucket if hour_bucket >= 0 else "all",
             "regime": regime or "all",
             "lookback_days": lookback_days,
@@ -294,28 +301,58 @@ def prior_pair_pnl_today(epic: str) -> Dict:
         return {"error": str(e)}
 
 
-def get_pair_config(epic: str) -> Dict:
+# Allowlist: strategy name → its pair_overrides table. Used by get_pair_config.
+_STRATEGY_CONFIG_TABLE: Dict[str, str] = {
+    "SMC_SIMPLE":       "smc_simple_pair_overrides",
+    "XAU_GOLD":         "xau_gold_pair_overrides",
+    "IMPULSE_FADE":     "impulse_fade_pair_overrides",
+    "DONCHIAN_TURTLE":  "donchian_turtle_pair_overrides",
+    "MEAN_REVERSION":   "mean_reversion_pair_overrides",
+    "SMC_MOMENTUM":     "smc_momentum_pair_overrides",
+}
+
+
+def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
     """
-    Return the current smc_simple_pair_overrides row for `epic`,
-    including monitor_only flag, SL/TP, and min/max confidence.
+    Return the pair configuration row for `epic` from the correct strategy table.
+
+    Always pass `strategy` so the correct table is queried — each strategy has its
+    own pair_overrides table (smc_simple_pair_overrides, xau_gold_pair_overrides,
+    impulse_fade_pair_overrides, donchian_turtle_pair_overrides,
+    mean_reversion_pair_overrides, smc_momentum_pair_overrides).
+    Returns monitor_only flag, SL/TP pips, and confidence thresholds.
     """
+    table = _STRATEGY_CONFIG_TABLE.get(strategy.upper())
+    if not table:
+        return {"error": f"Unknown strategy '{strategy}'. Known: {list(_STRATEGY_CONFIG_TABLE)}", "epic": epic}
+
     try:
         conn = _get_strategy_conn()
         cur = conn.cursor()
 
+        # smc_simple_pair_overrides stores monitor_only inside the JSONB parameter_overrides
+        # column rather than as a direct boolean column. All other strategy tables use a
+        # direct boolean monitor_only column.
+        if table == "smc_simple_pair_overrides":
+            monitor_col = "(parameter_overrides->>'monitor_only')::boolean"
+        else:
+            monitor_col = "monitor_only"
+
+        # Table name comes from an allowlist — no injection risk.
         cur.execute(
-            """
+            f"""
             SELECT
                 epic,
                 is_enabled,
-                parameter_overrides->>'monitor_only'        AS monitor_only,
+                {monitor_col}           AS monitor_only,
                 fixed_stop_loss_pips,
                 fixed_take_profit_pips,
                 min_confidence,
                 max_confidence,
                 parameter_overrides
-            FROM smc_simple_pair_overrides
+            FROM {table}
             WHERE epic = %s
+            ORDER BY id DESC
             LIMIT 1
             """,
             (epic,),
@@ -325,7 +362,7 @@ def get_pair_config(epic: str) -> Dict:
         conn.close()
 
         if not row:
-            return {"epic": epic, "found": False}
+            return {"epic": epic, "strategy": strategy, "found": False, "table": table}
 
         overrides = row[7]
         if isinstance(overrides, str):
@@ -336,14 +373,16 @@ def get_pair_config(epic: str) -> Dict:
 
         return {
             "epic": row[0],
+            "strategy": strategy,
+            "table": table,
             "found": True,
             "is_enabled": row[1],
-            "monitor_only": row[2] == "true" if row[2] else False,
+            "monitor_only": bool(row[2]) if row[2] is not None else False,
             "fixed_stop_loss_pips": row[3],
             "fixed_take_profit_pips": row[4],
             "min_confidence": float(row[5]) if row[5] else None,
             "max_confidence": float(row[6]) if row[6] else None,
-            "parameter_overrides": overrides,
+            "parameter_overrides": overrides or {},
         }
 
     except Exception as e:
@@ -429,7 +468,9 @@ TOOL_DEFINITIONS = [
         "name": "pair_session_wr_recent",
         "description": (
             "Look up historical win rate, profit factor, and average PnL for a specific "
-            "pair × UTC hour × market regime over a recent lookback window. "
+            "pair × strategy × UTC hour × market regime over a recent lookback window. "
+            "Always pass the strategy name so results are scoped to this strategy only — "
+            "IMPULSE_FADE losses on EURJPY at hour 20 must not contaminate SMC_SIMPLE WR at hour 8. "
             "Use this first to detect adverse environments before approving a signal. "
             "Key warning: XAU_GOLD in 'ranging' regime has historically shown <25% WR."
         ),
@@ -450,6 +491,14 @@ TOOL_DEFINITIONS = [
                     "description": "Days of history to include. Default 30.",
                     "default": 30,
                 },
+                "strategy": {
+                    "type": "string",
+                    "description": (
+                        "Strategy name to filter by, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
+                        "'DONCHIAN_TURTLE', 'MEAN_REVERSION'. Empty string aggregates all strategies (not recommended)."
+                    ),
+                    "default": "",
+                },
             },
             "required": ["epic", "hour_bucket", "regime"],
         },
@@ -458,6 +507,8 @@ TOOL_DEFINITIONS = [
         "name": "rejection_density",
         "description": (
             "Count recent SMC structure rejections for a pair over the last N hours. "
+            "NOTE: this table is populated by SMC_SIMPLE only — do not use for XAU_GOLD, "
+            "IMPULSE_FADE, DONCHIAN_TURTLE, or MEAN_REVERSION signals. "
             "High rejection density (>30 rejections, many distinct reasons) indicates "
             "choppy structure — a warning sign for new entries on EURUSD and JPY pairs."
         ),
@@ -516,16 +567,26 @@ TOOL_DEFINITIONS = [
     {
         "name": "get_pair_config",
         "description": (
-            "Retrieve the current pair configuration from smc_simple_pair_overrides: "
-            "whether it is monitor-only, its SL/TP pips, and confidence thresholds. "
+            "Retrieve the pair configuration for a specific strategy: monitor_only flag, "
+            "SL/TP pips, and confidence thresholds. Each strategy has its own config table — "
+            "always pass the strategy name so the correct table is queried. "
+            "Supported strategies: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
+            "MEAN_REVERSION, SMC_MOMENTUM. "
             "Call this to verify the pair is actively traded before approving."
         ),
         "input_schema": {
             "type": "object",
             "properties": {
                 "epic": {"type": "string", "description": "Full IG epic"},
+                "strategy": {
+                    "type": "string",
+                    "description": (
+                        "Strategy name, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
+                        "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM'. Required."
+                    ),
+                },
             },
-            "required": ["epic"],
+            "required": ["epic", "strategy"],
         },
     },
     {
