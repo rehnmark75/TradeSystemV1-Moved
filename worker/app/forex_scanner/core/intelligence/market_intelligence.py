@@ -987,7 +987,7 @@ class MarketIntelligenceEngine:
                 'london': {
                     'volatility': 'high',
                     'characteristics': 'High volatility, strong trend potential',  # FIXED: Added missing key
-                    'preferred_pairs': ['EURUSD', 'GBPUSD', 'EURGBP'],
+                    'preferred_pairs': ['EURUSD', 'GBPUSD'],
                     'strategy_adjustment': 'Trend following, breakout strategies',
                     'risk_level': 'medium'
                 },

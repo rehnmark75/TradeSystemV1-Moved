@@ -585,7 +585,6 @@ Signal Display Format:
         'NZDUSD': 'CS.D.NZDUSD.MINI.IP',
         'EURJPY': 'CS.D.EURJPY.MINI.IP',
         'AUDJPY': 'CS.D.AUDJPY.MINI.IP',
-        'EURGBP': 'CS.D.EURGBP.MINI.IP',
         'XAUUSD': 'CS.D.CFEGOLD.CEE.IP',
     }
 

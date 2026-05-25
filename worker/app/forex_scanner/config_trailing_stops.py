@@ -242,17 +242,6 @@ PAIR_TRAILING_CONFIGS = {
         'break_even_trigger_points': 14,  # v2.5.0: 14 (was 7) - more breathing room
     },
 
-    'CS.D.EURGBP.MINI.IP': {
-        'stage1_trigger_points': 15,      # v2.5.0: 15 (was 11) - let trade develop more
-        'stage1_lock_points': 6,          # v2.5.0: 6 (was 2) - lock more profit
-        'stage2_trigger_points': 20,      # v2.5.0: 20 (was 14) - closer to TP target
-        'stage2_lock_points': 13,         # v2.5.0: 13 (was 9) - protect 60%+ of target
-        'stage3_trigger_points': 22,      # v2.5.0: 22 (was 16) - let trade run
-        'stage3_atr_multiplier': 0.75,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 14,
-        'break_even_trigger_points': 15,  # v2.5.0: 15 (was 12) - more breathing room
-    },
 }
 
 # =============================================================================

@@ -78,7 +78,6 @@ const PAIRS = [
   "AUDUSD",
   "NZDUSD",
   "USDCAD",
-  "EURGBP",
   "EURJPY",
   "GBPJPY",
   "AUDJPY",

@@ -77,7 +77,6 @@ try:
         INSTRUMENT_FX_MAJORS_NZD_USD,
         INSTRUMENT_FX_CROSSES_EUR_JPY,
         INSTRUMENT_FX_CROSSES_AUD_JPY,
-        INSTRUMENT_FX_CROSSES_EUR_GBP,
         INSTRUMENT_FX_METALS_XAU_USD,
         INSTRUMENT_FX_METALS_XAG_USD,
     )
@@ -112,8 +111,6 @@ EPIC_MAPPINGS: List[EpicMapping] = [
     # JPY crosses
     EpicMapping("CS.D.EURJPY.MINI.IP", INSTRUMENT_FX_CROSSES_EUR_JPY, "EURJPY"),
     EpicMapping("CS.D.AUDJPY.MINI.IP", INSTRUMENT_FX_CROSSES_AUD_JPY, "AUDJPY"),
-    # Other crosses
-    EpicMapping("CS.D.EURGBP.MINI.IP", INSTRUMENT_FX_CROSSES_EUR_GBP, "EURGBP"),
     # Metals — distinct epics to avoid mixing Dukascopy pricing with IG live series
     EpicMapping("CS.D.CFEGOLD.DUKAS.IP",  INSTRUMENT_FX_METALS_XAU_USD, "XAUUSD (gold)"),
     EpicMapping("CS.D.CFDSILVER.DUKAS.IP", INSTRUMENT_FX_METALS_XAG_USD, "XAGUSD (silver)"),

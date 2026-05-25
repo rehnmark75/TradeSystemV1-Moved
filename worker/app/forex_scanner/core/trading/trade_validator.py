@@ -2048,7 +2048,6 @@ class TradeValidator:
             'AUDUSD': 1.2,     # ADDED: AUD/USD specific multiplier
             'NZDUSD': 1.2,     # ADDED: NZD/USD specific multiplier
             'USDCAD': 1.2,     # ADDED: USD/CAD specific multiplier
-            'EURGBP': 1.0,     # Typically less volatile (kept same)
         }
         
         # Extract pair from epic

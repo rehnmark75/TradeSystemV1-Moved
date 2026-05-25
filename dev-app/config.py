@@ -61,7 +61,6 @@ BROKER_EPIC_MAP = {
     'AUD/USD': 'CS.D.AUDUSD.MINI.IP',
     'NZD/USD': 'CS.D.NZDUSD.MINI.IP',
     'GBP/JPY': 'CS.D.GBPJPY.MINI.IP',
-    'EUR/GBP': 'CS.D.EURGBP.MINI.IP'
 }
 
 # Default epics for testing and examples
@@ -546,22 +545,6 @@ PAIR_TRAILING_CONFIGS = {
         'partial_close_size': 0.4,
     },
 
-    'CS.D.EURGBP.MINI.IP': {
-        'early_breakeven_trigger_points': 10,
-        'early_breakeven_buffer_points': 3,
-        'stage1_trigger_points': 14,
-        'stage1_lock_points': 8,
-        'stage2_trigger_points': 25,
-        'stage2_lock_points': 15,
-        'stage3_trigger_points': 35,
-        'stage3_atr_multiplier': 2.0,
-        'stage3_min_distance': 8,
-        'min_trail_distance': 8,
-        'break_even_trigger_points': 12,
-        'enable_partial_close': False,
-        'partial_close_trigger_points': 18,
-        'partial_close_size': 0.4,
-    },
 }
 
 # =============================================================================
