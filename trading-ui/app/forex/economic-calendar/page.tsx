@@ -125,6 +125,22 @@ function impactClass(level: CalendarEvent["impact_level"], critical?: boolean) {
   return "good";
 }
 
+type UpcomingHoliday = {
+  date: string;
+  label: string;
+  type: "fixed" | "recurring";
+  days_until: number;
+};
+
+const HOLIDAY_WINDOW_OPTIONS = [30, 60, 90, 180];
+
+const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function formatHolidayDate(dateStr: string) {
+  const d = new Date(dateStr + "T00:00:00");
+  return `${DOW[d.getDay()]} ${d.toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" })}`;
+}
+
 export default function EconomicCalendarPage() {
   const { environment } = useEnvironment();
   const [pair, setPair] = useState("EURUSD");
@@ -133,6 +149,10 @@ export default function EconomicCalendarPage() {
   const [payload, setPayload] = useState<Payload | null>(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const [holidays, setHolidays] = useState<UpcomingHoliday[]>([]);
+  const [holidayDays, setHolidayDays] = useState(90);
+  const [holidayExpanded, setHolidayExpanded] = useState(false);
 
   const loadData = () => {
     setLoading(true);
@@ -157,6 +177,13 @@ export default function EconomicCalendarPage() {
   useEffect(() => {
     loadData();
   }, [pair, hours, impact, environment]);
+
+  useEffect(() => {
+    fetch(`/trading/api/market/holidays?days=${holidayDays}`)
+      .then((r) => r.json())
+      .then((data) => setHolidays(data.holidays ?? []))
+      .catch(() => setHolidays([]));
+  }, [holidayDays]);
 
   const topRiskPairs = useMemo(
     () => (payload?.pair_risks ?? []).slice(0, 6),
@@ -486,6 +513,94 @@ export default function EconomicCalendarPage() {
             </div>
           </>
         )}
+
+        <div
+          className="panel table-panel"
+          style={{ marginTop: "1rem", border: "1px solid rgba(255,255,255,0.06)", background: "rgba(255,255,255,0.02)" }}
+        >
+          <div
+            style={{ display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer" }}
+            onClick={() => setHolidayExpanded((v) => !v)}
+          >
+            <div className="chart-title" style={{ marginBottom: 0 }}>
+              Upcoming Trade Blocks{" "}
+              {holidays.length > 0 && (
+                <span className="bad" style={{ marginLeft: "0.5rem", fontSize: "0.8rem" }}>
+                  {holidays.length} blocked {holidays.length === 1 ? "day" : "days"}
+                </span>
+              )}
+            </div>
+            <span style={{ color: "var(--muted)", fontSize: "0.9rem" }}>{holidayExpanded ? "▲" : "▼"}</span>
+          </div>
+
+          {holidayExpanded && (
+            <div style={{ marginTop: "0.9rem" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", marginBottom: "0.9rem" }}>
+                <label style={{ color: "var(--muted)", fontSize: "0.88rem" }}>Window</label>
+                <select
+                  value={holidayDays}
+                  onChange={(e) => setHolidayDays(Number(e.target.value))}
+                  style={{ fontSize: "0.88rem" }}
+                >
+                  {HOLIDAY_WINDOW_OPTIONS.map((d) => (
+                    <option key={d} value={d}>
+                      Next {d} days
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {holidays.length === 0 ? (
+                <div className="chart-placeholder">No trade-blocking holidays in the next {holidayDays} days.</div>
+              ) : (
+                <div>
+                  {holidays.map((h) => (
+                    <div
+                      key={h.date}
+                      style={{
+                        display: "flex",
+                        justifyContent: "space-between",
+                        alignItems: "center",
+                        padding: "0.7rem 0",
+                        borderBottom: "1px solid rgba(255,255,255,0.06)"
+                      }}
+                    >
+                      <div>
+                        <span style={{ fontWeight: 600, color: "var(--ink)" }}>{formatHolidayDate(h.date)}</span>
+                        <span style={{ color: "var(--muted)", marginLeft: "0.75rem" }}>{h.label}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: "0.5rem", alignItems: "center" }}>
+                        {h.days_until === 0 ? (
+                          <span className="bad">today</span>
+                        ) : (
+                          <span className="neutral">in {h.days_until}d</span>
+                        )}
+                        {h.type === "recurring" && (
+                          <span className="muted" style={{ fontSize: "0.78rem", color: "var(--muted)" }}>
+                            recurring
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              <div
+                style={{
+                  marginTop: "0.75rem",
+                  paddingTop: "0.75rem",
+                  borderTop: "1px solid rgba(255,255,255,0.06)",
+                  color: "var(--muted)",
+                  fontSize: "0.85rem",
+                  lineHeight: 1.5
+                }}
+              >
+                Dates sourced from LPF <code>date_block</code> rules. All signals on these days are hard-blocked (penalty 1.00) regardless of pair or strategy.
+              </div>
+            </div>
+          )}
+        </div>
       </div>
     </div>
   );
