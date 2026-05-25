@@ -377,6 +377,14 @@ class ImpulseFadeStrategy(StrategyInterface):
                 entry_price, stop_loss, take_profit, confidence,
             )
 
+            try:
+                from forex_scanner.core.strategies.helpers.smc_performance_metrics import enrich_signal_with_performance_metrics
+                signal = enrich_signal_with_performance_metrics(
+                    signal, df_entry=None, df_trigger=df_trigger, df_htf=df_4h, epic=epic or pair_key, logger=self.logger
+                )
+            except Exception as _pm_exc:
+                self.logger.warning("[IMPULSE_FADE] Performance metrics failed: %s", _pm_exc)
+
             return signal
 
         except Exception as exc:

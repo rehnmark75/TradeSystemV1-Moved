@@ -677,6 +677,55 @@ class SMCPerformanceMetricsCalculator:
         return metrics
 
 
+def enrich_signal_with_performance_metrics(
+    signal: Dict,
+    df_entry: Optional[pd.DataFrame],
+    df_trigger: Optional[pd.DataFrame],
+    df_htf: Optional[pd.DataFrame],
+    epic: str,
+    logger: Optional[logging.Logger] = None,
+) -> Dict:
+    """
+    Enrich a signal dict with performance_metrics and top-level indicator fields.
+
+    Strategy-agnostic: accepts any (entry, trigger, htf) dataframe triple.
+    Pass None for timeframes the strategy doesn't use.
+    """
+    try:
+        calculator = get_performance_metrics_calculator(logger)
+        metrics = calculator.calculate_metrics(
+            df_entry=df_entry,
+            df_trigger=df_trigger,
+            df_htf=df_htf,
+            signal_data=signal,
+            epic=epic,
+        )
+        signal['performance_metrics'] = metrics.to_json_safe()
+        signal['efficiency_ratio'] = metrics.efficiency_ratio
+        signal['market_regime_detected'] = metrics.market_regime
+        signal['regime_confidence'] = metrics.regime_confidence
+        signal['bb_width_percentile'] = metrics.bb_width_percentile
+        signal['atr_percentile'] = metrics.atr_percentile
+        signal['volatility_state'] = metrics.volatility_state
+        signal['entry_quality_score'] = metrics.entry_quality_score
+        signal['distance_from_optimal_fib'] = metrics.distance_from_optimal_fib
+        signal['entry_candle_momentum'] = metrics.entry_candle_momentum
+        signal['mtf_confluence_score'] = metrics.mtf_confluence_score
+        signal['htf_candle_position'] = metrics.htf_candle_position
+        signal['all_timeframes_aligned'] = metrics.all_timeframes_aligned
+        signal['volume_at_swing_break'] = metrics.volume_at_swing_break
+        signal['volume_trend'] = metrics.volume_trend
+        signal['volume_quality_score'] = metrics.volume_quality_score
+        signal['adx_value'] = metrics.adx_value
+        signal['adx_plus_di'] = metrics.adx_plus_di
+        signal['adx_minus_di'] = metrics.adx_minus_di
+        signal['adx_trend_strength'] = metrics.adx_trend_strength
+    except Exception as e:
+        if logger:
+            logger.warning(f"[perf_metrics] Failed to enrich {epic}: {e}")
+    return signal
+
+
 # Singleton instance for reuse
 _calculator_instance: Optional[SMCPerformanceMetricsCalculator] = None
 

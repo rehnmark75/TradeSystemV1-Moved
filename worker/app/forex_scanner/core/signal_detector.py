@@ -1401,6 +1401,19 @@ class SignalDetector:
                     signal['strategy_indicators'] = dataframe_indicators
                     self.logger.debug(f"📊 Enhanced signal with {len(all_indicators)} indicators + swing/SR data")
 
+            # Fallback: ensure every signal has performance_metrics regardless of strategy.
+            # Strategies that already enriched themselves (SMC_SIMPLE, RANGE_FADE, etc.) are
+            # skipped by the guard — this only fires for strategies that forgot to call it.
+            if signal.get('performance_metrics') is None:
+                try:
+                    from forex_scanner.core.strategies.helpers.smc_performance_metrics import enrich_signal_with_performance_metrics
+                    epic = signal.get('epic', '')
+                    signal = enrich_signal_with_performance_metrics(
+                        signal, df_entry=None, df_trigger=df, df_htf=None, epic=epic, logger=self.logger
+                    )
+                except Exception as _pm_exc:
+                    self.logger.warning(f"[signal_detector] Performance metrics fallback failed: {_pm_exc}")
+
             return signal
 
         except Exception as e:

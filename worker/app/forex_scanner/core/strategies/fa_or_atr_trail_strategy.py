@@ -265,7 +265,7 @@ class FAORATRTrailStrategy(StrategyInterface):
 
         monitor_only = cfg.is_monitor_only(epic) if cfg else bool(self.config_override.get("monitor_only", False))
 
-        return {
+        signal = {
             "signal": direction,
             "signal_type": signal_type,
             "strategy": STRATEGY_NAME,
@@ -317,6 +317,14 @@ class FAORATRTrailStrategy(StrategyInterface):
                 "usd_jpy_atr_floor_pips": usd_jpy_atr_floor_pips if epic == "CS.D.USDJPY.MINI.IP" else None,
             },
         }
+        try:
+            from forex_scanner.core.strategies.helpers.smc_performance_metrics import enrich_signal_with_performance_metrics
+            signal = enrich_signal_with_performance_metrics(
+                signal, df_entry=None, df_trigger=df_trigger, df_htf=None, epic=epic, logger=self.logger
+            )
+        except Exception as _pm_exc:
+            self.logger.warning("[FA_OR_ATR_TRAIL] Performance metrics failed: %s", _pm_exc)
+        return signal
 
     def _log_rejection(
         self,

@@ -307,6 +307,13 @@ class DonchianTurtleStrategy(StrategyInterface):
                 pair, direction, entry_price, sl_pips, tp_pips, atr_pips, confidence,
                 "(MONITOR)" if monitor_only else "(ACTIVE)",
             )
+            try:
+                from forex_scanner.core.strategies.helpers.smc_performance_metrics import enrich_signal_with_performance_metrics
+                signal = enrich_signal_with_performance_metrics(
+                    signal, df_entry=None, df_trigger=df_trigger, df_htf=None, epic=epic, logger=logger
+                )
+            except Exception as _pm_exc:
+                logger.warning("[DONCHIAN_TURTLE] Performance metrics failed: %s", _pm_exc)
             return signal
 
         except Exception as exc:

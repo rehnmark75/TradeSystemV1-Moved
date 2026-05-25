@@ -483,6 +483,14 @@ class MeanReversionStrategy(StrategyInterface):
                 signal = apply_lpf_gate(signal, self.logger, backtest_timestamp=self._current_timestamp)
             except Exception as _lpf_exc:
                 self.logger.warning("LPF gate error (letting signal through): %s", _lpf_exc)
+        if signal is not None:
+            try:
+                from forex_scanner.core.strategies.helpers.smc_performance_metrics import enrich_signal_with_performance_metrics
+                signal = enrich_signal_with_performance_metrics(
+                    signal, df_entry=df_entry, df_trigger=df_trigger, df_htf=df_4h, epic=epic, logger=self.logger
+                )
+            except Exception as _pm_exc:
+                self.logger.warning("[MEAN_REVERSION] Performance metrics failed: %s", _pm_exc)
         return signal
 
     # ------------------------------------------------------------------

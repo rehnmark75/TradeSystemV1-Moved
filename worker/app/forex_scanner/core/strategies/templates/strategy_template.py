@@ -437,6 +437,21 @@ class TemplateStrategy(StrategyInterface):
             'strategy_indicators': kwargs.get('indicators', {})
         }
 
+        # Enrich with performance metrics (regime, ER, volatility) for filter analysis.
+        # Pass the dataframes available to your strategy; use None for missing timeframes.
+        try:
+            from forex_scanner.core.strategies.helpers.smc_performance_metrics import enrich_signal_with_performance_metrics
+            signal = enrich_signal_with_performance_metrics(
+                signal,
+                df_entry=kwargs.get('df_entry'),    # e.g. 1m or 5m
+                df_trigger=kwargs.get('df_trigger'), # e.g. 5m or 15m
+                df_htf=kwargs.get('df_htf'),         # e.g. 1h or 4h
+                epic=epic,
+                logger=self.logger,
+            )
+        except Exception as _pm_exc:
+            self.logger.warning("Performance metrics enrichment failed: %s", _pm_exc)
+
         return signal
 
     # =========================================================================
