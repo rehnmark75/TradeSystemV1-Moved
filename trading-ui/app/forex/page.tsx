@@ -152,6 +152,14 @@ export default function ForexAnalyticsPage() {
   });
   const [strategyFilter, setStrategyFilter] = useState("All");
   const [pairFilter, setPairFilter] = useState("All");
+  const [holiday, setHoliday] = useState<{ is_holiday: boolean; label: string | null } | null>(null);
+
+  useEffect(() => {
+    fetch("/trading/api/market/holiday", { cache: "no-store" })
+      .then((r) => r.json())
+      .then(setHoliday)
+      .catch(() => {});
+  }, []);
 
   useEffect(() => {
     const controller = new AbortController();
@@ -395,6 +403,13 @@ export default function ForexAnalyticsPage() {
           </div>
         </div>
       </div>
+
+      {holiday?.is_holiday && (
+        <div className="ops-banner" role="alert">
+          📅 <strong>Market Holiday — {holiday.label}</strong>
+          &nbsp;· No trades will be taken today. The scanner is running but all signals are blocked by the LPF holiday filter.
+        </div>
+      )}
 
       <div className="section-tabs">
         <button
