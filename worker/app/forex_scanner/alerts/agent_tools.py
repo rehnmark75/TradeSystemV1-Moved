@@ -309,6 +309,29 @@ _STRATEGY_CONFIG_TABLE: Dict[str, str] = {
     "DONCHIAN_TURTLE":  "donchian_turtle_pair_overrides",
     "MEAN_REVERSION":   "mean_reversion_pair_overrides",
     "SMC_MOMENTUM":     "smc_momentum_pair_overrides",
+    "RANGE_FADE":       "range_fade_pair_overrides",
+    "FA_OR_ATR_TRAIL":  "fa_or_atr_trail_pair_overrides",
+}
+
+# Strategies whose pair_overrides table has a config_set column (demo/live split).
+# Tables without this column have one row per epic and don't need the filter.
+_STRATEGY_HAS_CONFIG_SET: frozenset = frozenset({
+    "XAU_GOLD", "MEAN_REVERSION", "SMC_MOMENTUM",
+    "RANGE_FADE", "FA_OR_ATR_TRAIL",
+})
+
+# Per-strategy SQL fragment for the four "extended" columns that not all tables have.
+# Table names come from the allowlist above so there is no injection risk.
+_STRATEGY_EXTENDED_COLS: Dict[str, str] = {
+    # Most strategies have all four columns (SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE,
+    # DONCHIAN_TURTLE, MEAN_REVERSION):
+    "__default__": "fixed_stop_loss_pips, fixed_take_profit_pips, min_confidence, max_confidence",
+    # RANGE_FADE has SL/TP but no confidence columns:
+    "RANGE_FADE":      "fixed_stop_loss_pips, fixed_take_profit_pips, NULL AS min_confidence, NULL AS max_confidence",
+    # SMC_MOMENTUM has min_confidence only — no SL/TP or max_confidence:
+    "SMC_MOMENTUM":    "NULL AS fixed_stop_loss_pips, NULL AS fixed_take_profit_pips, min_confidence, NULL AS max_confidence",
+    # FA_OR_ATR_TRAIL uses ATR-based stops — none of the four standard columns exist:
+    "FA_OR_ATR_TRAIL": "NULL AS fixed_stop_loss_pips, NULL AS fixed_take_profit_pips, NULL AS min_confidence, NULL AS max_confidence",
 }
 
 
@@ -319,10 +342,12 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
     Always pass `strategy` so the correct table is queried — each strategy has its
     own pair_overrides table (smc_simple_pair_overrides, xau_gold_pair_overrides,
     impulse_fade_pair_overrides, donchian_turtle_pair_overrides,
-    mean_reversion_pair_overrides, smc_momentum_pair_overrides).
+    mean_reversion_pair_overrides, smc_momentum_pair_overrides,
+    range_fade_pair_overrides, fa_or_atr_trail_pair_overrides).
     Returns monitor_only flag, SL/TP pips, and confidence thresholds.
     """
-    table = _STRATEGY_CONFIG_TABLE.get(strategy.upper())
+    strategy_upper = strategy.upper()
+    table = _STRATEGY_CONFIG_TABLE.get(strategy_upper)
     if not table:
         return {"error": f"Unknown strategy '{strategy}'. Known: {list(_STRATEGY_CONFIG_TABLE)}", "epic": epic}
 
@@ -338,20 +363,24 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
         else:
             monitor_col = "monitor_only"
 
-        # Table name comes from an allowlist — no injection risk.
+        extended_cols = _STRATEGY_EXTENDED_COLS.get(strategy_upper, _STRATEGY_EXTENDED_COLS["__default__"])
+
+        # Tables with a config_set column have separate demo/live rows — always
+        # query demo so the agent sees the active trading config, not the live row
+        # (which is always disabled until manual promotion).
+        config_set_clause = "AND config_set = 'demo'" if strategy_upper in _STRATEGY_HAS_CONFIG_SET else ""
+
+        # Table name and extended_cols come from allowlists — no injection risk.
         cur.execute(
             f"""
             SELECT
                 epic,
                 is_enabled,
                 {monitor_col}           AS monitor_only,
-                fixed_stop_loss_pips,
-                fixed_take_profit_pips,
-                min_confidence,
-                max_confidence,
+                {extended_cols},
                 parameter_overrides
             FROM {table}
-            WHERE epic = %s
+            WHERE epic = %s {config_set_clause}
             ORDER BY id DESC
             LIMIT 1
             """,
@@ -472,7 +501,9 @@ TOOL_DEFINITIONS = [
             "Always pass the strategy name so results are scoped to this strategy only — "
             "IMPULSE_FADE losses on EURJPY at hour 20 must not contaminate SMC_SIMPLE WR at hour 8. "
             "Use this first to detect adverse environments before approving a signal. "
-            "Key warning: XAU_GOLD in 'ranging' regime has historically shown <25% WR."
+            "Key warning: XAU_GOLD in 'ranging' regime has historically shown <25% WR. "
+            "Supported strategy values: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
+            "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL."
         ),
         "input_schema": {
             "type": "object",
@@ -495,7 +526,8 @@ TOOL_DEFINITIONS = [
                     "type": "string",
                     "description": (
                         "Strategy name to filter by, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
-                        "'DONCHIAN_TURTLE', 'MEAN_REVERSION'. Empty string aggregates all strategies (not recommended)."
+                        "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM', 'RANGE_FADE', "
+                        "'FA_OR_ATR_TRAIL'. Empty string aggregates all strategies (not recommended)."
                     ),
                     "default": "",
                 },
@@ -571,7 +603,8 @@ TOOL_DEFINITIONS = [
             "SL/TP pips, and confidence thresholds. Each strategy has its own config table — "
             "always pass the strategy name so the correct table is queried. "
             "Supported strategies: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
-            "MEAN_REVERSION, SMC_MOMENTUM. "
+            "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL. "
+            "Note: FA_OR_ATR_TRAIL uses ATR-based stops so fixed_stop_loss_pips will be null. "
             "Call this to verify the pair is actively traded before approving."
         ),
         "input_schema": {
@@ -582,7 +615,8 @@ TOOL_DEFINITIONS = [
                     "type": "string",
                     "description": (
                         "Strategy name, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
-                        "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM'. Required."
+                        "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM', "
+                        "'RANGE_FADE', 'FA_OR_ATR_TRAIL'. Required."
                     ),
                 },
             },
