@@ -63,6 +63,12 @@ type OperationRow = {
   message?: string;
 };
 
+type HolidayStatus = {
+  is_holiday: boolean;
+  label: string | null;
+  date: string | null;
+};
+
 type ForexAlertRow = {
   id: number;
   alert_timestamp: string;
@@ -252,6 +258,7 @@ export default function Page() {
   const [stream, setStream] = useState<StreamSummary | null>(null);
   const [operations, setOperations] = useState<OperationRow[]>([]);
   const [forexAlerts, setForexAlerts] = useState<ForexAlertPayload | null>(null);
+  const [holiday, setHoliday] = useState<HolidayStatus | null>(null);
   const [forexOverview, setForexOverview] = useState<ForexOverviewPayload | null>(null);
   const [forexIntelligence, setForexIntelligence] = useState<ForexMarketIntelligencePayload | null>(null);
   const [broker, setBroker] = useState<BrokerOverview | null>(null);
@@ -278,6 +285,7 @@ export default function Page() {
           fetch(`/trading/api/forex/overview/?days=7&env=${environment}`, { cache: "no-store" }).then((r) => r.json()),
           fetch(`/trading/api/forex/market-intelligence/?env=${environment}`, { cache: "no-store" }).then((r) => r.json()),
           fetch("/trading/api/broker/overview?days=7", { cache: "no-store" }).then((r) => r.json()),
+          fetch("/trading/api/market/holiday", { cache: "no-store" }).then((r) => r.json()),
         ]);
 
         if (cancelled) return;
@@ -291,6 +299,7 @@ export default function Page() {
         setForexOverview(responses[7]);
         setForexIntelligence(responses[8]);
         setBroker(responses[9]);
+        setHoliday(responses[10]);
         setLastLoadedAt(new Date());
       } catch {
         if (cancelled) return;
@@ -366,6 +375,13 @@ export default function Page() {
             <em>{lastLoadedAt ? `Last refresh ${formatRelative(lastLoadedAt.toISOString()).replace(/^Updated /, "")}` : "Click to refresh now"}</em>
           </button>
         </div>
+
+        {holiday?.is_holiday && (
+          <div className="ops-banner" role="alert">
+            📅 <strong>Market Holiday — {holiday.label}</strong>
+            &nbsp;· No trades will be taken today. The scanner is running but all signals are blocked by the LPF holiday filter.
+          </div>
+        )}
 
         <div className="ops-grid-primary">
           <section className="ops-panel">
