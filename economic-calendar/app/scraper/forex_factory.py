@@ -99,18 +99,33 @@ class ForexFactoryScraper:
         if not impact_element:
             return ImpactLevel.LOW
 
-        # Check for CSS classes or icons that indicate impact
-        classes = impact_element.get('class', [])
-        title = impact_element.get('title', '').lower()
+        # Forex Factory uses a child <span class="icon icon--ff-impact-{color}"> inside the impact <td>.
+        # Colors: red=HIGH, ora=MEDIUM, yel=LOW, gra=HOLIDAY/non-economic
+        span = impact_element.find('span')
+        if span:
+            classes_str = ' '.join(span.get('class', []))
+            if 'ff-impact-red' in classes_str:
+                return ImpactLevel.HIGH
+            elif 'ff-impact-ora' in classes_str:
+                return ImpactLevel.MEDIUM
+            elif 'ff-impact-gra' in classes_str:
+                return ImpactLevel.HOLIDAY
+            elif 'ff-impact-yel' in classes_str:
+                return ImpactLevel.LOW
 
-        if 'high' in classes or 'red' in classes or 'high impact' in title:
+        # Fallback: check title attributes on the cell and any children
+        title = impact_element.get('title', '').lower()
+        for child in impact_element.find_all(True):
+            title = title or child.get('title', '').lower()
+
+        if 'high' in title:
             return ImpactLevel.HIGH
-        elif 'medium' in classes or 'orange' in classes or 'medium impact' in title:
+        elif 'medium' in title:
             return ImpactLevel.MEDIUM
-        elif 'holiday' in classes or 'holiday' in title:
+        elif 'holiday' in title:
             return ImpactLevel.HOLIDAY
-        else:
-            return ImpactLevel.LOW
+
+        return ImpactLevel.LOW
 
     def parse_currency(self, currency_element) -> Optional[str]:
         """Parse currency from HTML element"""
@@ -325,8 +340,12 @@ class ForexFactoryScraper:
 
             event_datetime, time_str = self.parse_event_time(time_cell, date_str)
 
-            # Ensure we have a valid event_date - fallback to base_date if parsing failed
-            final_event_date = event_datetime or base_date
+            # Ensure we have a valid event_date - fallback to midnight on the calendar date
+            # (not datetime.now()) so deduplication works consistently across scrape runs
+            if event_datetime:
+                final_event_date = event_datetime
+            else:
+                final_event_date = base_date.replace(hour=0, minute=0, second=0, microsecond=0)
 
             # Extract actual, forecast, and previous values
             actual_cell = row.find('td', class_=re.compile(r'actual'))
