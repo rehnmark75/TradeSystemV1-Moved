@@ -670,6 +670,23 @@ class LossPreventionFilter:
         )
         return True
 
+    def is_holiday_today(self, dt: Optional[datetime] = None) -> Optional[str]:
+        """Return the holiday label if today matches any date_block rule, else None."""
+        if not self._loaded or not self._rules:
+            return None
+        check_dt = dt or datetime.now()
+        ymd = check_dt.strftime('%Y-%m-%d')
+        md = check_dt.strftime('%m-%d')
+        for rule in self._rules:
+            cond = rule.get('condition_config', {})
+            if cond.get('type') != 'date_block':
+                continue
+            explicit_dates = cond.get('dates') or []
+            month_days = cond.get('month_days') or []
+            if ymd in explicit_dates or md in month_days:
+                return cond.get('label', rule.get('rule_name', 'holiday'))
+        return None
+
     def _check_regime_and_efficiency(self, cond: Dict, signal: Dict) -> bool:
         """Block signals when regime is 'trending' but efficiency ratio indicates no real trend."""
         regime = self._get_regime(signal)
