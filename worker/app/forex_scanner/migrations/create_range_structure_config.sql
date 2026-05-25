@@ -172,9 +172,6 @@ VALUES
     ('CS.D.NZDUSD.MINI.IP', 'NZDUSD', FALSE, FALSE, TRUE,
      'Not in v1.0 pilot basket.',
      'Excluded pending larger-n JPY-first validation.'),
-    ('CS.D.GBPJPY.MINI.IP', 'GBPJPY', FALSE, FALSE, TRUE,
-     'Not in v1.0 pilot basket.',
-     'High-vol JPY cross; add only after EUR/AUD/USD-JPY show PF >= 1.3.')
 ON CONFLICT (epic) DO NOTHING;
 
 

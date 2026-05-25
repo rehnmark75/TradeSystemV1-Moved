@@ -874,7 +874,6 @@ def render_global_settings(config: Dict[str, Any]):
             "CS.D.USDCAD.MINI.IP",
             "CS.D.NZDUSD.MINI.IP",
             "CS.D.EURJPY.MINI.IP",
-            "CS.D.GBPJPY.MINI.IP",
             "CS.D.AUDJPY.MINI.IP",
             "CS.D.EURGBP.MINI.IP",
             "CS.D.EURCHF.MINI.IP",

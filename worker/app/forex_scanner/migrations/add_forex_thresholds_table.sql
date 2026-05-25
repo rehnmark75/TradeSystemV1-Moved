@@ -54,10 +54,6 @@ VALUES
      '{"moderate": 0.005, "strong": 0.010, "very_strong": 0.020}',
      'eurjpy_cross', 'EUR/JPY - Corrected from 0.0012'),
     
-    ('CS.D.GBPJPY.MINI.IP', 0.01200000,
-     '{"moderate": 0.005, "strong": 0.010, "very_strong": 0.020}',
-     'gbpjpy_volatile', 'GBP/JPY - Corrected from 0.0015'),
-    
     ('CS.D.AUDJPY.MINI.IP', 0.00800000,
      '{"moderate": 0.005, "strong": 0.010, "very_strong": 0.020}',
      'audjpy_carry', 'AUD/JPY - Corrected from 0.0010'),

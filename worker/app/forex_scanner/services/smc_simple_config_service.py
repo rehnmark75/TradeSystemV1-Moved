@@ -520,7 +520,6 @@ class SMCSimpleConfig:
         'CS.D.USDCAD.MINI.IP': 0.0001,
         'CS.D.NZDUSD.MINI.IP': 0.0001,
         'CS.D.EURJPY.MINI.IP': 0.01,
-        'CS.D.GBPJPY.MINI.IP': 0.01,
         'CS.D.AUDJPY.MINI.IP': 0.01,
     })
 

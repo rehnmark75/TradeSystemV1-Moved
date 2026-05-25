@@ -6598,7 +6598,6 @@ class SMCSimpleStrategy:
             'USDCAD': 'CS.D.USDCAD.MINI.IP',
             'NZDUSD': 'CS.D.NZDUSD.MINI.IP',
             'EURJPY': 'CS.D.EURJPY.MINI.IP',
-            'GBPJPY': 'CS.D.GBPJPY.MINI.IP',
             'AUDJPY': 'CS.D.AUDJPY.MINI.IP',
         }
         return pair_to_epic.get(pair.upper(), f'CS.D.{pair.upper()}.MINI.IP')

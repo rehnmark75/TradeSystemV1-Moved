@@ -639,7 +639,6 @@ async def ig_place_order(
             "CS.D.EURUSD.CEEM.IP": 8,      # Live=2, demo can spike to 6 during volatility
             "CS.D.EURJPY.MINI.IP": 20,      # Live=4, demo=18 (different minimums per environment)
             "CS.D.USDJPY.MINI.IP": 8,       # Live=2
-            "CS.D.GBPJPY.MINI.IP": 20,      # JPY cross
             "CS.D.AUDJPY.MINI.IP": 20,      # JPY cross
             "CS.D.USDCAD.MINI.IP": 8,       # Live=4
             "CS.D.GBPUSD.MINI.IP": 8,       # Live=4

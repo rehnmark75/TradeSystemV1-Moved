@@ -107,7 +107,6 @@ class BacktestRunnerService:
         ('NZDUSD', 'CS.D.NZDUSD.MINI.IP'),
         ('EURJPY', 'CS.D.EURJPY.MINI.IP'),
         ('AUDJPY', 'CS.D.AUDJPY.MINI.IP'),
-        ('GBPJPY', 'CS.D.GBPJPY.MINI.IP'),
     ]
 
     # Strategy options

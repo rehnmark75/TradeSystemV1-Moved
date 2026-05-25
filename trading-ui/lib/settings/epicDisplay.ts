@@ -22,8 +22,6 @@ const EPIC_OVERRIDES: Record<string, string> = {
   "CS.D.EURJPY.MINI.IP": "EUR/JPY",
   "CS.D.AUDJPY.CEEM.IP": "AUD/JPY",
   "CS.D.AUDJPY.MINI.IP": "AUD/JPY",
-  "CS.D.GBPJPY.CEEM.IP": "GBP/JPY",
-  "CS.D.GBPJPY.MINI.IP": "GBP/JPY",
 };
 
 /** Returns a short display name like "EUR/USD" for an IG epic */

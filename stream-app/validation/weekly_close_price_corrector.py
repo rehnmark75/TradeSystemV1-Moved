@@ -55,11 +55,7 @@ class WeeklyClosePriceCorrector:
             'CS.D.NZDUSD.MINI.IP',
             # JPY crosses (lower priority due to data limits)
             'CS.D.EURJPY.MINI.IP',
-            #'CS.D.GBPJPY.MINI.IP',
             'CS.D.AUDJPY.MINI.IP'
-            #'CS.D.CADJPY.MINI.IP',
-            #'CS.D.CHFJPY.MINI.IP',
-            #'CS.D.NZDJPY.MINI.IP'
         ]
         
         # Target timeframes (prioritized: 5m most important for trading)

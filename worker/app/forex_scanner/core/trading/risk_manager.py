@@ -130,7 +130,6 @@ class RiskManager:
             'CS.D.USDJPY.MINI.IP': 0.1,  # Different pip value for JPY pairs
             'CS.D.EURJPY.MINI.IP': 0.1,
             'CS.D.AUDJPY.MINI.IP': 0.1,
-            'CS.D.GBPJPY.MINI.IP': 0.1,
             'default': pip_value_default
         }
 

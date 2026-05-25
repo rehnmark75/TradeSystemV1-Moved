@@ -89,12 +89,6 @@ class ThresholdManager:
                 'pair_type': 'eurjpy_cross',
                 'notes': 'Corrected from 0.0012 (8x increase)'
             },
-            'CS.D.GBPJPY.MINI.IP': {
-                'base_threshold': 0.012,
-                'strength_thresholds': {'moderate': 0.005, 'strong': 0.010, 'very_strong': 0.020},
-                'pair_type': 'gbpjpy_volatile',
-                'notes': 'Corrected from 0.0015 (8x increase)'
-            }
         }
         
         for epic, config in defaults.items():
@@ -235,7 +229,7 @@ class ThresholdManager:
             expected_epics = [
                 'CS.D.EURUSD.CEEM.IP', 'CS.D.GBPUSD.MINI.IP', 'CS.D.AUDUSD.MINI.IP',
                 'CS.D.NZDUSD.MINI.IP', 'CS.D.USDCAD.MINI.IP', 'CS.D.USDCHF.MINI.IP',
-                'CS.D.USDJPY.MINI.IP', 'CS.D.EURJPY.MINI.IP', 'CS.D.GBPJPY.MINI.IP'
+                'CS.D.USDJPY.MINI.IP', 'CS.D.EURJPY.MINI.IP'
             ]
             
             found_epics = []

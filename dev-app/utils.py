@@ -270,7 +270,7 @@ def format_price(price: float, epic: str) -> str:
 
 # Constants for common instruments
 FOREX_MAJORS = ["EURUSD", "GBPUSD", "USDJPY", "USDCHF", "AUDUSD", "USDCAD", "NZDUSD"]
-FOREX_JPY_PAIRS = ["USDJPY", "EURJPY", "GBPJPY", "AUDJPY", "NZDJPY", "CADJPY", "CHFJPY"]
+FOREX_JPY_PAIRS = ["USDJPY", "EURJPY", "AUDJPY"]
 MAJOR_INDICES = ["US500", "US30", "UK100", "GER40", "JPN225", "AUS200"]
 MAJOR_COMMODITIES = ["GOLD", "SILVER", "OIL.WTI", "OIL.BRENT", "COPPER"]
 

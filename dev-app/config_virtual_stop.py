@@ -113,10 +113,6 @@ PAIR_VIRTUAL_SL_CONFIGS = {
         'virtual_sl_pips': 6.0,
         'enabled': True,
     },
-    'CS.D.GBPJPY.MINI.IP': {
-        'virtual_sl_pips': 6.0,
-        'enabled': True,
-    },
     'CS.D.AUDJPY.MINI.IP': {
         'virtual_sl_pips': 6.0,
         'enabled': True,
@@ -210,7 +206,6 @@ PAIR_BASELINE_SPREADS = {
     'CS.D.NZDUSD.MINI.IP': 1.2,   # NZD/USD - wider
     # JPY crosses - wider spreads
     'CS.D.EURJPY.MINI.IP': 1.1,   # EUR/JPY
-    'CS.D.GBPJPY.MINI.IP': 1.8,   # GBP/JPY - widest
     'CS.D.AUDJPY.MINI.IP': 1.3,   # AUD/JPY
 }
 DEFAULT_BASELINE_SPREAD_PIPS = 1.0  # Fallback for unknown pairs
@@ -313,7 +308,6 @@ PAIR_DYNAMIC_VSL_CONFIGS = {
         'target_pips': 12.0,            # TP target
     },
     'CS.D.EURJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
-    'CS.D.GBPJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
     'CS.D.AUDJPY.MINI.IP': DEFAULT_JPY_DYNAMIC_VSL_CONFIG.copy(),
 }
 

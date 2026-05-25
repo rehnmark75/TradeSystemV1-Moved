@@ -82,11 +82,7 @@ BEGIN
             "CS.D.USDCAD.MINI.IP": {"pair": "USDCAD", "pip_multiplier": 10000},
             "CS.D.USDJPY.MINI.IP": {"pair": "USDJPY", "pip_multiplier": 100},
             "CS.D.EURJPY.MINI.IP": {"pair": "EURJPY", "pip_multiplier": 100},
-            "CS.D.GBPJPY.MINI.IP": {"pair": "GBPJPY", "pip_multiplier": 100},
             "CS.D.AUDJPY.MINI.IP": {"pair": "AUDJPY", "pip_multiplier": 100},
-            "CS.D.CADJPY.MINI.IP": {"pair": "CADJPY", "pip_multiplier": 100},
-            "CS.D.CHFJPY.MINI.IP": {"pair": "CHFJPY", "pip_multiplier": 100},
-            "CS.D.NZDJPY.MINI.IP": {"pair": "NZDJPY", "pip_multiplier": 100},
             "CS.D.EURGBP.MINI.IP": {"pair": "EURGBP", "pip_multiplier": 10000},
             "CS.D.EURAUD.MINI.IP": {"pair": "EURAUD", "pip_multiplier": 10000},
             "CS.D.GBPAUD.MINI.IP": {"pair": "GBPAUD", "pip_multiplier": 10000}

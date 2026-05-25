@@ -77,7 +77,6 @@ class EMAConfigServiceSimple:
             'CS.D.USDCHF.MINI.IP': 'default',
             'CS.D.AUDJPY.MINI.IP': 'aggressive',  # This should show 5/13/50
             'CS.D.EURJPY.MINI.IP': 'aggressive',
-            'CS.D.GBPJPY.MINI.IP': 'scalping',
             'CS.D.EURGBP.MINI.IP': 'default',
             'CS.D.EURAUD.MINI.IP': 'swing',
             'CS.D.GBPAUD.MINI.IP': 'scalping'

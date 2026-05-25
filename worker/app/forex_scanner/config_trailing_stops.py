@@ -134,18 +134,6 @@ PAIR_TRAILING_CONFIGS = {
         'break_even_trigger_points': 35,  # v2.7.0: 35 (was 30) - compromise BUY=25/SELL=46
     },
 
-    'CS.D.GBPJPY.MINI.IP': {
-        'stage1_trigger_points': 32,      # v2.5.0: 32 (was 22) - GBP/JPY very volatile
-        'stage1_lock_points': 12,         # v2.5.0: 12 (was 6) - lock more profit
-        'stage2_trigger_points': 42,      # v2.5.0: 42 (was 28) - closer to TP target
-        'stage2_lock_points': 28,         # v2.5.0: 28 (was 18) - protect 60%+ of target
-        'stage3_trigger_points': 50,      # v2.5.0: 50 (was 32) - let trade run
-        'stage3_atr_multiplier': 1.0,
-        'stage3_min_distance': 3,
-        'min_trail_distance': 18,
-        'break_even_trigger_points': 28,  # v2.5.0: 28 (was 18) - GBP/JPY needs room
-    },
-
     'CS.D.GBPAUD.MINI.IP': {
         'stage1_trigger_points': 15,
         'stage1_lock_points': 3,
@@ -214,42 +202,6 @@ PAIR_TRAILING_CONFIGS = {
         'break_even_trigger_points': 28,  # v2.7.0: 28 (was 20) - from MFE/MAE analysis
         # Profit Protection Rule
         'enable_profit_protection': False,
-    },
-
-    'CS.D.CADJPY.MINI.IP': {
-        'stage1_trigger_points': 17,      # v2.5.0: 17 (was 12) - let trade develop more
-        'stage1_lock_points': 6,          # v2.5.0: 6 (was 2) - lock more profit
-        'stage2_trigger_points': 22,      # v2.5.0: 22 (was 16) - closer to TP target
-        'stage2_lock_points': 14,         # v2.5.0: 14 (was 10) - protect 60%+ of target
-        'stage3_trigger_points': 25,      # v2.5.0: 25 (was 18) - let trade run
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 14,  # v2.5.0: 14 (was 7) - more breathing room
-    },
-
-    'CS.D.CHFJPY.MINI.IP': {
-        'stage1_trigger_points': 17,      # v2.5.0: 17 (was 12) - let trade develop more
-        'stage1_lock_points': 6,          # v2.5.0: 6 (was 2) - lock more profit
-        'stage2_trigger_points': 22,      # v2.5.0: 22 (was 16) - closer to TP target
-        'stage2_lock_points': 14,         # v2.5.0: 14 (was 10) - protect 60%+ of target
-        'stage3_trigger_points': 25,      # v2.5.0: 25 (was 18) - let trade run
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 14,  # v2.5.0: 14 (was 7) - more breathing room
-    },
-
-    'CS.D.NZDJPY.MINI.IP': {
-        'stage1_trigger_points': 17,      # v2.5.0: 17 (was 12) - let trade develop more
-        'stage1_lock_points': 6,          # v2.5.0: 6 (was 2) - lock more profit
-        'stage2_trigger_points': 22,      # v2.5.0: 22 (was 16) - closer to TP target
-        'stage2_lock_points': 14,         # v2.5.0: 14 (was 10) - protect 60%+ of target
-        'stage3_trigger_points': 25,      # v2.5.0: 25 (was 18) - let trade run
-        'stage3_atr_multiplier': 0.9,
-        'stage3_min_distance': 2,
-        'min_trail_distance': 15,
-        'break_even_trigger_points': 14,  # v2.5.0: 14 (was 7) - more breathing room
     },
 
     # ========== CROSS PAIRS - Medium-High Volatility ==========

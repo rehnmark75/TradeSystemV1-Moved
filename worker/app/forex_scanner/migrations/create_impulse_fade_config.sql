@@ -91,8 +91,7 @@ VALUES
     ('CS.D.USDCHF.MINI.IP', 'USDCHF', FALSE, FALSE, TRUE),
     ('CS.D.NZDUSD.MINI.IP', 'NZDUSD', FALSE, FALSE, TRUE),
     ('CS.D.EURJPY.MINI.IP', 'EURJPY', FALSE, FALSE, TRUE),
-    ('CS.D.AUDJPY.MINI.IP', 'AUDJPY', FALSE, FALSE, TRUE),
-    ('CS.D.GBPJPY.MINI.IP', 'GBPJPY', FALSE, FALSE, TRUE)
+    ('CS.D.AUDJPY.MINI.IP', 'AUDJPY', FALSE, FALSE, TRUE)
 ON CONFLICT (epic) DO NOTHING;
 
 -- ============================================================================
