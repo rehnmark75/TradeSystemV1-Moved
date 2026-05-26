@@ -1643,6 +1643,7 @@ class TradingOrchestrator:
                             'decision': signal.get('claude_decision'),
                             'approved': signal.get('claude_approved', False),
                             'reason': signal.get('claude_reason'),
+                            'mode': signal.get('claude_mode', self.claude_analysis_mode),
                             'claude_analysis_level': signal.get('claude_analysis_level'),
                             'claude_advanced_prompts': signal.get('claude_advanced_prompts'),
                             'technical_validation_passed': signal.get('claude_technical_validation', False)
