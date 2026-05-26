@@ -649,7 +649,10 @@ class SignalProcessor:
             'range_structure': False,
             'zero_lag': False,
             'zero_lag_squeeze': False,
-            'xau_gold': False
+            'xau_gold': False,
+            'donchian_turtle': False,
+            'smc_momentum': True,
+            'impulse_fade': False
         }
 
         # Check explicit mapping first
