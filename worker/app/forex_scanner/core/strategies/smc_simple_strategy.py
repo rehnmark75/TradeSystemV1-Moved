@@ -1911,12 +1911,7 @@ class SMCSimpleStrategy:
             self.logger.debug(f"🎯 Scalp config applied for {pair}: EMA={pair_scalp_config['ema_period']}, "
                              f"Swing={pair_scalp_config['swing_lookback_bars']}")
 
-        self.logger.info(f"\n{'='*70}")
-        self.logger.info(f"🔍 SMC SIMPLE Strategy v{self.strategy_version} - Signal Detection")
-        self.logger.info(f"   Pair: {pair} ({epic})")
-        self.logger.info(f"   Timeframes: {self.htf_timeframe} (bias) → {self.trigger_tf} (trigger) → {self.entry_tf} (entry)")
-        self.logger.info(f"   df_entry received: {'Yes, ' + str(len(df_entry)) + ' bars' if df_entry is not None else 'NO - None'}")
-        self.logger.info(f"{'='*70}")
+        self.logger.debug(f"[SMC_SIMPLE] {pair} scan — {self.htf_timeframe}→{self.trigger_tf}→{self.entry_tf}")
 
         # Get candle timestamp for session check
         # Try 'start_time' column first (common in backtest data), then fall back to index
@@ -1940,7 +1935,7 @@ class SMCSimpleStrategy:
             if self.session_filter_enabled:
                 session_valid, session_reason = self._check_session(candle_timestamp, epic)
                 if not session_valid:
-                    self.logger.info(f"\n🕐 SESSION FILTER: {session_reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ SESSION: {session_reason}")
                     # Track rejection
                     self._track_rejection(
                         stage='SESSION',
@@ -1951,7 +1946,7 @@ class SMCSimpleStrategy:
                         context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value)
                     )
                     return None
-                self.logger.info(f"\n🕐 SESSION: {session_reason}")
+                self.logger.debug(f"[SMC_SIMPLE] {pair} SESSION: {session_reason}")
 
             # ================================================================
             # PRE-FILTER: Scalp Spread Check (only in scalp mode)
@@ -1959,7 +1954,7 @@ class SMCSimpleStrategy:
             if self.scalp_mode_enabled:
                 spread_valid, spread_reason = self._check_scalp_spread_filter(epic, df_trigger)
                 if not spread_valid:
-                    self.logger.info(f"\n💰 SCALP SPREAD FILTER: {spread_reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ SPREAD: {spread_reason}")
                     self._track_rejection(
                         stage='SCALP_SPREAD',
                         reason=spread_reason,
@@ -1969,7 +1964,7 @@ class SMCSimpleStrategy:
                         context=self._collect_market_context(df_trigger, df_4h, df_entry, pip_value)
                     )
                     return None
-                self.logger.info(f"\n💰 SCALP SPREAD: {spread_reason}")
+                self.logger.debug(f"[SMC_SIMPLE] {pair} SPREAD: {spread_reason}")
 
             # ================================================================
             # PRE-FILTER: Cooldown Check
@@ -1985,7 +1980,7 @@ class SMCSimpleStrategy:
                 candle_dt = candle_timestamp
             cooldown_valid, cooldown_reason = self._check_cooldown(pair, candle_dt)
             if not cooldown_valid:
-                self.logger.info(f"\n⏱️  COOLDOWN: {cooldown_reason}")
+                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ COOLDOWN: {cooldown_reason}")
                 # Track rejection
                 self._track_rejection(
                     stage='COOLDOWN',
@@ -2000,14 +1995,13 @@ class SMCSimpleStrategy:
             # ================================================================
             # TIER 1: 4H EMA Directional Bias
             # ================================================================
-            self.logger.info(f"\n📊 TIER 1: Checking {self.htf_timeframe.upper()} {self.ema_period} EMA Bias")
             slope_status = "ON" if self.ema_slope_validation_enabled else "OFF"
-            self.logger.info(f"   ⚙️  Settings: buffer={self.ema_buffer_pips}p, min_dist={self.min_distance_from_ema}p, slope={slope_status}")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} TIER 1: {self.htf_timeframe.upper()} {self.ema_period} EMA (buf={self.ema_buffer_pips}p, slope={slope_status})")
 
             ema_result = self._check_ema_bias(df_4h, pip_value, epic=epic)
 
             if not ema_result['valid']:
-                self.logger.info(f"   ❌ {ema_result['reason']}")
+                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ T1: {ema_result['reason']}")
                 # v2.16.0: Track EMA slope rejections separately from EMA position rejections
                 rejection_stage = ema_result.get('rejection_type', 'TIER1_EMA')
                 # Build context with EMA slope data if available
@@ -2031,9 +2025,7 @@ class SMCSimpleStrategy:
             ema_distance = ema_result['distance_pips']
             tier1_macd_aligned = ema_result.get('macd_aligned')  # v2.23.0
 
-            self.logger.info(f"   ✅ Direction: {direction}")
-            self.logger.info(f"   ✅ 50 EMA: {ema_value:.5f}")
-            self.logger.info(f"   ✅ Distance: {ema_distance:.1f} pips from EMA")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} T1 ✅ dir={direction} ema={ema_value:.5f} dist={ema_distance:.1f}p")
 
             # ================================================================
             # Extract 4H candle direction for analytics
@@ -2055,14 +2047,13 @@ class SMCSimpleStrategy:
             # ================================================================
             # TIER 2: Swing Break Confirmation (15m or 1H based on config)
             # ================================================================
-            self.logger.info(f"\n📈 TIER 2: Checking {self.trigger_tf} Swing Break")
             dynamic_lb = "ON" if getattr(self, 'dynamic_swing_lookback_enabled', False) else "OFF"
-            self.logger.info(f"   ⚙️  Settings: lookback={self.swing_lookback}, strength={self.swing_strength}, dynamic={dynamic_lb}")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} TIER 2: {self.trigger_tf} swing (lb={self.swing_lookback}, str={self.swing_strength}, dyn={dynamic_lb})")
 
             swing_result = self._check_swing_break(df_trigger, direction, pip_value, epic)
 
             if not swing_result['valid']:
-                self.logger.info(f"   ❌ {swing_result['reason']}")
+                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ T2: {swing_result['reason']}")
                 # Track rejection
                 self._track_rejection(
                     stage='TIER2_SWING',
@@ -2083,19 +2074,12 @@ class SMCSimpleStrategy:
             swing_significance = swing_result.get('swing_significance', 0.5)
             break_candle['swing_significance'] = swing_significance
 
-            self.logger.info(f"   ✅ Swing {'Low' if direction == 'BEAR' else 'High'} Break: {swing_level:.5f}")
-            self.logger.info(f"   ✅ Opposite Swing: {opposite_swing:.5f}")  # v1.6.0
-            self.logger.info(f"   ✅ Body Close Confirmed: Yes")
-            if self.swing_significance_enabled:
-                self.logger.info(f"   📐 Swing significance: {swing_significance:.2f}")
-            if self.volume_enabled:
-                self.logger.info(f"   {'✅' if volume_confirmed else '⚠️ '} Volume Spike: {'Yes' if volume_confirmed else 'No (optional)'}")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} T2 ✅ swing={'L' if direction=='BEAR' else 'H'}={swing_level:.5f} opp={opposite_swing:.5f} sig={swing_significance:.2f} vol={'Y' if volume_confirmed else 'N'}")
 
             # ================================================================
             # TIER 3: Pullback Entry Zone (5m or 15m based on config)
             # ================================================================
-            self.logger.info(f"\n🎯 TIER 3: Checking {self.entry_tf} Pullback Zone")
-            self.logger.info(f"   ⚙️  Settings: fib={self.fib_min*100:.0f}%-{self.fib_max*100:.0f}%, confirm_bars={self.pullback_confirm_bars}")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} TIER 3: {self.entry_tf} pullback (fib={self.fib_min*100:.0f}%-{self.fib_max*100:.0f}%, bars={self.pullback_confirm_bars})")
 
             if df_entry is None or len(df_entry) < 10:
                 self.logger.info(f"   ⚠️  No {self.entry_tf} data available, using {self.trigger_tf} for entry")
@@ -2132,8 +2116,8 @@ class SMCSimpleStrategy:
                     _cont_regime = _cont_metrics.market_regime or 'unknown'
                     _cont_adx = float(_cont_metrics.adx_value or 0.0)
                     _cont_er = float(_cont_metrics.efficiency_ratio or 0.0)
-                    self.logger.info(
-                        f"   📊 Continuation gate: regime={_cont_regime}, "
+                    self.logger.debug(
+                        f"[SMC_SIMPLE] {pair} cont gate: regime={_cont_regime}, "
                         f"ADX={_cont_adx:.1f}, ER={_cont_er:.2f}"
                     )
                 except Exception as _cont_err:
@@ -2180,7 +2164,7 @@ class SMCSimpleStrategy:
                     if pattern:
                         pattern_data = pattern
                         pattern_mode = getattr(self, 'pattern_confirmation_mode', 'MONITORING')
-                        self.logger.info(f"   🎯 PATTERN [{pattern_mode}]: {pattern.get('pattern_type', 'unknown')} "
+                        self.logger.debug(f"   🎯 PATTERN [{pattern_mode}]: {pattern.get('pattern_type', 'unknown')} "
                                        f"(strength: {pattern.get('strength', 0)*100:.0f}%)")
                 except ImportError as e:
                     self.logger.debug(f"   ⚠️ Pattern detection unavailable: {e}")
@@ -2193,13 +2177,13 @@ class SMCSimpleStrategy:
                     if divergence.get('detected'):
                         rsi_divergence_data = divergence
                         div_mode = getattr(self, 'rsi_divergence_mode', 'MONITORING')
-                        self.logger.info(f"   📊 DIVERGENCE [{div_mode}]: {divergence.get('type', 'unknown')} "
+                        self.logger.debug(f"   📊 DIVERGENCE [{div_mode}]: {divergence.get('type', 'unknown')} "
                                        f"(strength: {divergence.get('strength', 0)*100:.0f}%)")
                 except Exception as e:
                     self.logger.warning(f"   ⚠️ RSI divergence detection error: {e}")
 
             if not pullback_result['valid']:
-                self.logger.info(f"   ❌ {pullback_result['reason']}")
+                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ T3: {pullback_result['reason']}")
 
                 # v2.24.0: Check for alternative TIER 3 entries (pattern or divergence)
                 pattern_entry_threshold = getattr(self, 'pattern_entry_min_strength', 0.80)
@@ -2212,7 +2196,7 @@ class SMCSimpleStrategy:
                     pattern_strength = pattern_data.get('strength', 0)
                     if pattern_strength >= pattern_entry_threshold:
                         alternative_entry_type = 'PATTERN'
-                        self.logger.info(f"   ✅ ALTERNATIVE ENTRY: Pattern ({pattern_data.get('pattern_type', 'unknown')}) "
+                        self.logger.debug(f"   ✅ ALTERNATIVE ENTRY: Pattern ({pattern_data.get('pattern_type', 'unknown')}) "
                                        f"strength {pattern_strength*100:.0f}% >= {pattern_entry_threshold*100:.0f}% threshold")
 
                 # Check if divergence can serve as alternative entry
@@ -2220,7 +2204,7 @@ class SMCSimpleStrategy:
                     divergence_strength = rsi_divergence_data.get('strength', 0)
                     if divergence_strength >= divergence_entry_threshold:
                         alternative_entry_type = 'DIVERGENCE'
-                        self.logger.info(f"   ✅ ALTERNATIVE ENTRY: RSI Divergence ({rsi_divergence_data.get('type', 'unknown')}) "
+                        self.logger.debug(f"   ✅ ALTERNATIVE ENTRY: RSI Divergence ({rsi_divergence_data.get('type', 'unknown')}) "
                                        f"strength {divergence_strength*100:.0f}% >= {divergence_entry_threshold*100:.0f}% threshold")
 
                 # If no alternative entry found, reject the signal
@@ -2295,22 +2279,7 @@ class SMCSimpleStrategy:
                     trigger_details['enhanced_trigger'] = trigger_type
 
             # v1.8.0: Log entry type (v2.24.0: added PATTERN/DIVERGENCE; v5.0.0: CONTINUATION)
-            if entry_type == 'CONTINUATION':
-                self.logger.info(f"   ✅ Entry Type: CONTINUATION (trend-following, no pullback required)")
-                self.logger.info(f"   ✅ Beyond Break: {pullback_depth*100:.1f}% | ADX={_cont_adx:.1f}, ER={_cont_er:.2f}, regime={_cont_regime}")
-            elif entry_type == 'MOMENTUM':
-                self.logger.info(f"   ✅ Entry Type: MOMENTUM (continuation)")
-                self.logger.info(f"   ✅ Beyond Break: {pullback_depth*100:.1f}%")
-            elif entry_type == 'PATTERN':
-                self.logger.info(f"   ✅ Entry Type: PATTERN (alternative - {pattern_data.get('pattern_type', 'unknown')})")
-                self.logger.info(f"   ✅ Pattern Strength: {pattern_data.get('strength', 0)*100:.0f}%")
-            elif entry_type == 'DIVERGENCE':
-                self.logger.info(f"   ✅ Entry Type: DIVERGENCE (alternative - {rsi_divergence_data.get('type', 'unknown')})")
-                self.logger.info(f"   ✅ Divergence Strength: {rsi_divergence_data.get('strength', 0)*100:.0f}%")
-            else:
-                self.logger.info(f"   ✅ Entry Type: PULLBACK (retracement)")
-                self.logger.info(f"   ✅ Pullback Depth: {pullback_depth*100:.1f}%")
-            self.logger.info(f"   {'✅' if in_optimal_zone else '⚠️ '} Optimal Zone: {'Yes' if in_optimal_zone else 'No'}")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} T3 ✅ type={entry_type} depth={pullback_depth*100:.1f}% zone={'Y' if in_optimal_zone else 'N'}")
 
             # ================================================================
             # v2.22.0: SCALP ENTRY FILTERS (based on Jan 2026 trade analysis)
@@ -2325,7 +2294,7 @@ class SMCSimpleStrategy:
                 allowed_entry_types = ['MOMENTUM', 'CONTINUATION', 'PATTERN', 'DIVERGENCE']
                 if self.scalp_momentum_only_filter and entry_type not in allowed_entry_types:
                     rejection_reason = f"Scalp filter: Non-momentum entry ({entry_type}) blocked"
-                    self.logger.info(f"   ❌ {rejection_reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                     # Collect full market context including prices for outcome analysis
                     context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                           ema_result=ema_result, swing_result=swing_result,
@@ -2402,7 +2371,7 @@ class SMCSimpleStrategy:
 
                         if should_reject:
                             rejection_reason = f"Scalp filter: HTF bias score {htf_bias_score:.3f} < {htf_bias_threshold} ({interpretation})"
-                            self.logger.info(f"   ❌ {rejection_reason}")
+                            self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                             # Collect full market context including prices for outcome analysis
                             context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                                   ema_result=ema_result, swing_result=swing_result,
@@ -2441,7 +2410,7 @@ class SMCSimpleStrategy:
                 if rsi_value is not None:
                     if direction == 'BULL' and rsi_value > self.scalp_entry_rsi_buy_max:
                         rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} > {self.scalp_entry_rsi_buy_max} (overbought BUY)"
-                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                         # Collect full market context including prices for outcome analysis
                         context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                               ema_result=ema_result, swing_result=swing_result,
@@ -2459,7 +2428,7 @@ class SMCSimpleStrategy:
                         return None
                     if direction == 'BEAR' and rsi_value < self.scalp_entry_rsi_sell_min:
                         rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} < {self.scalp_entry_rsi_sell_min} (oversold SELL)"
-                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                         # Collect full market context including prices for outcome analysis
                         context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                               ema_result=ema_result, swing_result=swing_result,
@@ -2483,7 +2452,7 @@ class SMCSimpleStrategy:
                             rsi_block_zone = self._config_service.get_pair_scalp_rsi_block_buy_zone(epic)
                             if rsi_block_zone and rsi_block_zone[0] <= rsi_value <= rsi_block_zone[1]:
                                 rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} in blocked zone [{rsi_block_zone[0]:.0f}-{rsi_block_zone[1]:.0f}] for BUY"
-                                self.logger.info(f"   ❌ {rejection_reason}")
+                                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                                 context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                                       ema_result=ema_result, swing_result=swing_result,
                                                                       pullback_result=pullback_result, direction=direction)
@@ -2502,7 +2471,7 @@ class SMCSimpleStrategy:
                             rsi_block_zone = self._config_service.get_pair_scalp_rsi_block_sell_zone(epic)
                             if rsi_block_zone and rsi_block_zone[0] <= rsi_value <= rsi_block_zone[1]:
                                 rejection_reason = f"Scalp filter: RSI {rsi_value:.1f} in blocked zone [{rsi_block_zone[0]:.0f}-{rsi_block_zone[1]:.0f}] for SELL"
-                                self.logger.info(f"   ❌ {rejection_reason}")
+                                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                                 context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                                       ema_result=ema_result, swing_result=swing_result,
                                                                       pullback_result=pullback_result, direction=direction)
@@ -2521,7 +2490,7 @@ class SMCSimpleStrategy:
                 # Filter 4: Minimum EMA distance
                 if self.scalp_min_ema_distance_pips > 0 and ema_distance < self.scalp_min_ema_distance_pips:
                     rejection_reason = f"Scalp filter: EMA distance {ema_distance:.1f} < {self.scalp_min_ema_distance_pips} pips"
-                    self.logger.info(f"   ❌ {rejection_reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                     # Collect full market context including prices for outcome analysis
                     context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                           ema_result=ema_result, swing_result=swing_result,
@@ -2612,8 +2581,8 @@ class SMCSimpleStrategy:
                     trigger_details['sweep_score'] = sweep_score
                     trigger_details['sweep_conditions'] = sweep_conditions
 
-                    self.logger.info(
-                        f"   🛡️  Sweep protection: score={sweep_score}/{sweep_min_cond} "
+                    self.logger.debug(
+                        f"[SMC_SIMPLE] {pair} sweep: score={sweep_score}/{sweep_min_cond} "
                         f"[{sweep_detail}] mode={sweep_mode}"
                     )
 
@@ -2623,7 +2592,7 @@ class SMCSimpleStrategy:
                             f"({sweep_detail})"
                         )
                         if sweep_mode == 'block':
-                            self.logger.info(f"   ❌ {rejection_reason}")
+                            self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                             context = self._collect_market_context(
                                 df_trigger, df_4h, entry_df, pip_value,
                                 ema_result=ema_result, swing_result=swing_result,
@@ -2680,7 +2649,7 @@ class SMCSimpleStrategy:
 
                     if not has_rejection_candle:
                         rejection_reason = f"Scalp filter: No rejection candle (min strength {rejection_min_strength*100:.0f}%)"
-                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                         # Collect full market context including prices for outcome analysis
                         context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                               ema_result=ema_result, swing_result=swing_result,
@@ -2703,7 +2672,7 @@ class SMCSimpleStrategy:
                         return None
 
                     # Rejection candle confirmed - log it
-                    self.logger.info(f"   ✅ Rejection candle: {rejection_pattern_type} (strength: {rejection_strength*100:.0f}%)")
+                    self.logger.debug(f"   ✅ Rejection candle: {rejection_pattern_type} (strength: {rejection_strength*100:.0f}%)")
 
                     # Set flag for market order if scalp_use_market_on_rejection is enabled
                     use_market_on_rejection = getattr(self, 'scalp_use_market_on_rejection', True)
@@ -2753,7 +2722,7 @@ class SMCSimpleStrategy:
                 if not candle_aligned:
                     expected_color = 'GREEN' if direction == 'BULL' else 'RED'
                     alignment_reason = f"Entry candle not aligned: {candle_color} candle for {direction} signal (need {expected_color})"
-                    self.logger.info(f"   ❌ {alignment_reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {alignment_reason}")
                     # Collect full market context including prices for outcome analysis
                     context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                           ema_result=ema_result, swing_result=swing_result,
@@ -2780,7 +2749,7 @@ class SMCSimpleStrategy:
                     )
                     return None
 
-                self.logger.info(f"   ✅ Entry candle aligned: {candle_color} candle for {direction} signal")
+                self.logger.debug(f"   ✅ Entry candle aligned: {candle_color} candle for {direction} signal")
 
                 # Set flag for market order if scalp_use_market_on_entry_alignment is enabled
                 use_market_on_alignment = getattr(self, 'scalp_use_market_on_entry_alignment', True)
@@ -2864,7 +2833,7 @@ class SMCSimpleStrategy:
                         condition_context=_condition_hour_gate_context,
                     )
                     if hour_decision.dynamic_released:
-                        self.logger.info(f"   ✅ {hour_decision.reason}")
+                        self.logger.debug(f"   ✅ {hour_decision.reason}")
                     elif hour_decision.probe:
                         self.logger.info(f"   🧪 {hour_decision.reason}")
                     elif hour_decision.condition_blocked or hour_decision.dynamic_blocked or hour_decision.static_blocked:
@@ -2895,7 +2864,7 @@ class SMCSimpleStrategy:
                     self.logger.warning("Dynamic scalp hour gate error; falling back to static blocked hours: %s", hour_gate_exc)
                     if blocked_hours and current_hour in blocked_hours:
                         rejection_reason = f"Scalp filter: Hour {current_hour} UTC is blocked for {pair} (blocked hours: {blocked_hours})"
-                        self.logger.info(f"   ❌ {rejection_reason}")
+                        self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
                         context = self._collect_market_context(df_trigger, df_4h, entry_df, pip_value,
                                                               ema_result=ema_result, swing_result=swing_result,
                                                               pullback_result=pullback_result, direction=direction)
@@ -2917,7 +2886,7 @@ class SMCSimpleStrategy:
             # Based on trade log analysis: 65% of losing trades were at wrong swing levels
             # ================================================================
             if self.swing_proximity_enabled and self.swing_proximity_validator:
-                self.logger.info(f"\n🛡️ TIER 4: Checking Swing Proximity")
+                self.logger.debug(f"[SMC_SIMPLE] {pair} TIER 4: swing proximity check")
 
                 # For BUY: check distance to nearest swing HIGH (resistance) = swing_level (broken high)
                 # For SELL: check distance to nearest swing LOW (support) = swing_level (broken low)
@@ -2939,7 +2908,7 @@ class SMCSimpleStrategy:
                 )
 
                 if not proximity_result['valid']:
-                    self.logger.info(f"   ❌ {proximity_result.get('rejection_reason', 'Too close to swing level')}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {proximity_result.get('rejection_reason', 'Too close to swing level')}")
                     self._track_rejection(
                         stage='TIER4_PROXIMITY',
                         reason=proximity_result.get('rejection_reason', 'Swing proximity validation failed'),
@@ -2960,15 +2929,15 @@ class SMCSimpleStrategy:
 
                 dist_to_swing = proximity_result.get('distance_to_swing')
                 if dist_to_swing is not None:
-                    self.logger.info(f"   ✅ Distance to swing: {dist_to_swing:.1f} pips")
+                    self.logger.debug(f"   ✅ Distance to swing: {dist_to_swing:.1f} pips")
                 else:
-                    self.logger.info(f"   ✅ No nearby opposing swing detected")
+                    self.logger.debug(f"   ✅ No nearby opposing swing detected")
 
             # ================================================================
             # v2.0.0: Calculate Limit Entry Price with Offset
             # v2.17.0: Pass epic for per-pair offset override
             # ================================================================
-            self.logger.info(f"\n📊 LIMIT ORDER: Calculating Entry Offset")
+            self.logger.debug(f"\n📊 LIMIT ORDER: Calculating Entry Offset")
             if self.limit_order_enabled:
                 entry_price, limit_offset_pips = self._calculate_limit_entry(
                     market_price, direction, entry_type, pip_value, entry_df, epic
@@ -2997,7 +2966,7 @@ class SMCSimpleStrategy:
 
             # Preliminary order type - will be finalized after confidence calculation
             order_type = 'limit' if self.limit_order_enabled and limit_offset_pips > 0 else 'market'
-            self.logger.info(f"   📋 Preliminary Order Type: {order_type.upper()} (offset={limit_offset_pips:.1f} pips)")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} order type: {order_type.upper()} offset={limit_offset_pips:.1f}p")
 
             # ================================================================
             # PRE-STEP 4: Early performance metrics for regime-gated SL/TP (v4.0.0)
@@ -3081,7 +3050,7 @@ class SMCSimpleStrategy:
             # ================================================================
             # STEP 4: Calculate Stop Loss and Take Profit
             # ================================================================
-            self.logger.info(f"\n🛑 STEP 4: Calculating SL/TP")
+            self.logger.debug(f"[SMC_SIMPLE] {pair} calculating SL/TP")
 
             # v2.15.0: Check for fixed SL/TP override (per-pair or global)
             # Priority: backtest override > per-pair DB setting > global DB setting > structural calculation
@@ -3111,17 +3080,17 @@ class SMCSimpleStrategy:
                         if pair_scalp_sl is not None and pair_scalp_tp is not None:
                             fixed_sl_pips = pair_scalp_sl
                             fixed_tp_pips = pair_scalp_tp
-                            self.logger.info(f"   🎯 Using PER-PAIR SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f} (ATR-optimized)")
+                            self.logger.debug(f"   🎯 Using PER-PAIR SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f} (ATR-optimized)")
                         else:
                             # Fall back to global scalp values
                             fixed_sl_pips = self.scalp_sl_pips
                             fixed_tp_pips = self.scalp_tp_pips
-                            self.logger.info(f"   🎯 Using GLOBAL SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f}")
+                            self.logger.debug(f"   🎯 Using GLOBAL SCALP SL/TP: SL={fixed_sl_pips:.1f}, TP={fixed_tp_pips:.1f}")
                     else:
                         # Use global scalp values (file config mode)
                         fixed_sl_pips = self.scalp_sl_pips
                         fixed_tp_pips = self.scalp_tp_pips
-                        self.logger.info(f"   🎯 Using SCALP MODE SL/TP")
+                        self.logger.debug(f"   🎯 Using SCALP MODE SL/TP")
                 elif has_backtest_sl_override or has_backtest_tp_override:
                     # Use backtest overrides (highest priority after scalp mode)
                     fixed_sl_pips = self.fixed_stop_loss_pips
@@ -3178,10 +3147,9 @@ class SMCSimpleStrategy:
                         min_rr = getattr(self, 'min_rr_ratio', 1.3)
                         if adj_sl > 0 and adj_tp / adj_sl < min_rr:
                             adj_tp = round(adj_sl * min_rr, 1)
-                        self.logger.info(
-                            f"   🌐 Regime '{_pre_market_regime}' SL/TP adjustment: "
-                            f"SL {fixed_sl_pips}→{adj_sl}, TP {fixed_tp_pips}→{adj_tp} "
-                            f"(x{sl_mult}/{tp_mult})"
+                        self.logger.debug(
+                            f"[SMC_SIMPLE] {pair} regime SL/TP adj '{_pre_market_regime}': "
+                            f"SL {fixed_sl_pips}→{adj_sl}, TP {fixed_tp_pips}→{adj_tp}"
                         )
                         fixed_sl_pips = adj_sl
                         fixed_tp_pips = adj_tp
@@ -3224,7 +3192,7 @@ class SMCSimpleStrategy:
                             self.logger.debug(f"ATR normalization skipped: {_atr_e}")
 
                     using_fixed_sl_tp = True
-                    self.logger.info(f"   📌 Using FIXED SL/TP: SL={fixed_sl_pips} pips, TP={fixed_tp_pips} pips")
+                    self.logger.debug(f"[SMC_SIMPLE] {pair} fixed SL/TP: {fixed_sl_pips}/{fixed_tp_pips}p")
 
             if using_fixed_sl_tp:
                 # Use fixed SL/TP values
@@ -3236,7 +3204,7 @@ class SMCSimpleStrategy:
                     take_profit = entry_price - (fixed_tp_pips * pip_value) if fixed_tp_pips else None
 
                 risk_pips = fixed_sl_pips
-                self.logger.info(f"   Stop Loss: {stop_loss:.5f} ({risk_pips:.1f} pips) [FIXED]")
+                self.logger.debug(f"[SMC_SIMPLE] {pair} SL={stop_loss:.5f} ({risk_pips:.1f}p) [FIXED]")
 
             else:
                 # Original structural SL calculation
@@ -3300,7 +3268,7 @@ class SMCSimpleStrategy:
             if order_type == 'limit':
                 if risk_pips < self.min_risk_after_offset_pips:
                     reason = f"Risk too small after offset ({risk_pips:.1f} < {self.min_risk_after_offset_pips} pips)"
-                    self.logger.info(f"   ❌ {reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {reason}")
                     # Track rejection
                     risk_context = {
                         'potential_entry': entry_price,
@@ -3319,7 +3287,7 @@ class SMCSimpleStrategy:
                     return None
                 if risk_pips > self.max_risk_after_offset_pips:
                     reason = f"Risk too large after offset ({risk_pips:.1f} > {self.max_risk_after_offset_pips} pips)"
-                    self.logger.info(f"   ❌ {reason}")
+                    self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {reason}")
                     # Track rejection
                     risk_context = {
                         'potential_entry': entry_price,
@@ -3342,8 +3310,7 @@ class SMCSimpleStrategy:
                 # Use fixed TP from config/override
                 reward_pips = fixed_tp_pips
                 rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
-                self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips) [FIXED]")
-                self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
+                self.logger.debug(f"[SMC_SIMPLE] {pair} TP={take_profit:.5f} ({reward_pips:.1f}p) RR={rr_ratio:.2f} [FIXED]")
             else:
                 # Calculate TP from market structure
                 tp_result = self._calculate_take_profit(
@@ -3354,14 +3321,12 @@ class SMCSimpleStrategy:
                 reward_pips = tp_result['reward_pips']
                 rr_ratio = tp_result['rr_ratio']
 
-                self.logger.info(f"   Stop Loss: {stop_loss:.5f} ({risk_pips:.1f} pips)")
-                self.logger.info(f"   Take Profit: {take_profit:.5f} ({reward_pips:.1f} pips)")
-                self.logger.info(f"   R:R Ratio: {rr_ratio:.2f}")
+                self.logger.debug(f"[SMC_SIMPLE] {pair} SL={stop_loss:.5f} ({risk_pips:.1f}p) TP={take_profit:.5f} ({reward_pips:.1f}p) RR={rr_ratio:.2f}")
 
             # Validate R:R ratio (re-enabled Mar 2026 - data shows inverted R:R causes losses)
             if rr_ratio < self.min_rr_ratio:
                 reason = f"R:R too low ({rr_ratio:.2f} < {self.min_rr_ratio})"
-                self.logger.info(f"   ❌ {reason}")
+                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {reason}")
                 # Track rejection
                 risk_result = {
                     'entry_price': entry_price,
@@ -3385,7 +3350,7 @@ class SMCSimpleStrategy:
             # Validate minimum TP (re-enabled Mar 2026)
             if reward_pips < self.min_tp_pips:
                 reason = f"TP too small ({reward_pips:.1f} < {self.min_tp_pips} pips)"
-                self.logger.info(f"   ❌ {reason}")
+                self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {reason}")
                 # Track rejection
                 risk_result = {
                     'entry_price': entry_price,
@@ -3513,7 +3478,7 @@ class SMCSimpleStrategy:
             # v1.8.0: Apply confidence penalty for momentum entries
             if entry_type == 'MOMENTUM':
                 confidence -= self.momentum_confidence_penalty
-                self.logger.info(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
+                self.logger.debug(f"   ⚠️  Momentum entry penalty: -{self.momentum_confidence_penalty*100:.0f}%")
 
             # v2.40.0: RSI-based confidence adjustment
             # Feb 2026 analysis: Winners avg RSI=52, Losers avg RSI=43
@@ -3525,12 +3490,12 @@ class SMCSimpleStrategy:
                     # Buying into weak momentum - 10% penalty
                     penalty = 0.10 * (1.0 - rsi_value / 40.0)  # Scales: RSI 40=0%, RSI 20=5%, RSI 0=10%
                     confidence -= penalty
-                    self.logger.info(f"   📉 RSI penalty (BUY, RSI={rsi_value:.1f}): -{penalty*100:.1f}% → {confidence*100:.0f}%")
+                    self.logger.debug(f"[SMC_SIMPLE] {pair} RSI penalty BUY RSI={rsi_value:.1f}: -{penalty*100:.1f}% → {confidence*100:.0f}%")
                 elif direction == 'BEAR' and rsi_value > 60:
                     # Selling into strong upward momentum - 10% penalty
                     penalty = 0.10 * ((rsi_value - 60.0) / 40.0)  # Scales: RSI 60=0%, RSI 80=5%, RSI 100=10%
                     confidence -= penalty
-                    self.logger.info(f"   📉 RSI penalty (SELL, RSI={rsi_value:.1f}): -{penalty*100:.1f}% → {confidence*100:.0f}%")
+                    self.logger.debug(f"[SMC_SIMPLE] {pair} RSI penalty SELL RSI={rsi_value:.1f}: -{penalty*100:.1f}% → {confidence*100:.0f}%")
                 confidence = max(confidence, 0.0)  # Floor at 0
 
             # v2.35.0: Apply HTF bias confidence multiplier
@@ -3567,15 +3532,15 @@ class SMCSimpleStrategy:
                 if pair_general_min is not None and pair_general_min > scalp_threshold:
                     pair_min_confidence = pair_general_min
                     adjustment_type = "scalp-mode-capped"
-                    self.logger.info(f"   🎯 Scalp threshold capped by pair min: {pair_general_min*100:.0f}% (scalp was {scalp_threshold*100:.0f}%)")
+                    self.logger.debug(f"   🎯 Scalp threshold capped by pair min: {pair_general_min*100:.0f}% (scalp was {scalp_threshold*100:.0f}%)")
                 elif pair_scalp_min is not None:
                     pair_min_confidence = pair_scalp_min
                     adjustment_type = "scalp-mode-pair"
-                    self.logger.info(f"   🎯 Per-pair scalp threshold: {pair_scalp_min*100:.0f}%")
+                    self.logger.debug(f"   🎯 Per-pair scalp threshold: {pair_scalp_min*100:.0f}%")
                 else:
                     pair_min_confidence = self.scalp_min_confidence
                     adjustment_type = "scalp-mode"
-                    self.logger.info(f"   🎯 Scalp mode threshold: {self.scalp_min_confidence*100:.0f}%")
+                    self.logger.debug(f"   🎯 Scalp mode threshold: {self.scalp_min_confidence*100:.0f}%")
             elif self._backtest_mode and self._config_override and 'min_confidence' in self._config_override:
                 # Backtest mode with min_confidence override - use the overridden instance variable
                 pair_min_confidence = self.min_confidence
@@ -3633,7 +3598,7 @@ class SMCSimpleStrategy:
                     if high_atr_confidence is not None:
                         pair_min_confidence = high_atr_confidence
                         adjustment_type = "high-ATR"
-                        self.logger.info(f"   📈 High-ATR threshold: {high_atr_confidence*100:.0f}% (ATR={atr:.5f} >= {self.high_atr_threshold})")
+                        self.logger.debug(f"   📈 High-ATR threshold: {high_atr_confidence*100:.0f}% (ATR={atr:.5f} >= {self.high_atr_threshold})")
 
             # v2.11.0: Volume-adjusted confidence threshold (only if EMA and ATR didn't adjust)
             # When volume is high, use a lower confidence threshold for pairs that perform well
@@ -3654,7 +3619,7 @@ class SMCSimpleStrategy:
                 if high_vol_confidence is not None:
                     pair_min_confidence = high_vol_confidence
                     adjustment_type = "high-volume"
-                    self.logger.info(f"   📊 Volume-adjusted threshold: {high_vol_confidence*100:.0f}% (vol={volume_ratio:.2f} >= {self.high_volume_threshold})")
+                    self.logger.debug(f"   📊 Volume-adjusted threshold: {high_vol_confidence*100:.0f}% (vol={volume_ratio:.2f} >= {self.high_volume_threshold})")
 
             # v2.46.0: Rolling performance adaptive gate
             # Adjusts pair_min_confidence based on recent trade outcomes.
@@ -3670,7 +3635,7 @@ class SMCSimpleStrategy:
 
             # v2.9.0: Use round(2) for both values to avoid floating-point precision issues
             # (e.g., 0.4799 displaying as 48% but failing 48% threshold)
-            self.logger.info(f"   🔍 Confidence gate: score={confidence*100:.0f}% | effective_floor={pair_min_confidence*100:.0f}% ({adjustment_type})")
+            self.logger.debug(f"   🔍 Confidence gate: score={confidence*100:.0f}% | effective_floor={pair_min_confidence*100:.0f}% ({adjustment_type})")
             if round(confidence, 2) < round(pair_min_confidence, 2):
                 reason = f"Confidence too low ({confidence*100:.0f}% < {pair_min_confidence*100:.0f}%)"
                 self.logger.info(f"\n❌ {reason} ({adjustment_type})")
@@ -3768,7 +3733,7 @@ class SMCSimpleStrategy:
                 if scalp_max_conf is not None:
                     pair_max_confidence = scalp_max_conf
                     apply_max_confidence_check = True
-                    self.logger.info(f"   ⚠️ Per-pair scalp max confidence: {scalp_max_conf*100:.0f}%")
+                    self.logger.debug(f"   ⚠️ Per-pair scalp max confidence: {scalp_max_conf*100:.0f}%")
 
             if apply_max_confidence_check and round(confidence, 4) > pair_max_confidence:
                 reason = f"Confidence too high ({confidence*100:.0f}% > {pair_max_confidence*100:.0f}% cap)"
@@ -3866,7 +3831,7 @@ class SMCSimpleStrategy:
                     )
                     return None
 
-            self.logger.info(f"\n📊 Confidence: {confidence*100:.0f}%")
+            self.logger.debug(f"\n📊 Confidence: {confidence*100:.0f}%")
 
             # ================================================================
             # STEP 6: Calculate Technical Indicators for Analytics
@@ -3949,7 +3914,7 @@ class SMCSimpleStrategy:
                         )
                         return None
                     else:
-                        self.logger.info(f"   ✅ MACD aligned: {macd_reason}")
+                        self.logger.debug(f"   ✅ MACD aligned: {macd_reason}")
             except ImportError:
                 pass  # Config not available, skip MACD filter
 
@@ -4020,16 +3985,16 @@ class SMCSimpleStrategy:
                             return None
                         else:
                             # MONITORING: log and apply small confidence penalty
-                            self.logger.info(f"   ⚠️ [MFI MONITOR] {mfi_issue} — applying -{mfi_penalty*100:.0f}% confidence penalty")
+                            self.logger.debug(f"   ⚠️ [MFI MONITOR] {mfi_issue} — applying -{mfi_penalty*100:.0f}% confidence penalty")
                             confidence -= mfi_penalty
                     else:
                         _mfi_confirmed_for_signal = True
-                        self.logger.info(f"   ✅ MFI confirmed: {mfi_value:.0f} (slope: {mfi_slope:+.1f})")
+                        self.logger.debug(f"   ✅ MFI confirmed: {mfi_value:.0f} (slope: {mfi_slope:+.1f})")
                         # Small confidence bonus when MFI strongly confirms direction
                         if getattr(self, 'mfi_confidence_bonus_enabled', True):
                             if 30 < mfi_value < 70 and abs(mfi_slope) > 5:
                                 confidence += 0.02
-                                self.logger.info(f"   ➕ MFI bonus: +2% (neutral zone with directional slope)")
+                                self.logger.debug(f"[SMC_SIMPLE] {pair} MFI bonus: +2%")
             except Exception as e:
                 self.logger.debug(f"   MFI filter error (skipping): {e}")
 
@@ -4096,9 +4061,9 @@ class SMCSimpleStrategy:
                     else:
                         penalty = 0.10 if impulse_score < 0.25 else 0.05
                         confidence -= penalty
-                        self.logger.info(f"   ⚠️ [IMPULSE MONITOR] {detail} — -{penalty*100:.0f}% confidence")
+                        self.logger.debug(f"   ⚠️ [IMPULSE MONITOR] {detail} — -{penalty*100:.0f}% confidence")
                 else:
-                    self.logger.info(f"   ✅ Impulse quality: {impulse_score:.2f} (range={swing_range_atr:.2f}ATR, conviction={break_conviction*100:.1f}%, body={body_pct*100:.0f}%)")
+                    self.logger.debug(f"   ✅ Impulse quality: {impulse_score:.2f} (range={swing_range_atr:.2f}ATR, conviction={break_conviction*100:.1f}%, body={body_pct*100:.0f}%)")
             except Exception as e:
                 self.logger.debug(f"   Impulse quality filter error (skipping): {e}")
 
@@ -4122,7 +4087,7 @@ class SMCSimpleStrategy:
                         risk_pips = (stop_loss - entry_price) / pip_value
                         reward_pips = (entry_price - take_profit) / pip_value if take_profit else 0
                     rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
-                    self.logger.info(f"\n📋 FINAL Order Type: MARKET (high quality: conf={confidence:.1%}, slope={ema_slope_strength:.2f}x ATR)")
+                    self.logger.debug(f"\n📋 FINAL Order Type: MARKET (high quality: conf={confidence:.1%}, slope={ema_slope_strength:.2f}x ATR)")
                 elif order_type == 'limit':
                     # v2.17.0: Add extra offset for low confidence signals (0.50-0.54)
                     # SCALP MODE: Skip extra offset - use fixed 1 pip offset for all signals
@@ -4143,9 +4108,9 @@ class SMCSimpleStrategy:
                             risk_pips = (stop_loss - entry_price) / pip_value
                             reward_pips = (entry_price - take_profit) / pip_value if take_profit else 0
                         rr_ratio = reward_pips / risk_pips if risk_pips > 0 else 0
-                        self.logger.info(f"\n📋 FINAL Order Type: STOP (low conf: +{low_confidence_extra_offset:.0f} pips extra, total={limit_offset_pips:.1f} pips)")
+                        self.logger.debug(f"\n📋 FINAL Order Type: STOP (low conf: +{low_confidence_extra_offset:.0f} pips extra, total={limit_offset_pips:.1f} pips)")
                     else:
-                        self.logger.info(f"\n📋 FINAL Order Type: STOP (conf={confidence:.1%}, offset={limit_offset_pips:.1f} pips)")
+                        self.logger.debug(f"\n📋 FINAL Order Type: STOP (conf={confidence:.1%}, offset={limit_offset_pips:.1f} pips)")
 
             # ================================================================
             # v2.5.0: PAIR-SPECIFIC BLOCKING CHECK
@@ -4377,7 +4342,7 @@ class SMCSimpleStrategy:
                 'environment': os.getenv('TRADING_ENVIRONMENT', 'demo'),
             }
 
-            self.logger.info(f"\n📋 Signal Summary:")
+            self.logger.debug(f"\n📋 Signal Summary:")
             self.logger.info(f"   Direction: {signal['signal']}")
             self.logger.info(f"   Order Type: {signal['order_type'].upper()}")
             if signal['order_type'] == 'limit':
@@ -4803,7 +4768,7 @@ class SMCSimpleStrategy:
             ema_slope_atr = ema_slope / atr_4h if atr_4h > 0 else 0.0
 
             # Always log slope for debugging
-            self.logger.info(f"   📐 EMA slope: {ema_slope_atr:.3f}x ATR, direction: {direction}")
+            self.logger.debug(f"   📐 EMA slope: {ema_slope_atr:.3f}x ATR, direction: {direction}")
 
             # v2.16.0 Option 2: Asymmetric validation
             # BULL requires EMA to be rising above minimum threshold

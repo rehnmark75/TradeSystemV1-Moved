@@ -437,7 +437,7 @@ class SignalDetector:
             htf_tf = smc_config.get_pair_scalp_htf_timeframe(epic) or getattr(smc_config, 'scalp_htf_timeframe', '1h')
             trigger_tf = getattr(smc_config, 'scalp_trigger_timeframe', '5m')
             entry_tf = getattr(smc_config, 'scalp_entry_timeframe', '1m')
-            self.logger.info(f"🔍 [SMC_SIMPLE] SCALP MODE: Using htf_tf={htf_tf}, trigger_tf={trigger_tf}, entry_tf={entry_tf}")
+            self.logger.debug(f"[SMC_SIMPLE] scalp mode: htf={htf_tf}, trigger={trigger_tf}, entry={entry_tf}")
         else:
             htf_tf = smc_config.htf_timeframe or '4h'
             trigger_tf = smc_config.trigger_timeframe or '15m'
@@ -565,7 +565,7 @@ class SignalDetector:
                 df_entry = self._filter_incomplete_candles(df_entry, entry_tf)
 
             df_entry_len = len(df_entry) if df_entry is not None else 0
-            self.logger.info(f"🔍 [SMC_SIMPLE] Passing to strategy: {htf_tf}({len(df_4h)} bars), {trigger_tf}({len(df_trigger)} bars), {entry_tf}({df_entry_len} bars)")
+            self.logger.debug(f"[SMC_SIMPLE] Passing to strategy: {htf_tf}({len(df_4h)}), {trigger_tf}({len(df_trigger)}), {entry_tf}({df_entry_len})")
 
             # Detect signal
             signal = self.smc_simple_strategy.detect_signal(
