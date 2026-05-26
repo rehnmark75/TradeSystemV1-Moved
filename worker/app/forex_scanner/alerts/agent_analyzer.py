@@ -156,7 +156,7 @@ def _build_signal_prompt(signal: Dict) -> str:
     epic = signal.get("epic", "Unknown")
     strategy = signal.get("strategy", "Unknown")
     signal_type = signal.get("signal_type", signal.get("type", "Unknown"))
-    confidence = signal.get("confidence", 0)
+    confidence = signal.get("confidence_score", signal.get("confidence", 0))
     regime = signal.get("market_regime", signal.get("regime", "Unknown"))
     session = signal.get("session", "Unknown")
     sl_pips = signal.get("risk_pips", signal.get("stop_loss_pips", "?"))
