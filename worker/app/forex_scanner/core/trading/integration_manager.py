@@ -346,7 +346,7 @@ class IntegrationManager:
         """
         # CRITICAL GUARD: Prevent duplicate Claude calls
         # If TradeValidator handles Claude (require_claude_approval=True), skip this entirely.
-        # Exception: agent mode is a shadow observer — it runs regardless and never blocks trades.
+        # Exception: agent mode always runs via IntegrationManager; orchestrator gates execution on claude_approved.
         require_claude_approval = self._scanner_cfg.require_claude_approval
         agent_mode_active = self.claude_analysis_mode == 'agent'
 

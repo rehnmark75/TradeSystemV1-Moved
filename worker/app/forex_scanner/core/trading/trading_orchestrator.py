@@ -252,10 +252,10 @@ class TradingOrchestrator:
         )
 
         # Agent mode must run through IntegrationManager regardless of require_claude_approval
-        # or scalp overrides — it is a shadow observer and never blocks trades.
+        # or scalp overrides. Agent decisions gate trade execution — only APPROVE passes.
         if self.claude_analysis_mode == 'agent':
             self.enable_claude = True
-            self.logger.info("🤖 [AGENT MODE] Claude enabled in IntegrationManager for shadow analysis")
+            self.logger.info("🤖 [AGENT MODE] Claude enabled — agent APPROVE/REJECT gates execution")
         self.claude_analysis_level = (
             claude_analysis_level
             if claude_analysis_level is not None
@@ -1679,6 +1679,21 @@ class TradingOrchestrator:
                 if len(signals_to_execute) < len(analyzed_signals):
                     skipped = len(analyzed_signals) - len(signals_to_execute)
                     self.logger.warning(f"⚠️ Skipping {skipped} signals without alert_id (DB save failed)")
+
+                # Agent mode: only execute signals the agent approved
+                if self.claude_analysis_mode == 'agent' and signals_to_execute:
+                    agent_approved = [s for s in signals_to_execute if s.get('claude_approved', False)]
+                    agent_blocked = [s for s in signals_to_execute if not s.get('claude_approved', False)]
+                    if agent_blocked:
+                        for sig in agent_blocked:
+                            self.logger.info(
+                                f"🚫 [AGENT] Blocked {sig.get('epic')} {sig.get('signal_type')} "
+                                f"— {sig.get('claude_decision', 'REJECT')} "
+                                f"(score={sig.get('claude_score', '?')}, "
+                                f"reason={sig.get('claude_reason', 'no reason')[:80]})"
+                            )
+                    signals_to_execute = agent_approved
+
                 if signals_to_execute:
                     execution_results = self.order_manager.execute_signals(signals_to_execute)
                 else:
