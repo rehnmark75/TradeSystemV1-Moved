@@ -348,7 +348,9 @@ class TradingOrchestrator:
                 logger=self.logger,
                 db_manager=self.db_manager,  # NEW: Pass db_manager for S/R validation
                 alert_history_manager=self.alert_history,  # NEW: For saving Claude rejections to DB
-                enable_claude_filtering=self.enable_claude  # NEW: Pass scalp mode Claude setting
+                # In agent mode, TV must NOT run vision — AgentClaudeAnalyzer owns analysis.
+                # self.enable_claude stays True so IntegrationManager still fires.
+                enable_claude_filtering=(False if self.claude_analysis_mode == 'agent' else self.enable_claude)
                 # REMOVED: enable_duplicate_check, cooldown_minutes, duplicate_sensitivity
                 # These are no longer used in the new TradeValidator
             )
