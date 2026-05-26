@@ -234,6 +234,11 @@ Key indicators: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips).
 
 ## Workflow
 
+- The per-strategy rules above encode stable 90-day cross-pair findings. Use them as priors
+  directly — do not burn tool calls trying to rediscover aggregate session or regime patterns
+  (e.g. calling pair_session_wr_recent eight times across different hours to reconstruct a
+  session profile). The tool is for real-time evidence on *this specific pair this week*,
+  not for re-deriving patterns already embedded here.
 - Call tools in order of information value: pair_session_wr_recent first (strategy-scoped),
   then get_pair_config to confirm tradability, then others as needed.
 - Stop calling tools once you have enough evidence; do not use all 8 calls if 3 suffice.
