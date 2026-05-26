@@ -76,6 +76,30 @@ MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL). Always pass the stra
   populated by other strategies. Skip this tool for XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE,
   MEAN_REVERSION, RANGE_FADE, FA_OR_ATR_TRAIL signals.
 
+## FA_OR_ATR_TRAIL validation rules
+
+This strategy fires on two entry models — always check the MODEL indicator:
+- **FA (Failed Auction)**: price swept a prior extreme then closed back inside the value area. The rejection of the extreme IS the signal — do not penalise for a "failed" move.
+- **OR (Opening Range)**: break of the London/NY opening range high or low after a lock period.
+
+Key indicators surfaced for this strategy: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips).
+
+**Scoring guide:**
+- **ATR_PIPS**: normalised volatility. USDJPY requires ATR_PIPS ≥ 8.7; other pairs ≥ 5.0. Below floor → penalise 2 points (not enough room to trail).
+- **SLOPE**: EMA50 slope in pips/bar. SLOPE ≥ 0.3 confirms directional momentum (positive). SLOPE < 0.1 is flat/choppy → penalise 1 point.
+- **ADX 18–25 is the sweet spot** — this strategy targets range-to-trend transitions, not established trends. Do NOT penalise ADX 18–22 as "weak". ADX > 30 means the move is extended → slight negative.
+- **MODEL=FA + regime=ranging**: valid combination — failed auctions occur at range extremes. Do NOT penalise ranging regime for FA entries.
+
+**Known weak conditions from 90-day backtest (EURJPY, n=51):**
+- Friday signals: 30% WR vs 51% Mon–Thu → penalise 1 score point.
+- Hour 11 UTC (London mid-session chop): 40% WR → slight negative.
+- BUY signals weaker than SELL on EURJPY (45% vs 50% WR, avg win 9 vs 17 pips) — flag but do not auto-reject.
+
+**Do NOT penalise:**
+- Null fixed_stop_loss_pips in pair config — ATR-based stops are by design.
+- ADX 18–22 — this is the target zone, not a weakness.
+- Ranging regime for FA model entries.
+
 ## Workflow
 
 - Call tools in order of information value: pair_session_wr_recent first (strategy-scoped),
@@ -149,6 +173,21 @@ def _extract_indicators(signal: Dict) -> Dict:
     htf = first((si, "htf_bias"), (signal, "htf_bias"), (signal, "ema_bias"))
     if htf is not None:
         ind["HTF_BIAS"] = htf
+
+    # FA_OR_ATR_TRAIL-specific fields
+    strategy = signal.get("strategy", "")
+    if strategy == "FA_OR_ATR_TRAIL":
+        model = first((signal, "fa_or_model"), (si, "model"))
+        if model is not None:
+            ind["MODEL"] = model  # FA or OR
+
+        slope = first((si, "ema50_slope_pips"), (signal, "ema50_slope_pips"))
+        if slope is not None:
+            ind["SLOPE"] = round(float(slope), 2)
+
+        atr_pips = first((si, "atr_pips"), (signal, "atr_pips"))
+        if atr_pips is not None:
+            ind["ATR_PIPS"] = round(float(atr_pips), 1)
 
     return ind
 
