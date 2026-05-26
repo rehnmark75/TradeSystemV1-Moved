@@ -703,11 +703,34 @@ class IntelligentForexScanner:
                         'intelligence_source': 'live_scan',
                         'scan_timestamp': scan_start.isoformat() if scan_start else None,
                     }
+                    mi_dominant_regime = market_regime.get('dominant_regime', 'unknown')
+                    mi_regime_confidence = market_regime.get('confidence', 0.5)
+                    filtered_signals = []
                     for signal in clean_signals:
                         signal['market_intelligence'] = formatted_intel
                         signal['intelligence_source'] = 'live_scan'
-                        signal['market_regime'] = market_regime.get('dominant_regime', 'unknown')
-                        signal['regime_confidence'] = market_regime.get('confidence', 0.5)
+                        signal['market_regime'] = mi_dominant_regime
+                        signal['regime_confidence'] = mi_regime_confidence
+
+                        # Post-signal regime re-check using market intelligence.
+                        # The strategy's own regime gate fires before MI is attached, so a
+                        # borderline ADX (e.g. 25.8 vs threshold 25.0) can pass the strategy
+                        # gate while MI's multi-factor scoring correctly says "ranging".
+                        # Strategies that enforce block_ranging should also respect MI regime.
+                        strategy_name = signal.get('strategy', '')
+                        if (
+                            strategy_name == 'XAU_GOLD'
+                            and mi_dominant_regime in ('ranging', 'neutral')
+                        ):
+                            self.logger.info(
+                                f"[MI-REGIME-BLOCK] {signal.get('epic')} {strategy_name} "
+                                f"dropped post-MI: dominant_regime={mi_dominant_regime} "
+                                f"(confidence={mi_regime_confidence:.2f})"
+                            )
+                            rejected_signals.append(signal)
+                            continue
+                        filtered_signals.append(signal)
+                    clean_signals = filtered_signals
 
                 # ADD: Capture per-epic performance snapshots for rejection analysis
                 self._capture_scan_performance_snapshots(
