@@ -1156,6 +1156,52 @@ async def get_trade_outcome_analysis(trade_id: int, db: Session = Depends(get_db
 
 
 # ---------------------------------------------------------------------------
+# AI post-mortem endpoint
+# ---------------------------------------------------------------------------
+
+@router.get("/trade/{trade_id}/postmortem")
+async def get_trade_postmortem(trade_id: int, db: Session = Depends(get_db)):
+    """
+    Return the AI-generated post-mortem for a closed trade.
+
+    If the postmortem hasn't been generated yet, triggers it on-demand and
+    returns a 202 Accepted so the caller knows to retry.  Stored postmortems
+    are returned immediately as 200.
+    """
+    trade = db.query(TradeLog).filter(
+        TradeLog.id == trade_id,
+        TradeLog.environment == TRADING_ENVIRONMENT,
+    ).first()
+    if not trade:
+        raise HTTPException(status_code=404, detail=f"Trade {trade_id} not found")
+
+    from services.trade_postmortem_service import get_postmortem, schedule_postmortem
+
+    existing = get_postmortem(db, trade_id, TRADING_ENVIRONMENT)
+    if existing:
+        return {"trade_id": trade_id, "status": "ready", "postmortem": existing}
+
+    if trade.status != "closed":
+        return {
+            "trade_id": trade_id,
+            "status": "trade_not_closed",
+            "message": f"Postmortem requires a closed trade (current status: {trade.status})",
+        }
+
+    # Trigger on-demand generation
+    schedule_postmortem(trade_id, TRADING_ENVIRONMENT)
+    from fastapi.responses import JSONResponse
+    return JSONResponse(
+        status_code=202,
+        content={
+            "trade_id": trade_id,
+            "status": "generating",
+            "message": "Postmortem is being generated. Retry in a few seconds.",
+        },
+    )
+
+
+# ---------------------------------------------------------------------------
 # Chart data endpoint — unified payload for the trade chart + timeline UI
 # ---------------------------------------------------------------------------
 

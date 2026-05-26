@@ -463,11 +463,25 @@ class TradePnLCorrelator:
             try:
                 self.db_session.commit()
                 self.logger.info(f"✅ Committed {len(updated_trades)} trade_log updates")
+                # Schedule post-mortem analysis for each newly finalised trade
+                self._schedule_postmortems(updated_trades)
             except Exception as e:
                 self.db_session.rollback()
                 self.logger.error(f"❌ Error committing updates: {e}")
-        
+
         return updated_trades
+
+    def _schedule_postmortems(self, updated_trades: list) -> None:
+        """Fire off postmortem tasks for each updated trade (non-blocking)."""
+        try:
+            from services.trade_postmortem_service import schedule_postmortem
+            from config import TRADING_ENVIRONMENT
+            for trade in updated_trades:
+                trade_id = trade.get("trade_log_id")
+                if trade_id:
+                    schedule_postmortem(trade_id, TRADING_ENVIRONMENT)
+        except Exception as e:
+            self.logger.warning(f"Could not schedule postmortems: {e}")
     
     async def _ensure_pnl_columns_exist(self):
         """Ensure trade_log table has required P&L columns"""

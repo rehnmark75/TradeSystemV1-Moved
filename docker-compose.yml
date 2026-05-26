@@ -31,6 +31,7 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN:-}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID:-}
       - TRADE_NOTIFICATION_TELEGRAM_ENABLED=${TRADE_NOTIFICATION_TELEGRAM_ENABLED:-false}
+      - CLAUDE_API_KEY=${CLAUDE_API_KEY}
     healthcheck:
       disable: true  # Health endpoint always times out - container is functional, disable healthcheck
     networks:
