@@ -31,13 +31,13 @@ except ImportError:
         StrategyRejectionManager = None  # type: ignore[assignment,misc]
 
 try:
-    from forex_scanner.services.smc_momentum_config_service import (
+    from services.smc_momentum_config_service import (
         get_smc_momentum_config,
         apply_config_overrides,
         SMCMomentumConfig,
     )
 except ImportError:
-    from services.smc_momentum_config_service import (
+    from forex_scanner.services.smc_momentum_config_service import (
         get_smc_momentum_config,
         apply_config_overrides,
         SMCMomentumConfig,

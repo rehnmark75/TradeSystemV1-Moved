@@ -20,7 +20,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 try:
-    from ...services.donchian_turtle_config_service import (
+    from services.donchian_turtle_config_service import (
         DonchianTurtleConfig,
         get_donchian_turtle_config,
     )

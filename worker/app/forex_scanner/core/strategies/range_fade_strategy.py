@@ -25,7 +25,7 @@ import numpy as np
 import pandas as pd
 
 try:
-    from ...services.range_fade_config_service import (
+    from services.range_fade_config_service import (
         EURUSD_EPIC,
         RangeFadeConfig,
         build_range_fade_config,

@@ -29,7 +29,7 @@ from typing import Any, Dict, Optional
 import pandas as pd
 
 try:
-    from ...services.impulse_fade_config_service import (
+    from services.impulse_fade_config_service import (
         ImpulseFadeConfig,
         get_impulse_fade_config,
     )
