@@ -1302,7 +1302,11 @@ class AlertHistoryManager:
             # ================================
             # MARKET CONDITIONS
             # ================================
-            market_session = signal.get('market_session', signal.get('session'))
+            market_session = (
+                signal.get('market_session') or
+                signal.get('session') or
+                signal.get('market_intelligence', {}).get('session_analysis', {}).get('current_session')
+            )
             is_market_hours = signal.get('is_market_hours', True)
             # FIX: SMC_SIMPLE uses 'market_regime_detected', fallback to that field
             market_regime = signal.get('market_regime', signal.get('market_regime_detected'))
