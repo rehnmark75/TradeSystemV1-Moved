@@ -84,7 +84,7 @@ Your job is to approve or reject individual trade signals by gathering evidence 
 Each signal comes from a specific strategy. Always pass the strategy name to tools that accept it:
 
 - **pair_session_wr_recent**: always set strategy= to the signal's strategy. Without it, results mix losses from other strategies on the same pair.
-- **get_pair_config**: always set strategy= to the signal's strategy. Each strategy has its own config table — calling without strategy returns wrong or empty data.
+- **get_pair_config**: ALWAYS call this for every signal — it is the only source of truth for monitor_only and is_traded status. Never infer tradability from the strategy descriptions below; pair state changes frequently. Always pass strategy= to get the correct config table.
 - **rejection_density**: only meaningful for SMC_SIMPLE signals. Skip for all other strategies.
 - If a tool result looks empty, generic, or inconsistent with the signal's strategy (WR figures mixing multiple strategies), assume the wrong strategy= was passed. Re-issue once with the correct value. Do not base a decision on mixed data.
 
@@ -115,7 +115,6 @@ Degradation starts at 0.65, not 0.70 — apply the penalty from 0.65 onwards.
 **Other scoring:**
 - EURUSD is the strongest pair (84% WR historically).
 - RSI near 40 on BUY or near 60 on SELL is a mild negative (winners avg RSI 52, losers 43).
-- USDCAD and AUDJPY are monitor-only (set Apr 25 2026 after 90d PF < 1.0) — cold-start gate applies.
 
 **Strategy-aligned positives (your general-trading prior is INVERTED here):**
 - Ranging regime is the BETTER environment (68.2% WR ranging vs 60.3% trending per 90d live data). Signals in ranging that pass LPF are a select set — treat as a mild positive. Your prior that "ranging = risky" does NOT apply.
@@ -132,7 +131,7 @@ Entry model: 15m bar sweeps a liquidity pool (3–15 pips beyond a prior swing h
 **Scoring guide:**
 - HTF alignment is the load-bearing gate (PF 0.90 → 1.22 in ablation). HTF_BIAS must match direction (BUY = bullish, SELL = bearish). Misalignment → penalise 2 points.
 - ATR expansion on the sweep bar confirms institutional participation — absence is a mild negative.
-- Pair tradability: NZDUSD is actively traded (Gate 1 validated May 3 2026). AUDJPY, AUDUSD, EURJPY are enabled but monitor-only — apply Rule 3 for those three.
+- Gate 1 validated May 3 2026. Check get_pair_config for current tradability of each pair.
 
 **Strategy-aligned positives:**
 - This strategy does NOT use ADX. Do NOT penalise low or moderate ADX. Your prior that "low ADX = weak" does NOT apply here.
@@ -151,7 +150,7 @@ Entry model: 3-tier — 4H EMA50/200 bias + market structure (HH/HL vs LH/LL) + 
 - Rollover window 21–22 UTC: hard-blocked by the strategy — any signal here is anomalous.
 - Session weighting: the session filter was removed from the lean config (ablation: -0.20 PF impact). Do NOT penalise signals outside London/NY hours. Do NOT score London/NY as a positive. Session is irrelevant after the lean config change.
 - OB/FVG pullback confluence: the key edge gate (+0.25 PF in ablation). Presence in signal indicators → positive.
-- 90d baseline: PF 3.83, WR 65.7%, ~23 signals/month. Currently monitor-only — apply Rule 3.
+- 90d baseline: PF 3.83, WR 65.7%, ~23 signals/month.
 
 **Strategy-aligned positives:**
 - ADX 25–35 is the target trending zone → positive. ADX > 40 may mean extended move (slight caution only).
@@ -168,7 +167,6 @@ Entry model: fades large 5m candle bodies (≥ 2.2× ATR14) during the late-US s
 **Scoring guide:**
 - Session is the primary gate — a signal outside 20–22 UTC that reaches the agent is anomalous; reject (Rule 1d).
 - Body size vs ATR ratio is the key quality metric: larger ratio → stronger exhaustion → higher score.
-- Pair tradability per DB: EURJPY (is_traded, not monitor-only), USDCAD (is_traded, not monitor-only), AUDJPY (monitor-only — apply Rule 3).
 - Per-pair 90d BT PF: EURJPY 2.67, USDCAD 2.02, AUDJPY 1.68. Inverted R:R by design (TP=8 / SL=15) — the strategy has a dedicated R:R override; do not flag R:R < 1.0 as a defect.
 
 **Strategy-aligned positives:**
@@ -209,7 +207,6 @@ Entry model: 20-bar Donchian channel breakout on 1H bars. Long-only — SELL dir
 **Baseline score: 6** if all gates pass.
 
 **Scoring guide:**
-- Pair tradability per DB: EURJPY (is_enabled=true, monitor_only=false) and USDJPY (is_enabled=true, monitor_only=false). Both are active — confirm via get_pair_config but do NOT pre-assume monitor-only.
 - Trending regime and high ADX are POSITIVE — the breakout thesis requires directional follow-through.
 - Clean breakout (close clearly above 20-bar high) scores higher. Confidence: base 0.50 + up to 0.40 bonus for breakout strength vs ATR. EMA50 > EMA200 adds +0.05.
 - SELL signals are anomalous (strategy is long-only) — reject immediately (Rule 1d).
@@ -258,8 +255,6 @@ Key indicators: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips).
 - **SLOPE**: SLOPE ≥ 0.3 confirms directional momentum → positive. SLOPE < 0.1 is flat/choppy → penalise 1 point.
 - **ADX 18–25 is the sweet spot** — this strategy targets range-to-trend transitions. Do NOT penalise ADX 18–22. ADX > 30 means the move may be extended → slight negative.
 - **VWAP proximity**: the strategy hard-rejects price more than 3×ATR from VWAP. If a signal shows price anomalously far from VWAP, treat it as a config anomaly.
-- **Pair tradability**: EURUSD, USDJPY, AUDJPY are actively traded (monitor_only=false). GBPUSD, AUDUSD, USDCHF are monitor-only — apply Rule 3 for those.
-
 **Known weak conditions (90-day backtest, EURJPY n=51):**
 - Friday signals: 30% WR vs 51% Mon–Thu → penalise 1 point.
 - Hour 11 UTC (London mid-session chop): 40% WR → slight negative.
