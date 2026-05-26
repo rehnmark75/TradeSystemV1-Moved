@@ -131,6 +131,13 @@ class AlertDeduplicationManager:
 
         self._hourly_alert_count = 0
         self._last_count_reset = datetime.now()
+
+    @staticmethod
+    def _as_utc_aware(value: datetime) -> datetime:
+        """Normalize DB timestamps to UTC-aware datetimes for safe comparisons."""
+        if value.tzinfo is None:
+            return value.replace(tzinfo=timezone.utc)
+        return value.astimezone(timezone.utc)
     
     def _ensure_enhanced_table_structure(self):
         """Ensure alert_history table has enhanced columns for deduplication"""
@@ -419,9 +426,8 @@ class AlertDeduplicationManager:
                 status = active_trade[1]
                 direction = active_trade[2]
 
-                # Handle timezone
-                if opening_time and opening_time.tzinfo is None:
-                    opening_time = opening_time.replace(tzinfo=None)
+                if opening_time:
+                    opening_time = self._as_utc_aware(opening_time)
 
                 time_since_open = "unknown"
                 if opening_time and opening_time <= current_time:
@@ -450,9 +456,7 @@ class AlertDeduplicationManager:
                 opening_time = recent_opened[0]
                 status = recent_opened[1]
 
-                # Handle timezone-naive timestamps
-                if opening_time.tzinfo is None:
-                    opening_time = opening_time.replace(tzinfo=None)
+                opening_time = self._as_utc_aware(opening_time)
 
                 # Check if timestamp is valid (not in the future)
                 if opening_time <= current_time:
@@ -482,9 +486,7 @@ class AlertDeduplicationManager:
             if recent_closed:
                 close_time = recent_closed[0]
 
-                # Handle timezone-naive timestamps
-                if close_time.tzinfo is None:
-                    close_time = close_time.replace(tzinfo=None)
+                close_time = self._as_utc_aware(close_time)
 
                 # Check if timestamp is valid (not in the future)
                 if close_time <= current_time:

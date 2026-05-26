@@ -4124,7 +4124,7 @@ class SMCSimpleStrategy:
             # BUILD SIGNAL
             # ================================================================
             self.logger.info(f"\n{'='*70}")
-            self.logger.info(f"✅ VALID SMC SIMPLE SIGNAL DETECTED")
+            self.logger.info(f"✅ SMC SIMPLE CANDIDATE DETECTED")
             self.logger.info(f"{'='*70}")
 
             signal = {

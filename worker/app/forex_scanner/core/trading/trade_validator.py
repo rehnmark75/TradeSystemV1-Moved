@@ -2463,6 +2463,7 @@ class TradeValidator:
                 strategy_rr_overrides = {
                     'RANGE_FADE': 1.3,
                     'IMPULSE_FADE': 0.50,  # inverted R:R (TP=8/SL=15), high WR (82%) compensates; 0.50 gives rounding margin
+                    'FA_OR_ATR_TRAIL': 1.60,  # ATR model uses SL=1.2x/TP=2.0x => 1.67R by design; 1.60 gives rounding margin
                 }
                 strategy_upper = strategy.upper()
                 min_rr = strategy_rr_overrides.get(strategy_upper, self.min_risk_reward_ratio)

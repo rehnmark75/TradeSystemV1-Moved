@@ -1441,9 +1441,13 @@ class TradingOrchestrator:
 
             lpf = self.trade_validator and getattr(self.trade_validator, 'loss_prevention_filter', None)
             if lpf:
-                holiday_label = lpf.is_holiday_today()
+                holiday_check_dt = datetime.now(timezone.utc)
+                holiday_label = lpf.is_holiday_today(holiday_check_dt)
                 if holiday_label:
-                    self.logger.warning(f"📅 HOLIDAY MODE: {holiday_label} — all signals will be blocked by LPF")
+                    self.logger.warning(
+                        f"📅 HOLIDAY MODE: {holiday_label} on {holiday_check_dt:%Y-%m-%d} UTC "
+                        "— all signals will be blocked by LPF"
+                    )
 
             # 1. Get clean signals from scanner (includes deduplication)
             self.logger.info("🔍 Delegating signal detection to scanner...")
