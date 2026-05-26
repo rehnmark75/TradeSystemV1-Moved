@@ -10,6 +10,7 @@ import TradeTable, { type TradeRow } from "./_components/TradeTable";
 import TradeChart from "./_components/TradeChart";
 import TrailingTimeline from "./_components/TrailingTimeline";
 import CounterfactualBadge, { type CounterfactualVerdict } from "./_components/CounterfactualBadge";
+import PostmortemPanel, { type PostmortemData } from "./_components/PostmortemPanel";
 
 type ChartData = {
   trade_id: number;
@@ -61,6 +62,8 @@ export default function ForexTradeAnalysisPage() {
   const [chartData, setChartData] = useState<ChartData | null>(null);
   const [chartLoading, setChartLoading] = useState(false);
   const [chartError, setChartError] = useState<string | null>(null);
+  const [postmortem, setPostmortem] = useState<PostmortemData | null>(null);
+  const [postmortemStatus, setPostmortemStatus] = useState<"idle" | "loading" | "ready" | "generating" | "error">("idle");
   const detailRef = useRef<HTMLDivElement>(null);
 
   const fetchTrades = useCallback(() => {
@@ -89,15 +92,43 @@ export default function ForexTradeAnalysisPage() {
     fetchTrades();
   }, [fetchTrades]);
 
+  const fetchPostmortem = (id: number, env: string, attempt = 0) => {
+    setPostmortemStatus("loading");
+    fetch(`/trading/api/forex/trade-analysis/postmortem/?tradeId=${id}&env=${env}`)
+      .then(async (r) => {
+        const d = await r.json();
+        if (r.status === 202) {
+          // Still generating — retry once after 4 seconds
+          setPostmortemStatus("generating");
+          if (attempt < 3) {
+            setTimeout(() => fetchPostmortem(id, env, attempt + 1), 4000);
+          } else {
+            setPostmortemStatus("error");
+          }
+          return;
+        }
+        if (!r.ok) { setPostmortemStatus("error"); return; }
+        setPostmortem(d.postmortem ?? null);
+        setPostmortemStatus(d.postmortem ? "ready" : "error");
+      })
+      .catch(() => setPostmortemStatus("error"));
+  };
+
   const handleSelect = (id: number) => {
     setSelectedId(id);
     setChartData(null);
     setChartError(null);
     setChartLoading(true);
+    setPostmortem(null);
+    setPostmortemStatus("idle");
     setTimeout(() => detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 50);
     fetch(`/trading/api/forex/trade-analysis/chart-data/?tradeId=${id}&env=${environment}`)
       .then((r) => r.json())
-      .then((d) => setChartData(d))
+      .then((d) => {
+        setChartData(d);
+        // Fetch postmortem in parallel (only for closed trades)
+        fetchPostmortem(id, environment);
+      })
       .catch(() => setChartError("Failed to load chart data."))
       .finally(() => setChartLoading(false));
   };
@@ -234,6 +265,25 @@ export default function ForexTradeAnalysisPage() {
                   />
                 </div>
               )}
+
+              {/* AI Post-Mortem */}
+              <div className="ta-postmortem-wrap">
+                <div className="chart-title">AI Post-Mortem</div>
+                {postmortemStatus === "loading" && (
+                  <div className="chart-placeholder">Generating post-mortem…</div>
+                )}
+                {postmortemStatus === "generating" && (
+                  <div className="chart-placeholder">Generating post-mortem… retrying</div>
+                )}
+                {postmortemStatus === "error" && (
+                  <div className="chart-placeholder" style={{ color: "#94a3b8" }}>
+                    Post-mortem not available for this trade.
+                  </div>
+                )}
+                {postmortemStatus === "ready" && postmortem && (
+                  <PostmortemPanel data={postmortem} />
+                )}
+              </div>
             </>
           )}
         </div>
