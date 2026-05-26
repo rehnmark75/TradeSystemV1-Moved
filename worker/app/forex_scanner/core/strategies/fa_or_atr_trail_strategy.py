@@ -349,6 +349,8 @@ class FAORATRTrailStrategy(StrategyInterface):
             "timestamp": ts.isoformat(),
         })
 
+        self.logger.info("[FA_OR_ATR_TRAIL] %s ❌ %s: %s", pair or epic, stage, reason)
+
         if self._rej_mgr is not None:
             self._rej_mgr.reject(
                 stage=stage,

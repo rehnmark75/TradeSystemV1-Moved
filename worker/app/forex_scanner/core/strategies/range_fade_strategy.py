@@ -643,6 +643,7 @@ class RangeFadeStrategy(StrategyInterface):
     def _reject(self, epic: str, reason: str, direction: Optional[str] = None, details: Optional[Dict[str, Any]] = None) -> None:
         stage = reason.upper()
         self._rej_counts[stage] = self._rej_counts.get(stage, 0) + 1
+        self.logger.info("[RANGE_FADE] %s ❌ %s", epic, stage)
         if self._rej_mgr is not None:
             now = self._current_timestamp or datetime.now(timezone.utc)
             if isinstance(now, pd.Timestamp):

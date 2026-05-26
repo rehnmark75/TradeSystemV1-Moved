@@ -168,6 +168,7 @@ class ImpulseFadeStrategy(StrategyInterface):
         details: Optional[Dict[str, Any]] = None,
         scan_timestamp: Optional[datetime] = None,
     ) -> None:
+        self.logger.info("[IMPULSE_FADE] %s ❌ %s: %s", pair or epic, stage, reason)
         if self._rej_mgr is not None:
             self._rej_mgr.reject(
                 stage=stage,

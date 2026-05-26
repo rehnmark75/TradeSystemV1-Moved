@@ -212,6 +212,7 @@ class MeanReversionStrategy(StrategyInterface):
         direction: Optional[str] = None,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
+        self.logger.info("[MEAN_REVERSION] %s ❌ %s: %s", pair or epic, stage, reason)
         if self._rej_mgr is not None:
             self._rej_mgr.reject(
                 stage=stage,

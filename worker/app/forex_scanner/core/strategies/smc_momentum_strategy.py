@@ -510,6 +510,10 @@ class SMCMomentumStrategy(StrategyInterface):
             "detail": detail,
             "ts": datetime.now(timezone.utc).isoformat(),
         })
+        msg = f"[SMC_MOMENTUM] {epic} ❌ {reason}"
+        if detail:
+            msg += f": {detail}"
+        self.logger.info(msg)
         if self._rej_mgr is not None:
             now = self._current_timestamp if hasattr(self, "_current_timestamp") and self._current_timestamp else datetime.now(timezone.utc)
             if isinstance(now, pd.Timestamp):

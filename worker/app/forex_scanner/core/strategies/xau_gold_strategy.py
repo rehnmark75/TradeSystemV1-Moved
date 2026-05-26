@@ -1510,7 +1510,7 @@ class XAUGoldStrategy(StrategyInterface):
         self._rejections.append(_Rejection(epic=epic, reason=reason, detail=detail, ts=now))
         self._rej_counts[reason] = self._rej_counts.get(reason, 0) + 1
         self._scan_count += 1
-        self.logger.debug(f"[XAU_GOLD] {epic} rejected: {reason} ({detail})")
+        self.logger.info(f"[XAU_GOLD] {epic} ❌ {reason}" + (f": {detail}" if detail else ""))
         if self._rej_mgr is not None:
             self._rej_mgr.reject(
                 stage=reason,

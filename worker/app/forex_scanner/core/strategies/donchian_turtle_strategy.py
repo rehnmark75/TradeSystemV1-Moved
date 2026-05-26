@@ -123,6 +123,7 @@ class DonchianTurtleStrategy(StrategyInterface):
         scan_timestamp: Optional[datetime] = None,
         details: Optional[Dict[str, Any]] = None,
     ) -> None:
+        logger.info("[DONCHIAN_TURTLE] %s ❌ %s: %s", pair or epic, stage, reason)
         if self._rej_mgr is not None:
             self._rej_mgr.reject(
                 stage=stage,
