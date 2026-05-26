@@ -119,33 +119,42 @@ All strategies must implement:
 
 ### Signal Dictionary Format
 
-The `detect_signal()` method should return a dict with these fields:
+The `detect_signal()` method must return a dict with **all required fields** or the
+TradeValidator will reject the signal with `Missing required fields: ['signal_type']`.
+
+> **Lesson learned (May 2026):** DONCHIAN_TURTLE shipped with only `'signal': direction`
+> and no `'signal_type'` key. Every signal was dropped at validation with direction
+> logged as "Unknown". Always include all three direction keys.
 
 ```python
 signal = {
-    # Required
-    'signal': 'BUY',              # 'BUY' or 'SELL'
-    'signal_type': 'buy',         # lowercase
-    'strategy': 'MY_MOMENTUM',    # Strategy name
-    'epic': 'CS.D.EURUSD.CEEM.IP',
-    'pair': 'EURUSD',
-    'entry_price': 1.08500,
-    'stop_loss_pips': 15.0,
-    'take_profit_pips': 25.0,
+    # ── REQUIRED by TradeValidator ─────────────────────────────────────────────
+    'signal':       'BUY',           # uppercase 'BUY' or 'SELL'
+    'signal_type':  'BUY',           # MUST match 'signal', MUST be uppercase
+    'direction':    'BUY',           # same value — used by LPF direction gates
+    'strategy':     'MY_MOMENTUM',
+    'epic':         'CS.D.EURUSD.CEEM.IP',
+    'pair':         'EURUSD',
+    'entry_price':  1.08500,
+    'risk_pips':    15.0,            # stop-loss distance (BacktestScanner key)
+    'reward_pips':  25.0,            # take-profit distance (BacktestScanner key)
     'confidence_score': 0.75,
-    'signal_timestamp': '2026-01-03T10:30:00Z',
+    'timestamp':    datetime.now(timezone.utc),
 
-    # Optional but recommended
+    # ── Recommended ───────────────────────────────────────────────────────────
     'strategy_indicators': {
         'ema_50': 1.08450,
         'rsi': 55.2,
         'atr_pips': 8.5,
     },
-    'entry_type': 'pullback',     # or 'momentum', 'breakout', etc.
-    'htf_bias': 'bullish',
+    'entry_type': 'MOMENTUM',        # used by LPF — must be uppercase string
     'version': '1.0.0',
+    'monitor_only': False,
 }
 ```
+
+Use `_build_signal()` from the template rather than assembling the dict manually —
+it includes all required keys and calls `enrich_signal_with_performance_metrics()`.
 
 ---
 

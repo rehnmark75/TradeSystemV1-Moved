@@ -266,9 +266,12 @@ class SignalDetector:
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
-        known = {'SMC_SIMPLE', 'MEAN_REVERSION', 'RANGE_FADE', 'XAU_GOLD', 'SMC_MOMENTUM', 'IMPULSE_FADE', 'FA_OR_ATR_TRAIL', 'DONCHIAN_TURTLE'}
+        try:
+            from forex_scanner.services.scanner_config_service import KNOWN_ACTIVE_STRATEGIES as known
+        except ImportError:
+            from services.scanner_config_service import KNOWN_ACTIVE_STRATEGIES as known
         if canonical not in known:
-            return False, f"Unknown or archived strategy: {strategy_name}. Available: SMC_SIMPLE, MEAN_REVERSION, RANGE_FADE, XAU_GOLD, SMC_MOMENTUM, IMPULSE_FADE, FA_OR_ATR_TRAIL, DONCHIAN_TURTLE."
+            return False, f"Unknown or archived strategy: {strategy_name}. Available: {', '.join(sorted(known))}."
 
         if canonical == 'SMC_SIMPLE':
             # SMC Simple has its own lazy-load path; just arm the flag.

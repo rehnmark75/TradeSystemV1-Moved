@@ -35,6 +35,20 @@ import psycopg2.extras
 
 logger = logging.getLogger(__name__)
 
+# Single source of truth for active strategies. When a new strategy is added to
+# signal_detector.py, add its name here — the config service will auto-insert it
+# into scanner_global_config.enabled_strategies for every config_set on startup.
+KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
+    'SMC_SIMPLE',
+    'MEAN_REVERSION',
+    'RANGE_FADE',
+    'XAU_GOLD',
+    'SMC_MOMENTUM',
+    'IMPULSE_FADE',
+    'FA_OR_ATR_TRAIL',
+    'DONCHIAN_TURTLE',
+})
+
 
 @dataclass
 class ScannerConfig:
@@ -570,6 +584,28 @@ class ScannerConfigService:
                 config.loaded_at = datetime.now()
                 config.cache_age_minutes = 0.0
                 config.config_id = row['id']
+
+                # Auto-sync: ensure every known strategy is in enabled_strategies.
+                # Any strategy present in KNOWN_ACTIVE_STRATEGIES but absent from
+                # the DB row gets added here and persisted, so developers only need
+                # to update KNOWN_ACTIVE_STRATEGIES when wiring a new strategy.
+                current = set(config.enabled_strategies or [])
+                missing = KNOWN_ACTIVE_STRATEGIES - current
+                if missing:
+                    logger.warning(
+                        "[CONFIG:DB] Strategies missing from enabled_strategies "
+                        "(config_set=%s, id=%s): %s — auto-adding.",
+                        self.config_set, row['id'], sorted(missing),
+                    )
+                    updated = sorted(current | missing)
+                    cur.execute(
+                        "UPDATE scanner_global_config "
+                        "SET enabled_strategies = %s::jsonb "
+                        "WHERE id = %s",
+                        (json.dumps(updated), row['id']),
+                    )
+                    conn.commit()
+                    config.enabled_strategies = updated
 
                 # Check if config changed
                 if self._cached_config and self._config_changed(config):

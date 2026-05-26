@@ -284,13 +284,15 @@ class DonchianTurtleStrategy(StrategyInterface):
 
             signal = {
                 "signal": direction,
+                "signal_type": direction,
+                "direction": direction,
                 "strategy": "DONCHIAN_TURTLE",
                 "entry_price": entry_price,
                 "stop_price": stop_price,
                 "target_price": target_price,
                 "risk_pips": sl_pips,
                 "reward_pips": tp_pips,
-                "confidence": confidence,
+                "confidence_score": confidence,
                 "monitor_only": monitor_only,
                 "atr_pips": round(atr_pips, 1),
                 "donchian_entry_high": round(entry_high, 5),
