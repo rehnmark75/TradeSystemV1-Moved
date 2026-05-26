@@ -10112,13 +10112,14 @@ table {
 .ta-postmortem-wrap { margin-top: 20px; }
 
 .pm-panel {
-  background: rgba(15, 23, 42, 0.04);
-  border: 1px solid rgba(148, 163, 184, 0.15);
+  background: rgba(15, 23, 42, 0.86);
+  border: 1px solid rgba(148, 163, 184, 0.24);
   border-radius: 8px;
   padding: 16px;
   display: flex;
   flex-direction: column;
   gap: 14px;
+  color: #dbeafe;
 }
 
 .pm-header {
@@ -10129,11 +10130,11 @@ table {
 .pm-title {
   font-weight: 700;
   font-size: 0.9rem;
-  color: #1e293b;
+  color: #f8fafc;
 }
 .pm-meta {
   font-size: 0.75rem;
-  color: #94a3b8;
+  color: #a8b8cf;
 }
 
 /* Verdict row */
@@ -10154,31 +10155,31 @@ table {
   font-size: 0.7rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  opacity: 0.65;
+  color: rgba(226, 232, 240, 0.78);
 }
 .pm-verdict-value {
   font-size: 0.85rem;
   font-weight: 700;
 }
 .pm-verdict-green {
-  background: rgba(34, 197, 94, 0.10);
-  border: 1px solid rgba(34, 197, 94, 0.22);
-  color: #16a34a;
+  background: rgba(22, 101, 52, 0.42);
+  border: 1px solid rgba(74, 222, 128, 0.45);
+  color: #86efac;
 }
 .pm-verdict-amber {
-  background: rgba(245, 158, 11, 0.10);
-  border: 1px solid rgba(245, 158, 11, 0.22);
-  color: #d97706;
+  background: rgba(120, 53, 15, 0.48);
+  border: 1px solid rgba(251, 191, 36, 0.5);
+  color: #fde68a;
 }
 .pm-verdict-red {
-  background: rgba(239, 68, 68, 0.10);
-  border: 1px solid rgba(239, 68, 68, 0.22);
-  color: #dc2626;
+  background: rgba(127, 29, 29, 0.48);
+  border: 1px solid rgba(248, 113, 113, 0.52);
+  color: #fecaca;
 }
 .pm-verdict-gray {
-  background: rgba(148, 163, 184, 0.08);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  color: #64748b;
+  background: rgba(51, 65, 85, 0.56);
+  border: 1px solid rgba(148, 163, 184, 0.34);
+  color: #cbd5e1;
 }
 
 /* Notes */
@@ -10197,13 +10198,13 @@ table {
   font-size: 0.72rem;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-  color: #94a3b8;
+  color: #93c5fd;
   font-weight: 600;
   padding-top: 1px;
 }
 .pm-note-text {
   font-size: 0.85rem;
-  color: #334155;
+  color: #dbeafe;
   line-height: 1.5;
 }
 
@@ -10212,20 +10213,20 @@ table {
   display: flex;
   gap: 8px;
   align-items: flex-start;
-  background: rgba(99, 102, 241, 0.06);
-  border: 1px solid rgba(99, 102, 241, 0.14);
+  background: rgba(49, 46, 129, 0.45);
+  border: 1px solid rgba(129, 140, 248, 0.42);
   border-radius: 6px;
   padding: 10px 12px;
   font-size: 0.86rem;
-  color: #3730a3;
+  color: #e0e7ff;
   line-height: 1.5;
 }
 .pm-lesson-icon { flex-shrink: 0; }
 
 /* Config delta */
 .pm-delta {
-  background: rgba(245, 158, 11, 0.06);
-  border: 1px solid rgba(245, 158, 11, 0.18);
+  background: rgba(120, 53, 15, 0.36);
+  border: 1px solid rgba(251, 191, 36, 0.42);
   border-radius: 6px;
   padding: 10px 12px;
   display: flex;
@@ -10235,13 +10236,14 @@ table {
 .pm-delta-title {
   font-size: 0.8rem;
   font-weight: 600;
-  color: #92400e;
+  color: #fde68a;
   display: flex;
   align-items: center;
   gap: 6px;
 }
 .pm-delta-pair {
-  background: rgba(245, 158, 11, 0.15);
+  background: rgba(245, 158, 11, 0.22);
+  border: 1px solid rgba(251, 191, 36, 0.3);
   padding: 1px 6px;
   border-radius: 4px;
   font-size: 0.75rem;
@@ -10249,7 +10251,7 @@ table {
 }
 .pm-delta-action {
   font-size: 0.78rem;
-  opacity: 0.75;
+  color: #fcd34d;
 }
 .pm-delta-value {
   font-weight: 700;
@@ -10257,7 +10259,7 @@ table {
 }
 .pm-delta-rationale {
   font-size: 0.82rem;
-  color: #78350f;
+  color: #ffedd5;
   line-height: 1.45;
 }
 
@@ -10274,9 +10276,9 @@ table {
   letter-spacing: 0.04em;
   padding: 2px 8px;
   border-radius: 4px;
-  background: rgba(148, 163, 184, 0.10);
-  border: 1px solid rgba(148, 163, 184, 0.18);
-  color: #475569;
+  background: rgba(51, 65, 85, 0.7);
+  border: 1px solid rgba(148, 163, 184, 0.32);
+  color: #dbeafe;
 }
 
 .trail-timeline {
