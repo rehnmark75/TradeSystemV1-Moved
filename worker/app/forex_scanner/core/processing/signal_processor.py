@@ -627,45 +627,24 @@ class SignalProcessor:
         if confidence < 0.6:
             return False
 
-        # Check if strategy supports smart money analysis
+        # Check if strategy supports smart money analysis via registry
         strategy = signal.get('strategy', '').strip().lower()
 
-        # EXPLICIT strategy mapping for smart money compatibility
-        smart_money_strategies = {
-            'ema': True,
-            'macd': True,
-            'kama': True,
-            'combined': True,
-            'ichimoku': True,
-            'smc': True,
-            'smc_fast': True,
-            'smc_simple': True,
-            'smc_structure': True,
-            'momentum': True,
-            # Traditional technical analysis strategies that DON'T use smart money
-            'mean_reversion': False,
-            'ranging_market': False,
-            'range_fade': False,
-            'range_structure': False,
-            'zero_lag': False,
-            'zero_lag_squeeze': False,
-            'xau_gold': False,
-            'donchian_turtle': False,
-            'smc_momentum': True,
-            'impulse_fade': False
-        }
+        try:
+            from core.strategies.strategy_registry import StrategyRegistry
+        except ImportError:
+            from forex_scanner.core.strategies.strategy_registry import StrategyRegistry
 
-        # Check explicit mapping first
-        if strategy in smart_money_strategies:
-            should_analyze = smart_money_strategies[strategy]
-            self.logger.debug(f"🧠 Smart Money check for '{strategy}': {'✅ Enabled' if should_analyze else '❌ Disabled (traditional TA strategy)'}")
+        registry = StrategyRegistry.get_instance()
+        strategy_class = registry._strategies.get(strategy.upper())
+        if strategy_class is not None:
+            should_analyze = getattr(strategy_class, 'uses_smart_money_analysis', False)
+            self.logger.debug(f"🧠 Smart Money check for '{strategy}': {'✅ Enabled' if should_analyze else '❌ Disabled'}")
             return should_analyze
 
-        # Fallback for unknown strategies - log and use keyword matching
-        smart_money_keywords = ['ema', 'macd', 'combined', 'smc', 'ichimoku']
-        should_analyze = any(keyword in strategy for keyword in smart_money_keywords)
-        self.logger.warning(f"🧠 Unknown strategy '{strategy}' - using keyword fallback: {'✅ Enabled' if should_analyze else '❌ Disabled'}")
-        return should_analyze
+        # Truly unknown — not registered at all
+        self.logger.warning(f"🧠 Unknown strategy '{strategy}' not in registry - defaulting to no smart money analysis")
+        return False
     
     def _run_smart_money_analysis(self, signal: Dict, epic: str) -> Optional[Dict]:
         """Run smart money analysis with timeout protection"""

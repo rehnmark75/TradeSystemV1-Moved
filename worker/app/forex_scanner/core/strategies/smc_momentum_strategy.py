@@ -115,6 +115,8 @@ class SMCMomentumStrategy(StrategyInterface):
     reverting with trend). SL beyond swept level; TP = ATR(14, 1H) * multiplier.
     """
 
+    uses_smart_money_analysis: bool = True
+
     def __init__(
         self,
         config=None,

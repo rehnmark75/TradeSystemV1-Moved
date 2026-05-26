@@ -75,6 +75,10 @@ class StrategyInterface(ABC):
         """Flush any pending rejections to database (optional)"""
         pass
 
+    # Set to True in strategies that use Smart Money Concepts (SMC) analysis.
+    # Controls whether signal_processor runs Claude vision analysis on signals.
+    uses_smart_money_analysis: bool = False
+
     def get_lpf_extra_context(self, signal: Dict) -> Optional[Dict]:
         """Return strategy-specific data for the LPF (opt-in).
 
@@ -255,6 +259,7 @@ def _auto_register_smc_simple():
         # Create a wrapper class that implements StrategyInterface
         class SMCSimpleStrategyWrapper:
             """Wrapper to make SMC Simple compatible with registry"""
+            uses_smart_money_analysis: bool = True
 
             def __init__(self, config=None, db_manager=None, logger=None):
                 self._strategy = create_smc_simple_strategy(
