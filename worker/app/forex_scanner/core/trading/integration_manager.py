@@ -367,9 +367,6 @@ class IntegrationManager:
             return signals
 
         # Guard: Skip Claude for disabled pairs and monitor-only pairs (saves API cost)
-        # Exception: agent mode runs on ALL enabled pairs including monitor-only — shadow
-        # observation is the point, and monitor_only pairs are exactly the ones we want to
-        # validate before promoting them.
         agent_mode = self.claude_analysis_mode == 'agent'
 
         enabled_signals = []
@@ -382,14 +379,13 @@ class IntegrationManager:
                     strat = str(sig.get('strategy', '')).upper()
                     is_smc_simple = strat == 'SMC_SIMPLE'
                     skip_reason = None
-                    if not agent_mode:
-                        # Legacy path: skip monitor_only pairs to save API cost
-                        if sig.get('monitor_only', False):
-                            skip_reason = 'signal_monitor_only'
-                        elif is_smc_simple and epic:
-                            pair_overrides = smc_cfg._pair_overrides.get(epic, {})
-                            if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
-                                skip_reason = 'monitor_only'
+                    # Skip monitor_only pairs in all modes (agent and legacy)
+                    if sig.get('monitor_only', False):
+                        skip_reason = 'signal_monitor_only'
+                    elif is_smc_simple and epic:
+                        pair_overrides = smc_cfg._pair_overrides.get(epic, {})
+                        if pair_overrides.get('parameter_overrides', {}).get('monitor_only', False):
+                            skip_reason = 'monitor_only'
                     # Always skip truly disabled pairs regardless of mode
                     if not skip_reason and is_smc_simple and epic and not smc_cfg.is_pair_enabled(epic):
                         skip_reason = 'pair_not_enabled'
