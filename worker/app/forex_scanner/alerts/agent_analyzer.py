@@ -102,6 +102,55 @@ Decision rules:
 - NEUTRAL is reserved for edge cases where evidence is inconclusive; approved = false"""
 
 
+def _extract_indicators(signal: Dict) -> Dict:
+    """
+    Pull key indicator values from wherever the strategy stored them.
+
+    Strategies nest indicators differently — XAU_GOLD puts ADX inside
+    strategy_indicators.dataframe_analysis.adx_data; SMC_SIMPLE surfaces
+    some at the top level. This function checks both locations so the agent
+    always sees the same flat set regardless of strategy.
+    """
+    ind: Dict = {}
+    si = signal.get("strategy_indicators") or {}
+
+    # Helper: first non-None value from a list of (obj, key) pairs
+    def first(*pairs):
+        for obj, key in pairs:
+            v = obj.get(key) if isinstance(obj, dict) else None
+            if v is not None:
+                return v
+        return None
+
+    da = si.get("dataframe_analysis") or {}
+    adx_data = da.get("adx_data") or {}
+    other_ind = da.get("other_indicators") or {}
+
+    adx = first((adx_data, "adx"), (si, "adx"), (signal, "adx"))
+    if adx is not None:
+        ind["ADX"] = round(float(adx), 1)
+
+    plus_di = first((adx_data, "plus_di"), (si, "plus_di"))
+    minus_di = first((adx_data, "minus_di"), (si, "minus_di"))
+    if plus_di is not None and minus_di is not None:
+        ind["+DI"] = round(float(plus_di), 1)
+        ind["-DI"] = round(float(minus_di), 1)
+
+    rsi = first((other_ind, "rsi"), (si, "rsi_14"), (si, "rsi"), (signal, "rsi"))
+    if rsi is not None:
+        ind["RSI"] = round(float(rsi), 1)
+
+    rr = first((si, "rr_ratio"), (signal, "rr_ratio"), (signal, "risk_reward_ratio"))
+    if rr is not None:
+        ind["RR"] = round(float(rr), 2)
+
+    htf = first((si, "htf_bias"), (signal, "htf_bias"), (signal, "ema_bias"))
+    if htf is not None:
+        ind["HTF_BIAS"] = htf
+
+    return ind
+
+
 def _build_signal_prompt(signal: Dict) -> str:
     """Convert signal dict into a concise user-turn message for the agent."""
     epic = signal.get("epic", "Unknown")
@@ -127,11 +176,9 @@ def _build_signal_prompt(signal: Dict) -> str:
         f"Confidence: {confidence:.2f}  Regime: {regime}  Session: {session}  UTC hour: {hour}",
     ]
 
-    # Include key indicator values if present
-    for key in ("adx", "rsi", "macd_signal", "atr", "ema_bias", "htf_bias"):
-        val = signal.get(key)
-        if val is not None:
-            lines.append(f"{key.upper()}: {val}")
+    indicators = _extract_indicators(signal)
+    if indicators:
+        lines.append("Indicators: " + "  ".join(f"{k}={v}" for k, v in indicators.items()))
 
     lines.append(
         "\nPlease validate this signal by calling DB tools to gather evidence, then output your decision as JSON."
