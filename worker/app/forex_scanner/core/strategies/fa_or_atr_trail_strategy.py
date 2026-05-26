@@ -17,9 +17,9 @@ import pandas as pd
 from .strategy_registry import StrategyInterface, register_strategy
 
 try:
-    from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
-except ImportError:
     from services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
+except ImportError:
+    from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
 
 try:
     from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
