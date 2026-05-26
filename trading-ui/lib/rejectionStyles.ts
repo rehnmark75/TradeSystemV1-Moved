@@ -13,7 +13,9 @@ export type CategoryKey =
   | "claude"
   // Generic strategy categories (MEAN_REVERSION, IMPULSE_FADE, XAU_GOLD)
   | "regime"
+  | "event"
   | "atr"
+  | "gold"
   | "data";
 
 export interface CategoryDef {
@@ -52,7 +54,7 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
     label: "Momentum",
     description: "MACD or EMA slope against trade direction",
     color: "#34d399",
-    stages: ["MACD_MISALIGNED", "EMA_SLOPE"],
+    stages: ["MACD_MISALIGNED", "EMA_SLOPE", "MACD_HISTOGRAM_TOO_LOW", "DI_MISALIGNED_BUY", "DI_MISALIGNED_SELL"],
   },
   sr: {
     label: "S/R",
@@ -64,7 +66,15 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
     label: "Time",
     description: "Outside trading session, market hours, or cooldown active",
     color: "#94a3b8",
-    stages: ["SESSION", "COOLDOWN", "MARKET_HOURS"],
+    stages: [
+      "SESSION",
+      "COOLDOWN",
+      "MARKET_HOURS",
+      "SESSION_BLOCKED",
+      "BUY_SESSION_BLOCKED",
+      "DIRECTION_SESSION_BLOCKED",
+      "POST_LOSS_SESSION_BLOCK",
+    ],
   },
   market: {
     label: "Market",
@@ -101,17 +111,30 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
     description: "Volatility / trend regime gate rejected the signal (ADX, low-vol, trending required)",
     color: "#f59e0b",
     stages: [
-      "LOW_VOL_REGIME", "ADX_PRIMARY", "ADX_HTF", "REGIME_NOT_TRENDING", "REGIME_RANGING", "REGIME_EXPANSION",
+      "LOW_VOL_REGIME", "ADX", "ADX_PRIMARY", "ADX_HTF", "ADX_CEILING", "HTF_ADX_CEILING",
+      "REGIME_NOT_TRENDING", "REGIME_RANGING", "REGIME_EXPANSION", "ER_FLOOR", "ER_CEILING",
       // SMC_MOMENTUM structure gates
       "HTF_MISALIGN", "HTF_DISTANCE", "ATR_EXPANSION",
       "NO_LIQUIDITY_POOLS", "NO_SWEEP", "LOW_CONFIDENCE",
     ],
   },
+  event: {
+    label: "Event",
+    description: "Event-aware filters or confidence gates blocked the setup",
+    color: "#e879f9",
+    stages: ["EVENT_ADAPTIVE_FILTERED", "EVENT_LOW_CONFIDENCE"],
+  },
   atr: {
     label: "ATR / Body",
     description: "ATR spike guard or impulse body check failed",
     color: "#10b981",
-    stages: ["ATR_SPIKE", "ATR_UNAVAILABLE", "BODY_TOO_SMALL"],
+    stages: ["ATR_SPIKE", "ATR_UNAVAILABLE", "ATR_FLOOR", "BODY_TOO_SMALL"],
+  },
+  gold: {
+    label: "Gold",
+    description: "XAU-specific confirmation, RSI, or session-range gates blocked the setup",
+    color: "#facc15",
+    stages: ["STRICT_BOS_PULLBACK_DISABLED", "RANGE_BREAK_ASIAN_RANGING", "RSI_BUY_CEILING", "RSI_SELL_FLOOR"],
   },
   data: {
     label: "Data",
@@ -122,7 +145,11 @@ export const CATEGORIES: Record<CategoryKey, CategoryDef> = {
       "INSUFFICIENT_HTF_DATA",
       "NO_PATTERN",
       "NO_BOS",
+      "NO_BREAKOUT",
       "NO_OB_OR_FVG",
+      "NO_SETUP",
+      "NO_PULLBACK_ENTRY",
+      "MISSING_FVG_CONFLUENCE",
       "TIER2_NO_SIGNAL",
       "TIER3_NO_ENTRY",
       // RANGE_FADE-specific
@@ -151,7 +178,9 @@ export const CATEGORY_ORDER: CategoryKey[] = [
   "lpf",
   "claude",
   "regime",
+  "event",
   "atr",
+  "gold",
   "data",
 ];
 
@@ -170,12 +199,19 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   VOLUME_NO_DATA: "No volume data available",
   MACD_MISALIGNED: "Direction against MACD momentum",
   EMA_SLOPE: "Entry against EMA slope direction",
+  MACD_HISTOGRAM_TOO_LOW: "MACD histogram below minimum momentum threshold",
+  DI_MISALIGNED_BUY: "Directional index alignment does not support a buy",
+  DI_MISALIGNED_SELL: "Directional index alignment does not support a sell",
   SR_PATH_BLOCKED: "S/R levels block path to target",
   SR_LEVEL: "Blocked by individual S/R level",
   SR_CLUSTER: "Blocked by S/R cluster",
   SESSION: "Outside trading session / blocked hour",
   COOLDOWN: "Previous signal too recent",
   MARKET_HOURS: "Outside configured market hours",
+  SESSION_BLOCKED: "Blocked by the strategy session window",
+  BUY_SESSION_BLOCKED: "Buy direction blocked during this session window",
+  DIRECTION_SESSION_BLOCKED: "Direction-specific session filter blocked the setup",
+  POST_LOSS_SESSION_BLOCK: "Post-loss session protection blocked the setup",
   SMC_CONFLICT: "SMC structure conflicts with signal",
   MARKET_BIAS_FILTER: "Trade against dominant market bias",
   REVERSAL_FILTER: "Continues prior trend in reversal regime",
@@ -189,19 +225,35 @@ export const STAGE_DESCRIPTIONS: Record<string, string> = {
   CLAUDE_REJECTED: "Claude AI rejected signal after chart analysis",
   // Generic strategy stages
   LOW_VOL_REGIME: "Low volatility regime: ADX too low for mean-reversion entry",
+  ADX: "ADX filter outside the configured strategy range",
   ADX_PRIMARY: "ADX on primary timeframe below minimum threshold",
   ADX_HTF: "ADX on higher timeframe below minimum threshold",
+  ADX_CEILING: "ADX above maximum threshold for range-fade entry",
+  HTF_ADX_CEILING: "Higher-timeframe ADX above maximum threshold for range-fade entry",
   REGIME_NOT_TRENDING: "Market regime is not trending (required for this strategy)",
   REGIME_RANGING: "Market regime is ranging (blocked for this strategy)",
   REGIME_EXPANSION: "Volatility expansion detected — news-spike guard active",
+  ER_FLOOR: "Efficiency ratio below minimum threshold",
+  ER_CEILING: "Efficiency ratio above maximum threshold",
+  EVENT_ADAPTIVE_FILTERED: "Event-adaptive filter blocked the setup",
+  EVENT_LOW_CONFIDENCE: "Event context confidence below threshold",
   ATR_SPIKE: "ATR spike: extreme post-news volatility blocks entry",
   ATR_UNAVAILABLE: "ATR could not be calculated (insufficient data)",
+  ATR_FLOOR: "ATR below minimum volatility floor",
   BODY_TOO_SMALL: "Candle body below ATR multiplier threshold",
+  STRICT_BOS_PULLBACK_DISABLED: "Strict BOS pullback confirmation disabled this setup",
+  RANGE_BREAK_ASIAN_RANGING: "Asian-session range-break context blocked the setup",
+  RSI_BUY_CEILING: "RSI above buy ceiling threshold",
+  RSI_SELL_FLOOR: "RSI below sell floor threshold",
   INSUFFICIENT_DATA: "Not enough candle rows to evaluate strategy",
   INSUFFICIENT_HTF_DATA: "Not enough higher-timeframe candle rows",
   NO_PATTERN: "No qualifying BB/RSI pattern in current candle",
   NO_BOS: "No Break of Structure detected on trigger timeframe",
+  NO_BREAKOUT: "No Donchian breakout detected",
   NO_OB_OR_FVG: "No Order Block or Fair Value Gap found at pullback",
+  NO_SETUP: "No qualifying setup found for this scan",
+  NO_PULLBACK_ENTRY: "No pullback entry found after setup confirmation",
+  MISSING_FVG_CONFLUENCE: "Required Fair Value Gap confluence is missing",
   TIER2_NO_SIGNAL: "Tier 2 (trigger) timeframe produced no valid signal",
   TIER3_NO_ENTRY: "Tier 3 (entry) timeframe: no pullback entry found",
   // RANGE_FADE stages

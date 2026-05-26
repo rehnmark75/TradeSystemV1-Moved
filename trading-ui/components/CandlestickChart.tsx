@@ -146,7 +146,9 @@ function countByCategory(
     lpf: 0,
     claude: 0,
     regime: 0,
+    event: 0,
     atr: 0,
+    gold: 0,
     data: 0,
   };
   for (const r of rejections) {
