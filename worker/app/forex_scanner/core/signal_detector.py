@@ -40,7 +40,6 @@ try:
     from services.impulse_fade_config_service import ImpulseFadeConfigService
     from services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
     from services.donchian_turtle_config_service import DonchianTurtleConfigService
-    from services.liquidity_trap_config_service import LiquidityTrapConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -50,7 +49,6 @@ except ImportError:
     from forex_scanner.services.impulse_fade_config_service import ImpulseFadeConfigService
     from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
     from forex_scanner.services.donchian_turtle_config_service import DonchianTurtleConfigService
-    from forex_scanner.services.liquidity_trap_config_service import LiquidityTrapConfigService
 
 
 class SignalDetector:
@@ -122,10 +120,6 @@ class SignalDetector:
         # IMPULSE_FADE runs concurrently (late-US session large-body fade).
         # Per-pair is_enabled flags in impulse_fade_pair_overrides gate execution.
         self.impulse_fade_enabled = True
-
-        # LIQUIDITY_TRAP runs concurrently (failed prior-day-high/low fade, 1H trigger).
-        # Per-pair is_enabled flags in liquidity_trap_pair_overrides gate execution.
-        self.liquidity_trap_enabled = True
 
         # FA_OR_ATR_TRAIL is config-gated for forward testing. Pair rows decide
         # active vs monitor-only; scanner_global_config decides whether the
@@ -208,7 +202,6 @@ class SignalDetector:
                 'IMPULSE_FADE': 'impulse_fade_strategy',
                 'FA_OR_ATR_TRAIL': 'fa_or_atr_trail_strategy',
                 'DONCHIAN_TURTLE': 'donchian_turtle_strategy',
-                'LIQUIDITY_TRAP': 'liquidity_trap_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -960,28 +953,6 @@ class SignalDetector:
                     self.logger.error(f"❌ [IMPULSE_FADE] Error for {epic}: {e}")
                     individual_results['impulse_fade'] = None
 
-            if (self.liquidity_trap_enabled
-                    and not self._is_gold_epic(epic)
-                    and LiquidityTrapConfigService.get_instance().get_config().is_pair_enabled(epic)):
-                try:
-                    self.logger.debug(f"🔍 [LIQUIDITY_TRAP] Starting detection for {epic}")
-                    _lt_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
-                    _lt_ts = _lt_bt_time if _lt_bt_time is not None else datetime.now(timezone.utc)
-                    lt_signal = self.detect_liquidity_trap_signals(epic, pair, spread_pips, timeframe, current_timestamp=_lt_ts)
-                    individual_results['liquidity_trap'] = lt_signal
-                    if lt_signal:
-                        all_signals.append(lt_signal)
-                        mode = "MONITOR" if lt_signal.get("monitor_only") else "ACTIVE"
-                        self.logger.info(
-                            f"✅ [LIQUIDITY_TRAP:{mode}] Signal detected for {epic}: "
-                            f"{lt_signal.get('signal')} @ {lt_signal.get('entry_price', 0):.5f}"
-                        )
-                    else:
-                        self.logger.debug(f"📊 [LIQUIDITY_TRAP] No signal for {epic}")
-                except Exception as e:
-                    self.logger.error(f"❌ [LIQUIDITY_TRAP] Error for {epic}: {e}")
-                    individual_results['liquidity_trap'] = None
-
             if (self.fa_or_atr_trail_enabled
                     and not self._is_gold_epic(epic)
                     and FAORATRTrailConfigService.get_instance().get_config().is_pair_enabled(epic)):
@@ -1117,8 +1088,6 @@ class SignalDetector:
                 signal = self.detect_fa_or_atr_trail_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'DONCHIAN_TURTLE':
                 signal = self.detect_donchian_turtle_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
-            elif name == 'LIQUIDITY_TRAP':
-                signal = self.detect_liquidity_trap_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
@@ -1954,51 +1923,6 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting impulse-fade signals for {epic}: {e}")
-            return None
-
-    def detect_liquidity_trap_signals(
-        self,
-        epic: str,
-        pair: str,
-        spread_pips: float = 1.5,
-        timeframe: str = '1h',
-        current_timestamp: datetime = None,
-    ) -> Optional[Dict]:
-        """Detect signals using the LIQUIDITY_TRAP strategy (1H failed PDH/PDL breakout)."""
-        try:
-            strategy = self._get_strategy('LIQUIDITY_TRAP')
-            if strategy is None:
-                return None
-
-            # Need 96h of 1H bars to always have yesterday's full day (including weekends)
-            df_1h = self.data_fetcher.get_enhanced_data(
-                epic=epic,
-                pair=pair,
-                timeframe='1h',
-                lookback_hours=96,
-            )
-            if df_1h is None or df_1h.empty:
-                self.logger.debug(f"[LIQUIDITY_TRAP] No 1H data for {epic}")
-                return None
-
-            signal = strategy.detect_signal(
-                df_trigger=df_1h,
-                epic=epic,
-                pair=pair,
-                spread_pips=spread_pips,
-                current_timestamp=current_timestamp,
-            )
-
-            if signal:
-                signal = self._add_complete_technical_indicators(signal, df_1h)
-
-            if hasattr(strategy, 'flush_rejections'):
-                strategy.flush_rejections()
-
-            return signal
-
-        except Exception as e:
-            self.logger.error(f"❌ Error detecting liquidity-trap signals for {epic}: {e}")
             return None
 
     def detect_fa_or_atr_trail_signals(
