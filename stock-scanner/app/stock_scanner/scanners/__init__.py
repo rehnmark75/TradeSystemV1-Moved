@@ -1,7 +1,7 @@
 """
 Stock Signal Scanners Module
 
-7 consolidated scanners (TREND_REVERSAL removed - PF 1.09 too low):
+15 consolidated scanners (TREND_REVERSAL removed - PF 1.09 too low):
 
 Backtested & Optimized (PF > 1.5):
 - ZLMATrendScanner: Zero-Lag MA crossover (PF 1.55, WR 50%)
@@ -13,6 +13,14 @@ Other Strategies (lower PF, included for diversity):
 - BreakoutConfirmationScanner: 52W high breakouts with volume
 - GapAndGoScanner: Gap continuation plays
 - RSIDivergenceScanner: Price/RSI divergence reversals
+- PocketPivotScanner: Institutional accumulation patterns
+- EarningsDriftScanner: Post-earnings continuation
+- ShortSqueezeBreakoutScanner: High short-interest volume breakouts
+- SectorRotationLeaderScanner: Leaders in improving/leading sectors
+- VolatilityContractionBreakoutScanner: Range contraction breakouts
+- HighRetestScanner: 52-week high retest/reclaim setups
+- RelativeStrengthLeaderScanner: Fresh RS leaders
+- PreMarketCatalystScanner: Stored pre-market gap/news catalysts
 
 Usage:
     from stock_scanner.scanners import ScannerManager, TradingViewExporter
@@ -53,6 +61,14 @@ from .strategies import (
     BreakoutConfirmationScanner,
     GapAndGoScanner,
     RSIDivergenceScanner,
+    PocketPivotScanner,
+    EarningsDriftScanner,
+    ShortSqueezeBreakoutScanner,
+    SectorRotationLeaderScanner,
+    VolatilityContractionBreakoutScanner,
+    HighRetestScanner,
+    RelativeStrengthLeaderScanner,
+    PreMarketCatalystScanner,
 )
 
 __all__ = [
@@ -93,4 +109,12 @@ __all__ = [
     'BreakoutConfirmationScanner',
     'GapAndGoScanner',
     'RSIDivergenceScanner',
+    'PocketPivotScanner',
+    'EarningsDriftScanner',
+    'ShortSqueezeBreakoutScanner',
+    'SectorRotationLeaderScanner',
+    'VolatilityContractionBreakoutScanner',
+    'HighRetestScanner',
+    'RelativeStrengthLeaderScanner',
+    'PreMarketCatalystScanner',
 ]

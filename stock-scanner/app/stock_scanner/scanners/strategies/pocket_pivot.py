@@ -17,7 +17,7 @@ within a proper trend structure.
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
 
@@ -78,6 +78,31 @@ class PocketPivotScanner(BaseScanner):
     @property
     def description(self) -> str:
         return "Pocket Pivot - institutional accumulation within uptrend"
+
+    def _calculate_entry_levels(
+        self,
+        candidate: Dict[str, Any],
+        signal_type: SignalType
+    ) -> tuple[Decimal, Decimal, Decimal, Optional[Decimal]]:
+        """Calculate default pocket-pivot entry, stop, and targets."""
+        entry = Decimal(str(candidate.get('current_price') or 0))
+        low = Decimal(str(candidate.get('low') or 0))
+
+        if entry <= 0:
+            return Decimal('0'), Decimal('0'), Decimal('0'), None
+
+        if signal_type == SignalType.BUY:
+            stop_from_low = low * Decimal('0.98') if low > 0 else Decimal('0')
+            stop_from_pct = entry * (Decimal('1') - Decimal(str(self.config.stop_loss_pct / 100)))
+            stop = max(stop_from_low, stop_from_pct)
+            tp1 = entry * (Decimal('1') + Decimal(str(self.config.take_profit_pct / 100)))
+            tp2 = entry * Decimal('1.30')
+        else:
+            stop = entry * (Decimal('1') + Decimal(str(self.config.stop_loss_pct / 100)))
+            tp1 = entry * (Decimal('1') - Decimal(str(self.config.take_profit_pct / 100)))
+            tp2 = entry * Decimal('0.70')
+
+        return entry, stop, tp1, tp2
 
     async def scan(self, calculation_date: datetime = None) -> List[SignalSetup]:
         """
@@ -142,23 +167,24 @@ class PocketPivotScanner(BaseScanner):
                 m.rs_percentile,
                 m.rs_trend,
                 m.current_price,
-                m.ema_50,
-                m.ema_200,
+                m.sma_50,
+                m.sma_200,
                 m.atr_percent,
-                m.avg_daily_volume,
+                m.avg_volume_20,
                 m.trend_strength
             FROM stock_screening_metrics m
             WHERE m.calculation_date = (
                 SELECT MAX(calculation_date) FROM stock_screening_metrics
             )
-            AND m.rs_percentile >= %s
+            AND m.rs_percentile >= $1
             AND m.current_price > 5  -- Min price filter
-            AND m.avg_daily_volume > 500000  -- Min liquidity
-            AND m.ema_50 IS NOT NULL
-            AND m.ema_200 IS NOT NULL
+            AND m.avg_volume_20 > 500000  -- Min liquidity
+            AND m.sma_50 IS NOT NULL
+            AND m.sma_200 IS NOT NULL
             ORDER BY m.rs_percentile DESC
         """
-        return await self.db_manager.fetch_all(query, (self.config.min_rs_percentile,))
+        rows = await self.db.fetch(query, self.config.min_rs_percentile)
+        return [dict(row) for row in rows]
 
     async def _check_pocket_pivot(
         self,
@@ -169,10 +195,11 @@ class PocketPivotScanner(BaseScanner):
         """Check if ticker shows a valid Pocket Pivot pattern."""
 
         # Get candle data for analysis
-        candles = await self.data_provider.get_candles(
-            ticker,
+        candles = await self.data_provider.get_historical_data(
+            ticker=ticker,
             start_date=calculation_date - timedelta(days=30),
-            end_date=calculation_date
+            end_date=calculation_date,
+            timeframe='1d',
         )
 
         if candles is None or len(candles) < 15:
@@ -191,8 +218,8 @@ class PocketPivotScanner(BaseScanner):
             return None
 
         # Get EMA values from metrics
-        ema_50 = float(ticker_data.get('ema_50') or 0)
-        ema_200 = float(ticker_data.get('ema_200') or 0)
+        ema_50 = float(ticker_data.get('sma_50') or 0)
+        ema_200 = float(ticker_data.get('sma_200') or 0)
 
         # Check trend structure: Price > EMA 50 > EMA 200
         if not (today_close > ema_50 > ema_200):
@@ -341,7 +368,3 @@ class PocketPivotScanner(BaseScanner):
             score -= 3
 
         return min(max(score, 0), 100)
-
-
-# Import for timedelta
-from datetime import timedelta

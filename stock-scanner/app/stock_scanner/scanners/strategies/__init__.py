@@ -14,6 +14,13 @@ Other Strategies:
 - GapAndGoScanner: Gap continuation plays
 - RSIDivergenceScanner: Price/RSI divergence reversals
 - PocketPivotScanner: Institutional accumulation patterns (O'Neil methodology)
+- EarningsDriftScanner: Post-earnings continuation
+- ShortSqueezeBreakoutScanner: High short-interest volume breakouts
+- SectorRotationLeaderScanner: Leaders in improving/leading sectors
+- VolatilityContractionBreakoutScanner: Range contraction breakouts
+- HighRetestScanner: 52-week high retest/reclaim setups
+- RelativeStrengthLeaderScanner: Fresh RS leaders
+- PreMarketCatalystScanner: Stored pre-market gap/news catalysts
 """
 
 # Backtested & optimized strategies (PF > 1.5)
@@ -27,6 +34,15 @@ from .breakout_confirmation import BreakoutConfirmationScanner
 from .gap_and_go import GapAndGoScanner
 from .rsi_divergence import RSIDivergenceScanner
 from .pocket_pivot import PocketPivotScanner
+from .catalyst_scanners import (
+    EarningsDriftScanner,
+    ShortSqueezeBreakoutScanner,
+    SectorRotationLeaderScanner,
+    VolatilityContractionBreakoutScanner,
+    HighRetestScanner,
+    RelativeStrengthLeaderScanner,
+    PreMarketCatalystScanner,
+)
 
 __all__ = [
     # Backtested & optimized (PF > 1.5)
@@ -39,4 +55,11 @@ __all__ = [
     'GapAndGoScanner',
     'RSIDivergenceScanner',
     'PocketPivotScanner',
+    'EarningsDriftScanner',
+    'ShortSqueezeBreakoutScanner',
+    'SectorRotationLeaderScanner',
+    'VolatilityContractionBreakoutScanner',
+    'HighRetestScanner',
+    'RelativeStrengthLeaderScanner',
+    'PreMarketCatalystScanner',
 ]

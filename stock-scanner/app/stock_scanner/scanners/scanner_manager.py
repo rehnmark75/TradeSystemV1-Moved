@@ -28,6 +28,14 @@ from .strategies import (
     GapAndGoScanner,
     ReversalScanner,  # PF 2.44 - Best performer
     RSIDivergenceScanner,
+    PocketPivotScanner,
+    EarningsDriftScanner,
+    ShortSqueezeBreakoutScanner,
+    SectorRotationLeaderScanner,
+    VolatilityContractionBreakoutScanner,
+    HighRetestScanner,
+    RelativeStrengthLeaderScanner,
+    PreMarketCatalystScanner,
     # TrendReversalScanner removed - PF 1.09 too low
 )
 
@@ -105,6 +113,14 @@ class ScannerManager:
         'breakout_confirmation': BreakoutConfirmationScanner,
         'gap_and_go': GapAndGoScanner,
         'rsi_divergence': RSIDivergenceScanner,
+        'pocket_pivot': PocketPivotScanner,
+        'earnings_drift': EarningsDriftScanner,
+        'short_squeeze_breakout': ShortSqueezeBreakoutScanner,
+        'sector_rotation_leader': SectorRotationLeaderScanner,
+        'volatility_contraction_breakout': VolatilityContractionBreakoutScanner,
+        'high_retest': HighRetestScanner,
+        'relative_strength_leader': RelativeStrengthLeaderScanner,
+        'premarket_catalyst': PreMarketCatalystScanner,
     }
 
     def __init__(
