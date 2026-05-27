@@ -579,7 +579,7 @@ class IntegrationManager:
                 strategy_supports_vision = any(vs.upper() in strategy for vs in vision_strategies)
 
                 if strategy_supports_vision:
-                    self.logger.info(f"🔮 Using vision analysis for {strategy} strategy")
+                    self.logger.info(f"🤖 Routing to agent analyzer for {strategy} strategy")
                     return self.claude_analyzer.analyze_signal_with_vision(
                         signal=signal,
                         candles=candles,
