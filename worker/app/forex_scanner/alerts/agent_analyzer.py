@@ -607,7 +607,7 @@ class AgentClaudeAnalyzer:
 
             kwargs = dict(
                 model=MODEL,
-                max_tokens=1024,
+                max_tokens=4096,
                 system=system,
                 messages=messages,
                 thinking={"type": "adaptive"},
