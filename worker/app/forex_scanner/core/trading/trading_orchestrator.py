@@ -1684,10 +1684,18 @@ class TradingOrchestrator:
                     skipped = len(analyzed_signals) - len(signals_to_execute)
                     self.logger.warning(f"⚠️ Skipping {skipped} signals without alert_id (DB save failed)")
 
-                # Agent mode: only execute signals the agent approved
+                # Agent mode: execute approved + neutral signals; block only explicit rejects
                 if self.claude_analysis_mode == 'agent' and signals_to_execute:
                     agent_approved = [s for s in signals_to_execute if s.get('claude_approved', False)]
-                    agent_blocked = [s for s in signals_to_execute if not s.get('claude_approved', False)]
+                    agent_neutral = [s for s in signals_to_execute if not s.get('claude_approved', False) and s.get('claude_decision') == 'NEUTRAL']
+                    agent_blocked = [s for s in signals_to_execute if not s.get('claude_approved', False) and s.get('claude_decision') != 'NEUTRAL']
+                    if agent_neutral:
+                        for sig in agent_neutral:
+                            self.logger.info(
+                                f"⚪ [AGENT] Neutral (cold-start) — executing {sig.get('epic')} {sig.get('signal_type')} "
+                                f"to build history (score={sig.get('claude_score', '?')}, "
+                                f"reason={sig.get('claude_reason', 'no reason')[:80]})"
+                            )
                     if agent_blocked:
                         for sig in agent_blocked:
                             self.logger.info(
@@ -1696,7 +1704,7 @@ class TradingOrchestrator:
                                 f"(score={sig.get('claude_score', '?')}, "
                                 f"reason={sig.get('claude_reason', 'no reason')[:80]})"
                             )
-                    signals_to_execute = agent_approved
+                    signals_to_execute = agent_approved + agent_neutral
 
                 if signals_to_execute:
                     execution_results = self.order_manager.execute_signals(signals_to_execute)
