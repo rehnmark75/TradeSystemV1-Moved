@@ -47,6 +47,7 @@ KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
     'IMPULSE_FADE',
     'FA_OR_ATR_TRAIL',
     'DONCHIAN_TURTLE',
+    'LIQUIDITY_TRAP',
 })
 
 
