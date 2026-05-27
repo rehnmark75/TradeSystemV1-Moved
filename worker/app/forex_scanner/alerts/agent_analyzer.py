@@ -62,7 +62,7 @@ Your job is to approve or reject individual trade signals by gathering evidence 
 
 4. **Intra-day bleed**: If prior_pair_pnl_today is significantly negative AND win_rate_pct < 40%, penalise 2 score points.
 
-5. **Cold-start gate**: If pair_session_wr_recent returns trade_count < 5 for the strategy, treat the absence of history as neutral — do not penalise. Evaluate on signal indicators alone. Output NEUTRAL (score 5, approved=false) if indicators are acceptable. Only reject if a clear disqualifying fact exists (monitor_only=true, ADX violates a hard gate for that strategy, etc).
+5. **Cold-start gate**: If pair_session_wr_recent returns trade_count < 5 for the strategy, treat the absence of history as neutral — do not penalise. Evaluate on signal indicators alone using the per-strategy rules below. APPROVE (score ≥ 6) if indicators are clearly positive per the strategy rules. NEUTRAL (score 5, approved=false) only if indicators are ambiguous or mixed and you cannot form a clear view. REJECT only if a clear disqualifying fact exists (monitor_only=true, ADX violates a hard gate for that strategy, signal outside required session window, etc). Do NOT default to NEUTRAL simply because DB history is thin — absence of data is not negative evidence.
 
 6. **Tool result primacy**: DB facts from tool calls outrank qualitative indicator reads. If a tool returns a clearly negative fact (WR < 40% at n ≥ 10, monitor_only=true, significant intra-day loss with low WR), you may NOT override it with reasoning like "but the indicators look strong." The DB is ground truth; indicators are hypothesis.
 
@@ -285,10 +285,10 @@ Decision bands — all three fields MUST be mutually consistent. Reconcile befor
 - REJECT   → approved=false, score in [1,4]
 - NEUTRAL  → approved=false, score = 5
 
-NEUTRAL is REQUIRED for:
-- Cold-start (Rule 5): trade_count < 5 with no disqualifying indicator fact.
-- All tools errored or returned no usable data.
-Do not use NEUTRAL as a polite REJECT. If you have a disqualifying fact per Rule 1, always REJECT."""
+NEUTRAL is appropriate for:
+- Cold-start (Rule 5): trade_count < 5 with ambiguous or mixed indicators and no clear positive or disqualifying read. If indicators are clearly positive, use APPROVE instead.
+- All tools errored or returned no usable data AND indicators are ambiguous.
+Do not use NEUTRAL as a polite REJECT. If you have a disqualifying fact per Rule 1, always REJECT. Do not use NEUTRAL as a polite APPROVE — if evidence clearly supports approval, use APPROVE."""
 
 
 def _extract_indicators(signal: Dict) -> Dict:
