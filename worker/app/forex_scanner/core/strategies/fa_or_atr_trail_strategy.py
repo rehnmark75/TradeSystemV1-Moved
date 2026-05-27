@@ -31,7 +31,7 @@ except ImportError:
 
 
 STRATEGY_NAME = "FA_OR_ATR_TRAIL"
-VERSION = "0.1.0"
+VERSION = "0.2.0"
 
 ACTIVE_EPICS = {
     "CS.D.EURUSD.CEEM.IP",
@@ -108,6 +108,7 @@ class FAORATRTrailStrategy(StrategyInterface):
         self.adx_period = int(self.config_override.get("fa_or_adx_period", 14))
         self.rsi_period = int(self.config_override.get("fa_or_rsi_period", 14))
         self.htf_ema_period = int(self.config_override.get("fa_or_htf_ema_period", 50))
+        self.min_htf_margin_atr = float(self.config_override.get("fa_or_min_htf_margin_atr", 1.0))
 
         self._last_signal_idx: Dict[str, int] = {}
         self._live_config_service = FAORATRTrailConfigService.get_instance()
@@ -122,7 +123,7 @@ class FAORATRTrailStrategy(StrategyInterface):
 
         self.logger.info(
             "[FA_OR_ATR_TRAIL] initialized | session=%02d-%02d UTC ADX>=%.1f "
-            "SL=%.2fATR TP=%.2fATR trail=%.2f/%.2fATR",
+            "SL=%.2fATR TP=%.2fATR trail=%.2f/%.2fATR htf_margin>=%.1fATR",
             self.session_start_hour,
             self.session_end_hour,
             self.adx_min,
@@ -130,6 +131,7 @@ class FAORATRTrailStrategy(StrategyInterface):
             self.tp_atr,
             self.trail_trigger_atr,
             self.trail_distance_atr,
+            self.min_htf_margin_atr,
         )
 
     @property
@@ -261,6 +263,7 @@ class FAORATRTrailStrategy(StrategyInterface):
 
         confidence = self._confidence(row, model, atr_pips)
         regime = self._regime_label(float(row["adx"]))
+        htf_margin_atr = abs(float(row["close"]) - float(row["ema50_4h"])) / float(row["atr"])
         self._last_signal_idx[epic] = idx
 
         monitor_only = cfg.is_monitor_only(epic) if cfg else bool(self.config_override.get("monitor_only", False))
@@ -289,6 +292,7 @@ class FAORATRTrailStrategy(StrategyInterface):
             "entry_type": model,
             "market_regime": regime,
             "regime": regime,
+            "strategy_regime": regime,
             "market_session": _session_label(hour),
             "adx": float(row["adx"]),
             "rsi": float(row["rsi"]) if pd.notna(row["rsi"]) else None,
@@ -315,6 +319,8 @@ class FAORATRTrailStrategy(StrategyInterface):
                 "value_low": float(row["value_low"]) if pd.notna(row["value_low"]) else None,
                 "session_hour": hour,
                 "usd_jpy_atr_floor_pips": usd_jpy_atr_floor_pips if epic == "CS.D.USDJPY.MINI.IP" else None,
+                "htf_margin_atr": round(htf_margin_atr, 3),
+                "htf_margin_pips": round(abs(float(row["close"]) - float(row["ema50_4h"])) / pip, 1),
             },
         }
         try:
@@ -464,16 +470,17 @@ class FAORATRTrailStrategy(StrategyInterface):
         return None, None
 
     def _common_direction_filter(self, row: pd.Series, direction: str) -> bool:
+        min_margin = float(row["atr"]) * self.min_htf_margin_atr
         if direction == "BUY":
             return (
                 row["ema9"] > row["ema21"] > row["ema50"]
                 and row["ema50_slope_pips"] >= self.min_slope_pips
-                and row["close"] > row["ema50_4h"]
+                and row["close"] > row["ema50_4h"] + min_margin
             )
         return (
             row["ema9"] < row["ema21"] < row["ema50"]
             and row["ema50_slope_pips"] <= -self.min_slope_pips
-            and row["close"] < row["ema50_4h"]
+            and row["close"] < row["ema50_4h"] - min_margin
         )
 
     def _opening_range(self, df: pd.DataFrame, row: pd.Series) -> Tuple[float, float, Optional[pd.Timestamp]]:
@@ -517,7 +524,9 @@ class FAORATRTrailStrategy(StrategyInterface):
     def _confidence(row: pd.Series, model: str, atr_pips: float) -> float:
         base = 0.66 if model == "FA" else 0.68
         adx_bonus = min(0.12, max(0.0, (float(row["adx"]) - 18.0) / 100.0))
-        slope_bonus = min(0.08, abs(float(row["ema50_slope_pips"])) / 20.0)
+        # Normalize slope by ATR so a 2-pip slope on a 10-pip ATR pair scores the same
+        # as a 2-pip slope on a 2-pip ATR pair — avoids over-rewarding weak-trend slopes.
+        slope_bonus = min(0.08, abs(float(row["ema50_slope_pips"])) / max(atr_pips * 4.0, 1.0))
         atr_bonus = min(0.06, atr_pips / 200.0)
         return round(min(0.9, base + adx_bonus + slope_bonus + atr_bonus), 3)
 

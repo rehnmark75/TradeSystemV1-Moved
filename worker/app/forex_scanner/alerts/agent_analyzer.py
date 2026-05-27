@@ -246,15 +246,22 @@ Entry model: two variants — always check the MODEL indicator:
 - **FA (Failed Auction)**: price swept a prior extreme then closed back inside the value area. The rejection of the extreme IS the signal.
 - **OR (Opening Range)**: break of the London/NY opening range high or low after a lock period.
 
-Key indicators: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips).
+Key indicators: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips), HTF_MARGIN_ATR.
 
 **Baseline score: 6** if all gates pass.
 
+**Regime fields — read both, not just one:**
+- `strategy_regime`: the strategy's own ADX-based label (ranging/weak_trend/trending). This is what the strategy's gates used.
+- `market_regime`: the market intelligence system's label. It may differ and is for context only — it does NOT reflect what gates fired. Never cite `market_regime` as a reason the signal should have been blocked; the strategy's gates already ran before this field was written.
+- There is NO confluence_count field in this strategy. Do not invent one or cite it.
+
 **Scoring guide:**
 - **ATR_PIPS**: USDJPY has a hard ATR floor of 8.7 pips enforced by the strategy. If ATR_PIPS is below 8.7 on a USDJPY signal, something is anomalous — penalise 2 points. No ATR floor exists for other pairs; do NOT invent one.
-- **SLOPE**: SLOPE ≥ 0.3 confirms directional momentum → positive. SLOPE < 0.1 is flat/choppy → penalise 1 point.
+- **SLOPE**: SLOPE ≥ 0.3 confirms directional momentum → positive. SLOPE < 0.1 is flat/choppy → penalise 1 point. Note: slope is now scored relative to ATR, so a 2-pip slope on a 10-pip ATR pair scores lower than the raw number suggests.
 - **ADX 18–25 is the sweet spot** — this strategy targets range-to-trend transitions. Do NOT penalise ADX 18–22. ADX > 30 means the move may be extended → slight negative.
+- **HTF_MARGIN_ATR** (`strategy_indicators.htf_margin_atr`): distance between close and 4H EMA50, expressed in ATR units. The strategy now hard-gates at ≥ 1.0 ATR, so any live signal already cleared this. Values 1.0–1.5 are marginal (flag); values ≥ 2.0 are well-anchored (positive).
 - **VWAP proximity**: the strategy hard-rejects price more than 3×ATR from VWAP. If a signal shows price anomalously far from VWAP, treat it as a config anomaly.
+
 **Known weak conditions (90-day backtest, EURJPY n=51):**
 - Friday signals: 30% WR vs 51% Mon–Thu → penalise 1 point.
 - Hour 11 UTC (London mid-session chop): 40% WR → slight negative.
@@ -263,7 +270,7 @@ Key indicators: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips).
 **Strategy-aligned positives:**
 - Null fixed_stop_loss_pips in pair config is by design (ATR-based stops) — do NOT penalise.
 - ADX 18–22 is the TARGET zone, not a weakness.
-- MODEL=FA + regime=ranging is a valid combination — failed auctions occur at range extremes. Do NOT penalise ranging for FA entries.
+- MODEL=FA + strategy_regime=ranging is a valid combination — failed auctions occur at range extremes. Do NOT penalise ranging for FA entries.
 
 ---
 

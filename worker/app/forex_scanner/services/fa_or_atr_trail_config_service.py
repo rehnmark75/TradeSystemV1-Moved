@@ -45,6 +45,7 @@ class FAORATRTrailConfig:
     fa_or_rsi_period: int = 14
     fa_or_htf_ema_period: int = 50
     fa_or_usdjpy_atr_floor_pips: float = 8.7
+    fa_or_min_htf_margin_atr: float = 1.0
     pair_overrides: Dict[str, Dict[str, Any]] = field(default_factory=dict)
     source: str = "default"
     loaded_at: datetime = field(default_factory=datetime.now)
