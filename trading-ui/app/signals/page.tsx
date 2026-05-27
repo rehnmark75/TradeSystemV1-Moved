@@ -329,6 +329,20 @@ export default function SignalsPage() {
   const [noteEditDraft, setNoteEditDraft] = useState<Record<string, string>>({});
   const [notesOpen, setNotesOpen] = useState<Record<string, boolean>>({});
 
+  // Order form state (keyed by signal id)
+  const [orderOpen, setOrderOpen] = useState<Record<number, boolean>>({});
+  const [orderState, setOrderState] = useState<Record<number, {
+    orderType: "limit" | "market";
+    quantity: number;
+    price: number;
+    stopLoss: number;
+    takeProfit: number;
+    override: boolean;
+  }>>({});
+  const [orderLoading, setOrderLoading] = useState<Record<number, boolean>>({});
+  const [orderMessage, setOrderMessage] = useState<Record<number, { type: "success" | "error"; text: string } | null>>({});
+  const [orderConfirming, setOrderConfirming] = useState<Record<number, boolean>>({});
+
   const [scannerFilter, setScannerFilter] = useState("All Scanners");
   const [tierFilter, setTierFilter] = useState("All Tiers");
   const [statusFilter, setStatusFilter] = useState("All");
@@ -502,6 +516,91 @@ export default function SignalsPage() {
       setNoteMessage((prev) => ({ ...prev, [ticker]: "Note deleted." }));
     }
     setNoteLoading((prev) => ({ ...prev, [ticker]: false }));
+  };
+
+  const BUDGET = 500;
+
+  const initOrderState = (signal: SignalRow) => {
+    const entryPrice = numberOrNull(signal.entry_price) || 0;
+    const sl = entryPrice > 0 ? entryPrice * 0.97 : 0;
+    const tp = entryPrice > 0 ? entryPrice * 1.05 : 0;
+    const qty = entryPrice > 0 ? Math.floor(BUDGET / entryPrice) : 0;
+    return {
+      orderType: "limit" as const,
+      quantity: qty,
+      price: Number(entryPrice.toFixed(2)),
+      stopLoss: Number(sl.toFixed(2)),
+      takeProfit: Number(tp.toFixed(2)),
+      override: false,
+    };
+  };
+
+  const toggleOrder = (signal: SignalRow) => {
+    const next = !orderOpen[signal.id];
+    setOrderOpen((prev) => ({ ...prev, [signal.id]: next }));
+    if (next && !orderState[signal.id]) {
+      setOrderState((prev) => ({ ...prev, [signal.id]: initOrderState(signal) }));
+    }
+    setOrderConfirming((prev) => ({ ...prev, [signal.id]: false }));
+    setOrderMessage((prev) => ({ ...prev, [signal.id]: null }));
+  };
+
+  const updateOrder = (id: number, patch: Partial<typeof orderState[number]>) => {
+    setOrderState((prev) => {
+      const cur = prev[id];
+      if (!cur) return prev;
+      const updated = { ...cur, ...patch };
+      if (patch.price !== undefined && patch.price > 0) {
+        updated.quantity = Math.floor(BUDGET / patch.price);
+      }
+      return { ...prev, [id]: updated };
+    });
+  };
+
+  const placeOrder = async (signal: SignalRow) => {
+    const os = orderState[signal.id];
+    if (!os) return;
+    setOrderLoading((prev) => ({ ...prev, [signal.id]: true }));
+    setOrderMessage((prev) => ({ ...prev, [signal.id]: null }));
+    try {
+      const res = await fetch(`${apiPath("orders/place")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          ticker: signal.ticker,
+          side: "buy",
+          order_type: os.orderType,
+          quantity: os.quantity,
+          price: os.orderType === "limit" ? os.price : undefined,
+          stop_loss: os.stopLoss,
+          take_profit: os.takeProfit > 0 ? os.takeProfit : undefined,
+          trade_ready_override: os.override,
+          signal_id: signal.id,
+        }),
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        setOrderMessage((prev) => ({
+          ...prev,
+          [signal.id]: { type: "error", text: data?.error || "Order failed" },
+        }));
+      } else {
+        setOrderMessage((prev) => ({
+          ...prev,
+          [signal.id]: {
+            type: "success",
+            text: `Order ${data.status}! Broker ID: ${data.robomarkets_order_id || "pending"}, DB #${data.db_order_id}`,
+          },
+        }));
+        setOrderConfirming((prev) => ({ ...prev, [signal.id]: false }));
+      }
+    } catch {
+      setOrderMessage((prev) => ({
+        ...prev,
+        [signal.id]: { type: "error", text: "Network error placing order" },
+      }));
+    }
+    setOrderLoading((prev) => ({ ...prev, [signal.id]: false }));
   };
 
   const formatNoteTime = (value: string | null | undefined) => {
@@ -1035,6 +1134,152 @@ export default function SignalsPage() {
                           {signal.claude_key_risks ? <p><strong>Risks:</strong> {signal.claude_key_risks}</p> : null}
                           {claudeMessage[signal.id] ? <div className="footer-note">{claudeMessage[signal.id]}</div> : null}
                         </div>
+                      </div>
+
+                      {/* Place Order Panel */}
+                      <div className="order-panel">
+                        <h4>
+                          Place Order
+                          <button className="order-toggle-btn" onClick={() => toggleOrder(signal)}>
+                            {orderOpen[signal.id] ? "Close" : "Open"}
+                          </button>
+                        </h4>
+                        {orderOpen[signal.id] && orderState[signal.id] && (() => {
+                          const os = orderState[signal.id]!;
+                          const refPrice = os.orderType === "limit" ? os.price : (numberOrNull(signal.entry_price) || 0);
+                          const posValue = os.quantity * refPrice;
+                          const riskPerShare = refPrice - os.stopLoss;
+                          const rrRatio = riskPerShare > 0 && os.takeProfit > 0 && refPrice > 0
+                            ? ((os.takeProfit - refPrice) / riskPerShare).toFixed(2)
+                            : "-";
+                          const canReview = os.quantity > 0 && os.stopLoss > 0 && (os.orderType === "market" || os.price > 0);
+                          return (
+                            <div>
+                              <div className="order-summary-bar">
+                                <span>Budget: ${BUDGET}</span>
+                                <span>Position: ${posValue.toFixed(2)}</span>
+                                <span>Risk/share: ${riskPerShare > 0 ? riskPerShare.toFixed(2) : "-"}</span>
+                                <span>R:R: {rrRatio}</span>
+                              </div>
+                              <div className="order-grid">
+                                <div>
+                                  <label>Order Type</label>
+                                  <select
+                                    value={os.orderType}
+                                    onChange={(e) => updateOrder(signal.id, { orderType: e.target.value as "limit" | "market" })}
+                                  >
+                                    <option value="limit">Limit</option>
+                                    <option value="market">Market</option>
+                                  </select>
+                                </div>
+                                {os.orderType === "limit" && (
+                                  <div>
+                                    <label>Limit Price</label>
+                                    <input
+                                      type="number"
+                                      step="0.01"
+                                      value={os.price}
+                                      onChange={(e) => updateOrder(signal.id, { price: Number(e.target.value) })}
+                                    />
+                                  </div>
+                                )}
+                                <div>
+                                  <label>Shares</label>
+                                  <input
+                                    type="number"
+                                    step="1"
+                                    min="1"
+                                    value={os.quantity}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [signal.id]: { ...prev[signal.id]!, quantity: Number(e.target.value) }
+                                    }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label>Stop Loss</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={os.stopLoss}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [signal.id]: { ...prev[signal.id]!, stopLoss: Number(e.target.value) }
+                                    }))}
+                                  />
+                                </div>
+                                <div>
+                                  <label>Take Profit</label>
+                                  <input
+                                    type="number"
+                                    step="0.01"
+                                    value={os.takeProfit}
+                                    onChange={(e) => setOrderState((prev) => ({
+                                      ...prev,
+                                      [signal.id]: { ...prev[signal.id]!, takeProfit: Number(e.target.value) }
+                                    }))}
+                                  />
+                                </div>
+                              </div>
+                              <div className="order-override-row">
+                                <input
+                                  type="checkbox"
+                                  checked={os.override}
+                                  onChange={(e) => setOrderState((prev) => ({
+                                    ...prev,
+                                    [signal.id]: { ...prev[signal.id]!, override: e.target.checked }
+                                  }))}
+                                />
+                                <span>Override trade-ready gate.</span>
+                              </div>
+                              {!orderConfirming[signal.id] ? (
+                                <div className="order-actions">
+                                  <button
+                                    className="order-review-btn"
+                                    disabled={!canReview || orderLoading[signal.id]}
+                                    onClick={() => setOrderConfirming((prev) => ({ ...prev, [signal.id]: true }))}
+                                  >
+                                    Review Order
+                                  </button>
+                                </div>
+                              ) : (
+                                <div className="order-confirm-box">
+                                  <h5>Confirm Order</h5>
+                                  <div className="order-confirm-summary">
+                                    <div>Ticker: <strong>{signal.ticker}</strong></div>
+                                    <div>Side: <strong>BUY</strong></div>
+                                    <div>Type: <strong>{os.orderType.toUpperCase()}</strong></div>
+                                    <div>Shares: <strong>{os.quantity}</strong></div>
+                                    {os.orderType === "limit" && <div>Limit: <strong>${os.price.toFixed(2)}</strong></div>}
+                                    <div>Stop Loss: <strong>${os.stopLoss.toFixed(2)}</strong></div>
+                                    <div>Take Profit: <strong>{os.takeProfit > 0 ? `$${os.takeProfit.toFixed(2)}` : "None"}</strong></div>
+                                    <div>Total: <strong>${posValue.toFixed(2)}</strong></div>
+                                  </div>
+                                  <div className="order-confirm-actions">
+                                    <button
+                                      className="order-confirm-btn"
+                                      disabled={orderLoading[signal.id]}
+                                      onClick={() => placeOrder(signal)}
+                                    >
+                                      {orderLoading[signal.id] ? "Placing..." : "Confirm & Place"}
+                                    </button>
+                                    <button
+                                      className="order-back-btn"
+                                      onClick={() => setOrderConfirming((prev) => ({ ...prev, [signal.id]: false }))}
+                                    >
+                                      Back
+                                    </button>
+                                  </div>
+                                </div>
+                              )}
+                              {orderMessage[signal.id] && (
+                                <div className={orderMessage[signal.id]!.type === "success" ? "order-message-success" : "order-message-error"}>
+                                  {orderMessage[signal.id]!.text}
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })()}
                       </div>
                     </div>
                   ) : null}
