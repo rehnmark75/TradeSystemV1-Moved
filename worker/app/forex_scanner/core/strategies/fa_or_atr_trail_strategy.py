@@ -33,16 +33,6 @@ except ImportError:
 STRATEGY_NAME = "FA_OR_ATR_TRAIL"
 VERSION = "0.2.0"
 
-ACTIVE_EPICS = {
-    "CS.D.EURUSD.CEEM.IP",
-    "CS.D.GBPUSD.MINI.IP",
-    "CS.D.USDJPY.MINI.IP",
-    "CS.D.AUDUSD.MINI.IP",
-    "CS.D.USDCHF.MINI.IP",
-    "CS.D.EURJPY.MINI.IP",
-    "CS.D.AUDJPY.MINI.IP",
-}
-
 USDJPY_ATR_FLOOR_PIPS = 8.7
 
 
@@ -158,9 +148,6 @@ class FAORATRTrailStrategy(StrategyInterface):
         spread_pips: float = 1.5,
         **kwargs,
     ) -> Optional[Dict]:
-        if epic not in ACTIVE_EPICS:
-            self._log_rejection(epic, pair, "PAIR_OUT_OF_SCOPE", "epic is not in FAOR enabled universe")
-            return None
         cfg = None
         if not self.config_override.get("fa_or_ignore_db_pair_config", False):
             cfg = self._live_config_service.get_config()
