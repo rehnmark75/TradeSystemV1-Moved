@@ -336,13 +336,116 @@ def assess_entry_quality(
         "max_points": 30
     })
 
-    # Detect strategy type - SMC_SIMPLE uses tier1_ema, SMC_STRUCTURE uses htf_data/bos_choch
+    # Detect strategy type by key indicators present in strategy_indicators
     is_smc_simple = 'tier1_ema' in strategy_indicators
+    is_range_fade = 'bb_upper' in strategy_indicators and 'range_high' in strategy_indicators
     tier1_ema = strategy_indicators.get('tier1_ema', {}) or {}
     tier2_swing = strategy_indicators.get('tier2_swing', {}) or {}
     tier3_entry = strategy_indicators.get('tier3_entry', {}) or {}
     risk_management = strategy_indicators.get('risk_management', {}) or {}
     dataframe_analysis = strategy_indicators.get('dataframe_analysis', {}) or {}
+
+    # ------------------------------------------------------------------ #
+    # RANGE_FADE scoring — different rubric entirely from SMC_SIMPLE       #
+    # Criteria: band touch, RSI extreme, HTF bias alignment, ADX ranging  #
+    # ------------------------------------------------------------------ #
+    if is_range_fade:
+        adx_data = dataframe_analysis.get('adx_data', {}) or {}
+        adx = safe_float(adx_data.get('adx', 0))
+        rsi_val = safe_float(strategy_indicators.get('rsi', 50))
+        dist_to_high = safe_float(strategy_indicators.get('distance_to_high_pips', 999))
+        dist_to_low = safe_float(strategy_indicators.get('distance_to_low_pips', 999))
+        band_proximity = min(dist_to_high, dist_to_low)
+        htf_bias = strategy_indicators.get('htf_bias', '')
+        direction = getattr(alert, 'direction', '') if alert else ''
+
+        # 1. Band proximity (0-30): closer to band = stronger setup
+        if band_proximity <= 5:
+            band_pts, band_label = 30, f"AT band ({band_proximity:.1f} pips)"
+        elif band_proximity <= 10:
+            band_pts, band_label = 24, f"Near band ({band_proximity:.1f} pips)"
+        elif band_proximity <= 15:
+            band_pts, band_label = 18, f"Approaching ({band_proximity:.1f} pips)"
+        elif band_proximity <= 25:
+            band_pts, band_label = 10, f"Moderate ({band_proximity:.1f} pips)"
+        else:
+            band_pts, band_label = 4, f"Far ({band_proximity:.1f} pips)"
+        score += band_pts
+        factors.append({"name": "Band Proximity", "value": band_label,
+                         "points": band_pts, "max_points": 30})
+
+        # 2. RSI extreme (0-25): overbought/oversold confirms fade
+        if rsi_val >= 70 or rsi_val <= 30:
+            rsi_pts, rsi_label = 25, f"Extreme ({rsi_val:.0f})"
+        elif rsi_val >= 60 or rsi_val <= 40:
+            rsi_pts, rsi_label = 15, f"Extended ({rsi_val:.0f})"
+        else:
+            rsi_pts, rsi_label = 5, f"Neutral ({rsi_val:.0f})"
+        score += rsi_pts
+        factors.append({"name": "RSI Extreme", "value": rsi_label,
+                         "points": rsi_pts, "max_points": 25})
+
+        # 3. HTF bias alignment (0-20):
+        # BUY fading a down-move: bullish HTF = aligned; SELL fading up-move: bearish HTF = aligned
+        htf_aligned = False
+        if htf_bias and direction:
+            d = direction.upper()
+            b = htf_bias.lower()
+            htf_aligned = (d == 'BUY' and b == 'bullish') or (d == 'SELL' and b == 'bearish')
+        if htf_aligned:
+            htf_pts, htf_label = 20, f"Aligned ({htf_bias})"
+        elif htf_bias:
+            htf_pts, htf_label = 8, f"Counter-bias ({htf_bias})"
+        else:
+            htf_pts, htf_label = 0, "No bias data"
+        score += htf_pts
+        factors.append({"name": "HTF Bias", "value": htf_label,
+                         "points": htf_pts, "max_points": 20})
+
+        # 4. ADX (0-15): low ADX = ranging market = better for fade
+        if adx > 0:
+            if adx < 20:
+                adx_pts, adx_label = 15, f"Ranging ({adx:.1f})"
+            elif adx < 25:
+                adx_pts, adx_label = 10, f"Mild trend ({adx:.1f})"
+            elif adx < 30:
+                adx_pts, adx_label = 5, f"Trending ({adx:.1f})"
+            else:
+                adx_pts, adx_label = 0, f"Strong trend ({adx:.1f})"
+            score += adx_pts
+            factors.append({"name": "ADX (Ranging)", "value": adx_label,
+                             "points": adx_pts, "max_points": 15})
+
+        # 5. R:R from confidence/fixed config (0-10)
+        rr_ratio = safe_float((strategy_indicators.get('risk_management') or {}).get('rr_ratio', 0))
+        rr_pts = 10 if rr_ratio >= 1.5 else 7 if rr_ratio >= 1.0 else 3 if rr_ratio > 0 else 5
+        score += rr_pts
+        factors.append({"name": "R:R Ratio", "value": f"{rr_ratio:.2f}" if rr_ratio else "default",
+                         "points": rr_pts, "max_points": 10})
+
+        percentage = (score / 100) * 100
+        if score >= 60:
+            verdict = "GOOD_ENTRY"
+        elif score >= 40:
+            verdict = "AVERAGE_ENTRY"
+        elif score >= 25:
+            verdict = "BELOW_AVERAGE_ENTRY"
+        else:
+            verdict = "POOR_ENTRY"
+
+        return {
+            "score": round(score, 1),
+            "max_score": 100,
+            "percentage": round(percentage, 1),
+            "factors": factors,
+            "verdict": verdict,
+            "htf_aligned": htf_aligned,
+            "confluence_count": sum(1 for f in factors if f.get('points', 0) > 0),
+        }
+
+    # ------------------------------------------------------------------ #
+    # SMC_SIMPLE / SMC_STRUCTURE scoring (original logic below)           #
+    # ------------------------------------------------------------------ #
 
     # 2. HTF alignment (0-20 points)
     # SMC_SIMPLE: tier1_ema.direction, SMC_STRUCTURE: htf_data.trend or bos_choch.htf_direction

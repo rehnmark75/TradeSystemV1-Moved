@@ -15,11 +15,11 @@ logger = logging.getLogger(__name__)
 
 # Static system prompt — cached by Anthropic (5-min TTL).
 # Keep changes to this block minimal to maximise cache hits.
+# Strategy-specific context is injected per-call in the user message.
 _SYSTEM_PROMPT = """\
-You are a forex trade analyst for an automated SMC trading system on IG Markets.
+You are a forex trade analyst for an automated multi-strategy trading system on IG Markets.
 
 ## System Context
-- Strategy: SMC_SIMPLE — 3-tier (TIER1: 1H EMA bias, TIER2: 5m swing break, TIER3: 1m pullback)
 - Trailing stops: 4 progressive stages → Break-Even → Stage1 (profit lock) → Stage2 (profit lock) → Stage3 (ATR trail)
 - Account currency: SEK  |  Instrument: FX majors/crosses
 
@@ -30,8 +30,10 @@ You are a forex trade analyst for an automated SMC trading system on IG Markets.
 - Stage 3:    ATR-based dynamic trail for the run-up
 
 ## Your task
-Given structured trade data, write a concise post-mortem. Focus on:
-1. Was the entry setup strong?
+Given structured trade data, write a concise post-mortem. Evaluate the entry against
+the STRATEGY CONTEXT provided in the user message — not against a generic SMC rubric.
+Focus on:
+1. Was the entry setup strong FOR THIS STRATEGY?
 2. Did the trade capture available profit (MFE efficiency)?
 3. Did the trailing stop system behave appropriately?
 4. One concrete config suggestion (or "none" if nothing actionable).
@@ -55,6 +57,26 @@ Given structured trade data, write a concise post-mortem. Focus on:
            "MISSED_TP","GOOD_TRAILING","POOR_TIMING","HIGH_MFE_MAE","IMMEDIATE_ADVERSE","HELD_THROUGH_DRAWDOWN"]
 }\
 """
+
+# Per-strategy context injected into the user message so the agent
+# evaluates entries against the correct rubric.
+_STRATEGY_CONTEXT = {
+    "SMC_SIMPLE": (
+        "3-tier Smart Money Concepts strategy: "
+        "TIER1 (1H EMA bias/direction) → TIER2 (5m swing break) → TIER3 (1m pullback entry). "
+        "Good entry = strong HTF EMA alignment, clean swing break, pullback into optimal zone."
+    ),
+    "RANGE_FADE": (
+        "Fades large impulsive 5m candle bodies (≥2.2×ATR14) in late-US session (20-22 UTC). "
+        "Good entry = price AT or just beyond Bollinger Band, RSI extreme (>70 or <30), "
+        "fade direction aligned with HTF bias, low ADX (<25, ranging market). "
+        "Entry quality is NOT based on trend-following or HTF EMA tiers."
+    ),
+    "SMC_MOMENTUM": (
+        "Momentum-based SMC strategy using BOS/CHOCH with MACD confirmation. "
+        "Good entry = clear BOS/CHOCH, MACD aligned, strong trend context."
+    ),
+}
 
 
 def _epic_to_pair(epic: str) -> str:
@@ -80,7 +102,13 @@ def _build_user_message(
     s1 = "YES" if trade_data.get("moved_to_stage1") else "NO"
     s2 = "YES" if trade_data.get("moved_to_stage2") else "NO"
 
+    strategy = alert_data.get("strategy", "UNKNOWN")
+    strategy_desc = _STRATEGY_CONTEXT.get(strategy, f"Strategy: {strategy} (no description available)")
+
     lines = [
+        f"## Strategy Context",
+        f"**Strategy:** {strategy} — {strategy_desc}",
+        f"",
         f"## Trade: {pair} {direction}",
         f"",
         f"**Result:** P&L {pnl:+.2f} SEK | {exit_quality.get('actual_pips', 0):+.1f} pips | "
