@@ -1994,6 +1994,13 @@ class SignalDetector:
                 self.logger.debug(f"[DONCHIAN_TURTLE] No 1h data for {epic}")
                 return None
 
+            # Live 1H data includes the currently forming hour. Donchian's rule is
+            # a closed-candle breakout, so mirror RANGE_FADE and evaluate only
+            # completed candles in live scans. Backtests provide closed bars at
+            # current_backtest_time and should keep their current bar.
+            if getattr(self.data_fetcher, 'current_backtest_time', None) is None and len(df_1h) > 1:
+                df_1h = df_1h.iloc[:-1]
+
             signal = strategy.detect_signal(
                 df_trigger=df_1h,
                 epic=epic,

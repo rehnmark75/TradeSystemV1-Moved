@@ -14,7 +14,7 @@ Pairs: USDJPY (PF 1.37), USDCHF (PF 1.22), EURJPY (PF 1.18) — all monitor-only
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, Optional
 
 import pandas as pd
@@ -98,6 +98,7 @@ class DonchianTurtleStrategy(StrategyInterface):
         self._last_signal_time: Dict[str, datetime] = {}
         self._rej_mgr = None
         db_manager = kwargs.get("db_manager")
+        self.db_manager = db_manager
         if db_manager is not None and StrategyRejectionManager is not None:
             try:
                 self._rej_mgr = StrategyRejectionManager("DONCHIAN_TURTLE", db_manager)
@@ -181,6 +182,15 @@ class DonchianTurtleStrategy(StrategyInterface):
                         details={"elapsed_minutes": round(elapsed, 1), "cooldown_minutes": cooldown_minutes},
                     )
                     return None
+            db_cooldown = self._check_persisted_cooldown(
+                epic=epic,
+                pair=pair,
+                current_timestamp=current_timestamp,
+                cooldown_minutes=cooldown_minutes,
+                hour_utc=hour_utc,
+            )
+            if not db_cooldown:
+                return None
 
             entry_bars = config.get_pair_entry_bars(epic)
             exit_bars = config.get_pair_exit_bars(epic)
@@ -322,6 +332,78 @@ class DonchianTurtleStrategy(StrategyInterface):
         except Exception as exc:
             logger.error("[DONCHIAN_TURTLE] Error detecting signal for %s: %s", pair, exc)
             return None
+
+    def _check_persisted_cooldown(
+        self,
+        epic: str,
+        pair: str,
+        current_timestamp: datetime,
+        cooldown_minutes: int,
+        hour_utc: int,
+    ) -> bool:
+        """
+        Live safety net for duplicate Donchian alerts.
+
+        The in-memory cooldown is enough while a single worker keeps running,
+        but it is lost on restart. For live-ish timestamps, also check the
+        saved alert history so a restart cannot emit the same breakout again.
+        Historical backtests are skipped to avoid production alert_history
+        affecting replay results.
+        """
+        if self.db_manager is None or cooldown_minutes <= 0:
+            return True
+
+        now_utc = datetime.now(timezone.utc)
+        current_utc = current_timestamp
+        if current_utc.tzinfo is None:
+            current_utc = current_utc.replace(tzinfo=timezone.utc)
+        else:
+            current_utc = current_utc.astimezone(timezone.utc)
+
+        if abs((now_utc - current_utc).total_seconds()) > 24 * 60 * 60:
+            return True
+
+        current_naive = current_utc.replace(tzinfo=None)
+        cutoff = (current_utc - timedelta(minutes=cooldown_minutes)).replace(tzinfo=None)
+
+        try:
+            rows = self.db_manager.execute_query(
+                """
+                SELECT alert_timestamp
+                  FROM alert_history
+                 WHERE epic = :epic
+                   AND strategy = 'DONCHIAN_TURTLE'
+                   AND alert_timestamp >= :cutoff
+                   AND alert_timestamp < :current_timestamp
+                 ORDER BY alert_timestamp DESC
+                 LIMIT 1
+                """,
+                {
+                    "epic": epic,
+                    "cutoff": cutoff,
+                    "current_timestamp": current_naive,
+                },
+            )
+            if rows is not None and not rows.empty:
+                last_ts = rows.iloc[0]["alert_timestamp"]
+                elapsed = (current_naive - last_ts).total_seconds() / 60
+                self._reject(
+                    "COOLDOWN",
+                    f"persisted elapsed={elapsed:.0f}m < {cooldown_minutes}m",
+                    epic, pair,
+                    hour_utc=hour_utc,
+                    scan_timestamp=current_timestamp,
+                    details={
+                        "elapsed_minutes": round(elapsed, 1),
+                        "cooldown_minutes": cooldown_minutes,
+                        "source": "alert_history",
+                    },
+                )
+                return False
+        except Exception as exc:
+            logger.debug("[DONCHIAN_TURTLE] persisted cooldown check failed: %s", exc)
+
+        return True
 
     # ------------------------------------------------------------------
     # Helpers
