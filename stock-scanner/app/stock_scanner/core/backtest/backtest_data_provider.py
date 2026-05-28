@@ -87,10 +87,15 @@ class BacktestDataProvider:
         Returns:
             DataFrame with OHLCV + indicators, or empty DataFrame if no data
         """
-        # Check cache first
+        # Check cache first (2-hour TTL to prevent stale candle data across pipeline runs)
         cache_key = f"{ticker}_{timeframe}_{end_date}"
         if cache_key in self._data_cache:
-            return self._data_cache[cache_key].copy()
+            cache_age = (datetime.now() - self._cache_timestamps.get(cache_key, datetime.min)).total_seconds()
+            if cache_age < 7200:  # 2-hour TTL
+                return self._data_cache[cache_key].copy()
+            # Cache expired — remove it so we fetch fresh data below
+            del self._data_cache[cache_key]
+            del self._cache_timestamps[cache_key]
 
         # Fetch ALL available data up to end_date
         # This ensures we get maximum warmup for indicators
