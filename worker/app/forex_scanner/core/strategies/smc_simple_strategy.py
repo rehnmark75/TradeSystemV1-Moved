@@ -998,6 +998,7 @@ class SMCSimpleStrategy:
         self.scalp_momentum_min_depth = getattr(config, 'scalp_momentum_min_depth', -0.30)
         self.scalp_fib_pullback_min = getattr(config, 'scalp_fib_pullback_min', 0.0)
         self.scalp_fib_pullback_max = getattr(config, 'scalp_fib_pullback_max', 1.0)
+        self.scalp_micro_pullback_lookback = getattr(config, 'scalp_micro_pullback_lookback', 10)
 
         # Scalp reversal override (counter-trend) settings
         self.scalp_reversal_enabled = getattr(config, 'scalp_reversal_enabled', True)
@@ -1239,15 +1240,17 @@ class SMCSimpleStrategy:
                 if pair_htf is not None:
                     config['htf_timeframe'] = pair_htf
 
-            # Trigger timeframe: per-pair DB > global (no CLI override for this)
-            pair_trigger = self._db_config.get_pair_scalp_trigger_timeframe(epic)
-            if pair_trigger is not None:
-                config['trigger_timeframe'] = pair_trigger
+            # Trigger timeframe: CLI override > per-pair DB > global
+            if 'scalp_trigger_timeframe' not in cli_overrides:
+                pair_trigger = self._db_config.get_pair_scalp_trigger_timeframe(epic)
+                if pair_trigger is not None:
+                    config['trigger_timeframe'] = pair_trigger
 
-            # Entry timeframe: per-pair DB > global (no CLI override for this)
-            pair_entry = self._db_config.get_pair_scalp_entry_timeframe(epic)
-            if pair_entry is not None:
-                config['entry_timeframe'] = pair_entry
+            # Entry timeframe: CLI override > per-pair DB > global
+            if 'scalp_entry_timeframe' not in cli_overrides:
+                pair_entry = self._db_config.get_pair_scalp_entry_timeframe(epic)
+                if pair_entry is not None:
+                    config['entry_timeframe'] = pair_entry
 
             # Min confidence: per-pair DB > global
             pair_confidence = self._db_config.get_pair_scalp_min_confidence(epic)
@@ -3181,6 +3184,10 @@ class SMCSimpleStrategy:
                                     _atr_ratio = max(_scale_min, min(_scale_max, _current_atr_pips / _ref_atr))
                                     _atr_sl = round(fixed_sl_pips * _atr_ratio, 1)
                                     _atr_tp = round(fixed_tp_pips * _atr_ratio, 1)
+                                    # Floor TP at min_tp_pips so ATR scaling never produces a
+                                    # RISK_TP rejection when the base TP was already valid.
+                                    if _atr_tp < self.min_tp_pips:
+                                        _atr_tp = self.min_tp_pips
                                     self.logger.info(
                                         f"   📐 ATR normalization: ATR={_current_atr_pips:.1f}p "
                                         f"(ref={_ref_atr:.1f}p, ratio={_atr_ratio:.2f}x) "
@@ -5450,12 +5457,12 @@ class SMCSimpleStrategy:
             if micro_pullback < pair_fib_min:
                 return {
                     'valid': False,
-                    'reason': f"Micro-pullback too shallow ({micro_pullback*100:.1f}% < {pair_fib_min*100:.1f}% on 1m)"
+                    'reason': f"Micro-pullback too shallow ({micro_pullback*100:.1f}% < {pair_fib_min*100:.1f}% on {self.entry_tf})"
                 }
             if micro_pullback > pair_fib_max:
                 return {
                     'valid': False,
-                    'reason': f"Micro-pullback too deep ({micro_pullback*100:.1f}% > {pair_fib_max*100:.1f}% on 1m)"
+                    'reason': f"Micro-pullback too deep ({micro_pullback*100:.1f}% > {pair_fib_max*100:.1f}% on {self.entry_tf})"
                 }
 
             # Micro-pullback is valid
@@ -5469,7 +5476,7 @@ class SMCSimpleStrategy:
                 'entry_type': 'MICRO_PULLBACK',
                 'trigger_type': trigger_type,
                 'swing_range_pips': micro_range_pips,
-                'reason': f"Micro-pullback valid ({micro_pullback*100:.1f}% on 1m)"
+                'reason': f"Micro-pullback valid ({micro_pullback*100:.1f}% on {self.entry_tf})"
             }
 
         # v1.6.0: Use swing data from Tier 2 for consistent Fib calculation
