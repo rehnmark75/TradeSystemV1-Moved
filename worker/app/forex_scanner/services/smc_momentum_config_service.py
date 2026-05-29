@@ -156,7 +156,9 @@ class SMCMomentumConfig:
 
     def is_monitor_only(self, epic: str) -> bool:
         row = self._pair(epic)
-        return bool(row.get("monitor_only", True))
+        # Default to False (trade enabled pairs). Only return True if explicitly set in DB.
+        # Bug fix (May 29 2026): was defaulting to True, blocking all enabled pairs.
+        return bool(row.get("monitor_only", False))
 
     def is_traded(self, epic: str) -> bool:
         row = self._pair(epic)

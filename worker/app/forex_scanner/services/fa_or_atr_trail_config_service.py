@@ -72,7 +72,9 @@ class FAORATRTrailConfig:
         return bool(row.get("is_enabled", False)) if row else False
 
     def is_monitor_only(self, epic: str) -> bool:
-        return bool(self.get_for_pair(epic, "monitor_only", True))
+        # Default to False (trade enabled pairs). Only return True if explicitly set in DB.
+        # Bug fix (May 29 2026): was defaulting to True, blocking all enabled pairs.
+        return bool(self.get_for_pair(epic, "monitor_only", False))
 
     def is_traded(self, epic: str) -> bool:
         return bool(self.get_for_pair(epic, "is_traded", False))

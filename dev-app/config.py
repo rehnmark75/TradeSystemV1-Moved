@@ -584,8 +584,8 @@ SCALP_TRAILING_CONFIGS = {
 
     # ========== MAJOR PAIRS (15 pip optimal stop) ==========
     'CS.D.EURUSD.CEEM.IP': {
-        'early_breakeven_trigger_points': 6,    # Fire early to give 4 pips room before TP=10
-        'early_breakeven_buffer_points': 2,     # Lock +2 pips; was 1 (£9 consolation wins)
+        'early_breakeven_trigger_points': 8,    # From data: avoid premature BE
+        'early_breakeven_buffer_points': 1,     # Lock +1 pip (improved from 0.5)
         'stage1_trigger_points': 10,            # Stage1 at +10 pips
         'stage1_lock_points': 5,                # Lock +5 pips
         'stage2_trigger_points': 15,            # Stage2 at +15 pips - lock solid profit
