@@ -135,6 +135,9 @@ class SignalDetector:
         # Per-pair is_enabled flags in donchian_turtle_pair_overrides gate execution.
         self.donchian_turtle_enabled = True
 
+        # KAMA_V2 runs concurrently (AUDUSD-only 5m crossover, monitor-only at launch).
+        self.kama_v2_enabled = True
+
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
         self._strategy_router = None
@@ -202,6 +205,7 @@ class SignalDetector:
                 'IMPULSE_FADE': 'impulse_fade_strategy',
                 'FA_OR_ATR_TRAIL': 'fa_or_atr_trail_strategy',
                 'DONCHIAN_TURTLE': 'donchian_turtle_strategy',
+                'KAMA_V2': 'kama_v2_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -1001,6 +1005,27 @@ class SignalDetector:
                     self.logger.error(f"❌ [DONCHIAN_TURTLE] Error for {epic}: {e}")
                     individual_results['donchian_turtle'] = None
 
+            if self.kama_v2_enabled and not self._is_gold_epic(epic):
+                try:
+                    self.logger.debug(f"🔍 [KAMA_V2] Starting detection for {epic}")
+                    _kv2_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _kv2_ts = _kv2_bt_time if _kv2_bt_time is not None else datetime.now(timezone.utc)
+                    kv2_signal = self.detect_kama_v2_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_kv2_ts
+                    )
+                    individual_results['kama_v2'] = kv2_signal
+                    if kv2_signal:
+                        all_signals.append(kv2_signal)
+                        self.logger.info(
+                            f"✅ [KAMA_V2:MONITOR] Signal detected for {epic}: "
+                            f"{kv2_signal.get('signal')} @ {kv2_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [KAMA_V2] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [KAMA_V2] Error for {epic}: {e}")
+                    individual_results['kama_v2'] = None
+
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
@@ -1088,6 +1113,8 @@ class SignalDetector:
                 signal = self.detect_fa_or_atr_trail_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'DONCHIAN_TURTLE':
                 signal = self.detect_donchian_turtle_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'KAMA_V2':
+                signal = self.detect_kama_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
@@ -2019,4 +2046,56 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting Donchian Turtle signals for {epic}: {e}")
+            return None
+
+    def detect_kama_v2_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the KAMA V2 strategy (AUDUSD-only 5m crossover)."""
+        try:
+            strategy = self._get_strategy('KAMA_V2')
+            if strategy is None:
+                return None
+
+            # Reset cooldowns between backtest pairs (same id-tracking pattern as SMC_MOMENTUM)
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_kama_v2_backtest_id', None) != current_id:
+                    self._kama_v2_backtest_id = current_id
+                    strategy.reset_cooldowns()
+
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='5m',
+                lookback_hours=48,
+            )
+            if df_5m is None or df_5m.empty:
+                self.logger.debug(f"[KAMA_V2] No 5m data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_5m,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_5m)
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting KAMA V2 signals for {epic}: {e}")
             return None
