@@ -11,7 +11,11 @@ Edge: KAMA(10,2,30) crossover during high-efficiency market conditions.
 - 30-min cooldown per epic
 - monitor-only at launch
 
-Research baseline (90d AUDUSD sweep): n=93, WR=55.9%, PF=1.95, CI=[1.21, 2.76]
+Research baseline (90d AUDUSD sweep, fixed SL/TP): n=93, WR=55.9%, PF=1.95, CI=[1.21, 2.76]
+
+Unswept gates (default-off, ablate before enabling):
+- session_filter / blocked_hours_utc  — sweep candidate: block 21-06 UTC
+- adx_min                             — sweep candidate: 12–25
 """
 from __future__ import annotations
 
@@ -29,11 +33,21 @@ logger = logging.getLogger(__name__)
 _AUDUSD_EPIC = "CS.D.AUDUSD.MINI.IP"
 _PIP = 0.0001
 
+try:
+    from forex_scanner.services.kama_v2_config_service import get_kama_v2_config_service
+except ImportError:
+    try:
+        from services.kama_v2_config_service import get_kama_v2_config_service  # type: ignore
+    except ImportError:
+        get_kama_v2_config_service = None  # type: ignore
+
 
 @dataclass
 class KamaV2Config:
-    # Pair
-    enabled_epic: str = _AUDUSD_EPIC
+    # Pair routing
+    # "" (empty) = DB-driven: accept any epic that is enabled in kama_v2_pair_overrides
+    # Non-empty   = single-epic override (used by --override enabled_epic=X in backtests)
+    enabled_epic: str = ""
     monitor_only: bool = True
 
     # KAMA / ER parameters (must match DataFetcher kama_period=10)
@@ -47,6 +61,14 @@ class KamaV2Config:
     macd_filter: bool = True        # require MACD histogram sign alignment
     rsi_extreme_filter: bool = True # reject RSI>70 BUY, RSI<30 SELL
 
+    # Session filter — default OFF until swept (ablate: session_filter=true + blocked_hours)
+    session_filter: bool = False
+    # Comma-separated UTC hours to block, e.g. "21,22,23,0,1,2,3" for rollover+dead-Asian
+    blocked_hours_utc: str = "21,22,23,0,1,2,3"
+
+    # ADX gate — default OFF until swept (ablate: adx_min=12 through 25)
+    adx_min: float = 0.0            # 0.0 = no ADX gate
+
     # Risk
     fixed_stop_loss_pips: float = 10.0
     fixed_take_profit_pips: float = 15.0
@@ -54,11 +76,8 @@ class KamaV2Config:
     # Operational
     signal_cooldown_minutes: float = 30.0
     base_confidence: float = 0.60
-    min_confidence: float = 0.55
-    max_confidence: float = 0.85
-
-    # Backtest
-    max_hold_bars: int = 288        # 24h in 5m bars
+    min_confidence: float = 0.60    # honest: base=0.60 so nothing below can pass
+    max_confidence: float = 0.80    # honest: actual max achievable is ~0.80
 
 
 def _apply_config_override(cfg: KamaV2Config, overrides: Optional[Dict[str, Any]]) -> None:
@@ -103,10 +122,14 @@ class KamaV2Strategy(StrategyInterface):
         self._cooldowns: Dict[str, datetime] = {}
         self._current_timestamp: Optional[datetime] = None
 
+        # Config service for multi-pair DB-driven mode (None = not available)
+        self._cfg_svc = get_kama_v2_config_service() if get_kama_v2_config_service else None
+
         self.logger.info(
             "[KAMA_V2] initialized | epic=%s monitor_only=%s "
             "cross_er=%.2f slope_bars=%d slope_min=%.1f pips "
-            "EMA200=%s MACD=%s RSI=%s SL/TP=%.0f/%.0f cooldown=%.0fm",
+            "EMA200=%s MACD=%s RSI=%s SL/TP=%.0f/%.0f cooldown=%.0fm "
+            "session_filter=%s adx_min=%.1f",
             self.config.enabled_epic,
             self.config.monitor_only,
             self.config.cross_er_min,
@@ -118,6 +141,8 @@ class KamaV2Strategy(StrategyInterface):
             self.config.fixed_stop_loss_pips,
             self.config.fixed_take_profit_pips,
             self.config.signal_cooldown_minutes,
+            self.config.session_filter,
+            self.config.adx_min,
         )
 
     # -------------------------------------------------------------------------
@@ -160,9 +185,27 @@ class KamaV2Strategy(StrategyInterface):
             pair_key = epic or pair or "UNKNOWN"
             self._current_timestamp = current_timestamp
 
-            # ── Epic gate ────────────────────────────────────────────────────
-            if epic != cfg.enabled_epic:
-                return None
+            # ── Epic gate ─────────────────────────────────────────────────────
+            # Single-epic override mode (backtest): enabled_epic is set explicitly
+            if cfg.enabled_epic:
+                if epic != cfg.enabled_epic:
+                    return None
+            else:
+                # DB-driven multi-pair mode: check kama_v2_pair_overrides
+                if self._cfg_svc is None or not self._cfg_svc.is_pair_enabled(epic):
+                    return None
+
+            # ── Per-pair param resolution ─────────────────────────────────────
+            # DB overrides win; fall back to global KamaV2Config for unset columns.
+            # In single-epic override mode (backtest), use global config values as-is.
+            svc = self._cfg_svc if (self._cfg_svc and not cfg.enabled_epic) else None
+            sl_pips       = svc.get_pair_sl_pips(pair_key, cfg.fixed_stop_loss_pips)   if svc else cfg.fixed_stop_loss_pips
+            tp_pips       = svc.get_pair_tp_pips(pair_key, cfg.fixed_take_profit_pips) if svc else cfg.fixed_take_profit_pips
+            cross_er_min  = svc.get_pair_cross_er_min(pair_key, cfg.cross_er_min)      if svc else cfg.cross_er_min
+            adx_min       = svc.get_pair_adx_min(pair_key, cfg.adx_min)                if svc else cfg.adx_min
+            sess_filter   = svc.get_pair_session_filter(pair_key, cfg.session_filter)  if svc else cfg.session_filter
+            blocked_hours = svc.get_pair_blocked_hours(pair_key, cfg.blocked_hours_utc) if svc else cfg.blocked_hours_utc
+            monitor_only  = svc.is_monitor_only(pair_key)                               if svc else cfg.monitor_only
 
             # ── Data check ───────────────────────────────────────────────────
             min_rows = cfg.kama_period + cfg.slope_bars + 5
@@ -194,6 +237,16 @@ class KamaV2Strategy(StrategyInterface):
                     eval_ts = datetime.now(timezone.utc)
             self._current_timestamp = eval_ts  # type: ignore[assignment]
 
+            # ── Session filter ───────────────────────────────────────────────
+            if sess_filter and blocked_hours:
+                try:
+                    blocked = {int(h.strip()) for h in blocked_hours.split(",") if h.strip()}
+                    if eval_ts.hour in blocked:
+                        self.logger.debug("[KAMA_V2] %s: session block (hour=%d UTC)", pair_key, eval_ts.hour)
+                        return None
+                except Exception:
+                    pass
+
             # ── Cooldown ─────────────────────────────────────────────────────
             if pair_key in self._cooldowns:
                 elapsed = (eval_ts - self._cooldowns[pair_key]).total_seconds() / 60
@@ -217,8 +270,8 @@ class KamaV2Strategy(StrategyInterface):
             er_now = float(er.iloc[-1]) if not pd.isna(er.iloc[-1]) else 0.0
 
             # ── ER gate ───────────────────────────────────────────────────────
-            if er_now < cfg.cross_er_min:
-                self.logger.debug("[KAMA_V2] %s: ER too low (%.3f < %.3f)", pair_key, er_now, cfg.cross_er_min)
+            if er_now < cross_er_min:
+                self.logger.debug("[KAMA_V2] %s: ER too low (%.3f < %.3f)", pair_key, er_now, cross_er_min)
                 return None
 
             # ── Crossover detection ───────────────────────────────────────────
@@ -241,6 +294,13 @@ class KamaV2Strategy(StrategyInterface):
                 return None
 
             direction = "BUY" if crossed_up else "SELL"
+
+            # ── ADX gate ──────────────────────────────────────────────────────
+            if adx_min > 0 and "adx" in df_trigger.columns:
+                adx_val = float(df_trigger["adx"].iloc[-1])
+                if not pd.isna(adx_val) and adx_val < adx_min:
+                    self.logger.debug("[KAMA_V2] %s: %s blocked — ADX=%.1f < min=%.1f", pair_key, direction, adx_val, adx_min)
+                    return None
 
             # ── EMA200 alignment ──────────────────────────────────────────────
             if cfg.ema_trend and "ema_200" in df_trigger.columns:
@@ -276,7 +336,7 @@ class KamaV2Strategy(StrategyInterface):
                         return None
 
             # ── Confidence ────────────────────────────────────────────────────
-            confidence = self._score_confidence(er_now, abs(kama_delta_pips))
+            confidence = self._score_confidence(er_now, abs(kama_delta_pips), cross_er_min)
             if confidence < cfg.min_confidence:
                 self.logger.debug("[KAMA_V2] %s: confidence %.3f < min %.3f", pair_key, confidence, cfg.min_confidence)
                 return None
@@ -284,9 +344,6 @@ class KamaV2Strategy(StrategyInterface):
 
             # ── Entry / SL / TP ───────────────────────────────────────────────
             entry_price = close_now
-            sl_pips = cfg.fixed_stop_loss_pips
-            tp_pips = cfg.fixed_take_profit_pips
-
             if direction == "BUY":
                 stop_loss = entry_price - sl_pips * _PIP
                 take_profit = entry_price + tp_pips * _PIP
@@ -312,7 +369,9 @@ class KamaV2Strategy(StrategyInterface):
                 "timeframe": "5m",
                 "pair": pair or pair_key,
                 "epic": pair_key,
-                "monitor_only": cfg.monitor_only,
+                "monitor_only": monitor_only,
+                # Research was validated with fixed SL/TP — opt out of scalp trailing
+                "is_scalp_trade": False,
                 # Metadata for analysis
                 "er": round(er_now, 4),
                 "kama_delta_pips": round(kama_delta_pips, 2),
@@ -324,7 +383,7 @@ class KamaV2Strategy(StrategyInterface):
                 "entry=%.5f SL=%.5f TP=%.5f conf=%.2f%s",
                 pair_key, direction, er_now, kama_delta_pips,
                 entry_price, stop_loss, take_profit, confidence,
-                " [MONITOR]" if cfg.monitor_only else "",
+                " [MONITOR]" if monitor_only else "",
             )
 
             return signal
@@ -337,11 +396,9 @@ class KamaV2Strategy(StrategyInterface):
     # Internal helpers
     # -------------------------------------------------------------------------
 
-    def _score_confidence(self, er: float, abs_slope_pips: float) -> float:
-        """Base 0.60; small bonus for high ER and aligned slope magnitude."""
+    def _score_confidence(self, er: float, abs_slope_pips: float, cross_er_min: float = 0.35) -> float:
+        """Score 0.60–0.80: base + ER bonus (max +0.15) + slope bonus (max +0.05)."""
         base = self.config.base_confidence
-        # ER above threshold → proportional bonus (capped at +0.15)
-        er_bonus = min(0.15, (er - self.config.cross_er_min) * 0.30)
-        # Aligned slope bonus (capped at +0.05)
+        er_bonus = min(0.15, (er - cross_er_min) * 0.30)
         slope_bonus = min(0.05, abs_slope_pips * 0.02)
         return round(max(0.0, min(1.0, base + er_bonus + slope_bonus)), 4)

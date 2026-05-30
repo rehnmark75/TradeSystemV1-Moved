@@ -1418,6 +1418,20 @@ class BacktestScanner:
                 logger=self.logger,
             )
             self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP, 500 bars) ready for {epic} (DONCHIAN_TURTLE)")
+        elif strategy == 'KAMA_V2':
+            # KAMA_V2 uses fixed SL/TP — research baseline was validated with pure
+            # fixed SL=10/TP=15 (no trailing). Scalp trailing (BE at +6-20 pips)
+            # compresses avg winner from 15 to ~9 pips and obscures true signal WR.
+            simulator = TrailingStopSimulator(
+                epic=epic,
+                target_pips=15.0,       # placeholder — overridden per-signal via reward_pips
+                initial_stop_pips=10.0, # placeholder — overridden per-signal via risk_pips
+                max_bars=288,           # 24h in 5m bars
+                use_fixed_sl_tp=True,
+                strategy=strategy,
+                logger=self.logger,
+            )
+            self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP) ready for {epic} (KAMA_V2)")
         else:
             # New engine: uses live PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS.
             # Scalp mode uses SCALP_TRAILING_CONFIGS with full progressive trailing
