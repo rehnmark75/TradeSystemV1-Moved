@@ -77,7 +77,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade" | "fa-or-atr-trail" | "donchian-turtle";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade" | "fa-or-atr-trail" | "donchian-turtle" | "kama2";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -226,6 +226,24 @@ const STRATEGIES: Record<StrategyKey, {
       "Risk Management",
       "Confidence",
       "Cooldown",
+      "Other",
+    ],
+  },
+  kama2: {
+    label: "KAMA_V2",
+    apiBase: "/api/settings/strategy/kama2",
+    draftKey: "kama2-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/kama2/effective",
+    columnEndpoint: "/api/settings/strategy/kama2/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "General",
+      "KAMA / ER",
+      "Confirmation Filters",
+      "Session",
+      "Risk Management",
+      "Cooldown",
+      "Confidence",
       "Other",
     ],
   },
@@ -913,7 +931,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade", "fa-or-atr-trail", "donchian-turtle"] as const).map((key) => {
+        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade", "fa-or-atr-trail", "donchian-turtle", "kama2"] as const).map((key) => {
           const summary = statusSummary[key];
           const counts = summary?.counts;
           return (

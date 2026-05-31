@@ -93,6 +93,18 @@ const STRATEGIES = {
     defaultGlobalEnabled: false,
     defaultMonitorOnly: true,
   },
+  kama2: {
+    label: "KAMA_V2",
+    globalTable: "",
+    overrideTable: "kama_v2_pair_overrides",
+    configSetColumn: "config_set",
+    overrideConfigJoin: false,
+    globalDefaults: {
+      monitor_only: true,
+    },
+    defaultGlobalEnabled: false,
+    defaultMonitorOnly: true,
+  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {
@@ -180,6 +192,10 @@ function resolveStatus(
 }
 
 async function loadGlobal(strategy: typeof STRATEGIES[keyof typeof STRATEGIES], configSet: string) {
+  if ("globalDefaults" in strategy) {
+    return strategy.globalDefaults as Record<string, unknown>;
+  }
+
   const clauses = ["is_active = TRUE"];
   const values: unknown[] = [];
   if (strategy.configSetColumn) {
