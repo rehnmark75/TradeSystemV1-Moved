@@ -121,6 +121,11 @@ class SignalDetector:
         # Per-pair is_enabled flags in impulse_fade_pair_overrides gate execution.
         self.impulse_fade_enabled = True
 
+        # INSIDE_DAY runs concurrently (daily inside-day breakout + weekly-momentum
+        # bias, 5m entry). Monitor-only V2 replacing the retired SMC scalp; the
+        # strategy self-filters to its validated epics (EURUSD + USDJPY).
+        self.inside_day_enabled = True
+
         # FA_OR_ATR_TRAIL is config-gated for forward testing. Pair rows decide
         # active vs monitor-only; scanner_global_config decides whether the
         # strategy is part of the demo/live scan set.
@@ -957,6 +962,22 @@ class SignalDetector:
                     self.logger.error(f"❌ [IMPULSE_FADE] Error for {epic}: {e}")
                     individual_results['impulse_fade'] = None
 
+            if self.inside_day_enabled and not self._is_gold_epic(epic):
+                try:
+                    id_signal = self.detect_inside_day_signals(epic, pair, spread_pips, timeframe)
+                    individual_results['inside_day'] = id_signal
+                    if id_signal:
+                        all_signals.append(id_signal)
+                        self.logger.info(
+                            f"✅ [INSIDE_DAY] Signal detected for {epic}: "
+                            f"{id_signal.get('signal')} @ {id_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [INSIDE_DAY] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [INSIDE_DAY] Error for {epic}: {e}")
+                    individual_results['inside_day'] = None
+
             if (self.fa_or_atr_trail_enabled
                     and not self._is_gold_epic(epic)
                     and FAORATRTrailConfigService.get_instance().get_config().is_pair_enabled(epic)):
@@ -1115,6 +1136,8 @@ class SignalDetector:
                 signal = self.detect_donchian_turtle_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'KAMA_V2':
                 signal = self.detect_kama_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'INSIDE_DAY':
+                signal = self.detect_inside_day_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
                 self.logger.error(f"❌ Unknown strategy '{strategy_name}' in _detect_single_strategy")
                 return None
@@ -1950,6 +1973,48 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting impulse-fade signals for {epic}: {e}")
+            return None
+
+    # Epics the Inside-Day Breakout V2 is validated for (EURUSD + USDJPY).
+    INSIDE_DAY_EPICS = ('CS.D.EURUSD.CEEM.IP', 'CS.D.USDJPY.MINI.IP')
+
+    def detect_inside_day_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the Inside-Day Breakout V2 strategy.
+
+        Resamples 4h up to daily/weekly for the inside-day + weekly-bias setup and
+        uses 5m for the breakout. EURUSD + USDJPY only (the OOS-validated pairs).
+        """
+        try:
+            if epic not in self.INSIDE_DAY_EPICS:
+                return None
+            strat = self._get_strategy('INSIDE_DAY')
+            if strat is None:
+                return None
+
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe='4h', lookback_hours=1100,  # ~46 days
+            )
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic, pair=pair, timeframe='5m', lookback_hours=48,
+            )
+            if df_4h is None or df_5m is None or df_4h.empty or df_5m.empty:
+                self.logger.debug(f"[INSIDE_DAY] Insufficient data for {epic}")
+                return None
+
+            signal = strat.detect_signal(df_4h=df_4h, df_5m=df_5m, epic=epic, pair=pair)
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_5m)
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting INSIDE_DAY signals for {epic}: {e}")
             return None
 
     def detect_fa_or_atr_trail_signals(

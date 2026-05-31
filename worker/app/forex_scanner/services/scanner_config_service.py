@@ -48,6 +48,7 @@ KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
     'FA_OR_ATR_TRAIL',
     'DONCHIAN_TURTLE',
     'KAMA_V2',
+    'INSIDE_DAY',
 })
 
 
