@@ -327,6 +327,20 @@ class RangeFadeStrategy(StrategyInterface):
         score = min(1.0, 0.45 * rsi_extremity + 0.35 * min(1.0, band_penetration) + 0.20 * range_proximity)
         confidence = round(cfg.min_confidence + score * (cfg.max_confidence - cfg.min_confidence), 3)
 
+        # Confidence-floor REJECT gate. min_confidence above is only a SCALING anchor, not a
+        # gate — so penalized (score<0) signals were emitted below it and lost (forward PF
+        # 0.80 sub-0.52; 0.55-0.59 band PF 0.51). The edge concentrates at conf>=0.60
+        # (forward PF 1.65; OOS EURUSD PF 1.31 vs 0.93 below). Reject below the floor.
+        conf_floor = float(getattr(cfg, "min_reject_confidence", 0.60))
+        if confidence < conf_floor:
+            self._reject(
+                epic,
+                "below_confidence_floor",
+                direction=direction,
+                details={"confidence": confidence, "floor": conf_floor},
+            )
+            return None
+
         pip_size = 0.01 if "JPY" in epic.upper() else 0.0001
         sl_pips, tp_pips = self._resolve_sl_tp_pips(cfg, epic, band_width_pips)
         sl_distance = sl_pips * pip_size
