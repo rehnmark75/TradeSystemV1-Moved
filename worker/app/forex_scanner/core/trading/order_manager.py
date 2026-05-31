@@ -435,6 +435,20 @@ class OrderManager:
                     'signal': signal
                 }
 
+            execution_status = str(signal.get('execution_status', '')).lower()
+            market_status = str(signal.get('market_status', '')).lower()
+            if execution_status == 'queued_for_market_open' or market_status == 'closed':
+                self.logger.info(f"🌙 MARKET CLOSED: {epic} signal is queued for market open - order execution skipped")
+                self.logger.info(f"   ℹ️ execution_status={execution_status or 'unset'}, market_status={market_status or 'unset'}")
+                _record_block(alert_id, "market_closed_queued")
+                return {
+                    'status': 'queued_for_market_open',
+                    'executed': False,
+                    'reason': 'Market closed - signal saved and queued for market open',
+                    'alert_id': alert_id,
+                    'signal': signal
+                }
+
             strategy_name = str(signal.get('strategy', '')).upper()
             if SMC_CONFIG_AVAILABLE and strategy_name == 'SMC_SIMPLE':
                 try:

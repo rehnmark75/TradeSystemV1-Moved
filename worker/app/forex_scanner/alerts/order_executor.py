@@ -626,6 +626,18 @@ class OrderExecutor:
             else:
                 self.logger.info(f"📊 MARKET Order: Stop={stop_distance}pips, TP={limit_distance}pips ({confidence:.1%})")
 
+            execution_status = str(signal.get('execution_status', '')).lower()
+            market_status = str(signal.get('market_status', '')).lower()
+            if execution_status == 'queued_for_market_open' or market_status == 'closed':
+                message = "Market closed - signal saved and queued for market open"
+                self.logger.info(f"🌙 {message}; skipping broker order for {internal_epic}")
+                return {
+                    "status": "skipped",
+                    "message": message,
+                    "alert_id": alert_id,
+                    "reason": "market_closed_queued"
+                }
+
             # v3.2.0: Detect scalp mode from SMC config for VSL (Virtual Stop Loss) system
             # NOTE: virtual_sl_pips is NOT passed - VSL service uses its own per-pair config
             # (3 pips for majors, 4 pips for JPY) from config_virtual_stop.py

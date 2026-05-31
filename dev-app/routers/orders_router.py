@@ -1156,6 +1156,24 @@ async def ig_place_order(
         # Extract deal information
         deal_id = confirm.get("dealId")
         entry_price_raw = confirm.get("level")
+        deal_status = str(confirm.get("dealStatus") or "").upper()
+        rejection_reason = confirm.get("reason")
+
+        if deal_status == "REJECTED":
+            logger.warning(f"⚠️ Broker rejected order confirmation: {confirm}")
+            raise HTTPException(
+                status_code=409,
+                detail={
+                    "status": "skipped",
+                    "message": f"Broker rejected order: {rejection_reason or 'unknown reason'}",
+                    "reason": "broker_order_rejected",
+                    "broker_reason": rejection_reason,
+                    "deal_status": deal_status,
+                    "deal_reference": confirm.get("dealReference") or deal_reference,
+                    "deal_id": deal_id,
+                    "epic": confirm.get("epic") or symbol,
+                },
+            )
         
         if entry_price_raw is None:
             logger.error(f"❌ Order confirmation missing 'level': {confirm}")

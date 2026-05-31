@@ -51,6 +51,25 @@ class TimezoneManager:
     def get_current_utc_time(self) -> datetime:
         """Get current time in UTC"""
         return datetime.now(self.utc_tz)
+
+    def _is_forex_24_5_open_utc(self, check_time: Optional[datetime] = None) -> bool:
+        """Forex is closed from Friday 22:00 UTC until Sunday 22:00 UTC."""
+        if check_time is None:
+            check_time = self.get_current_utc_time()
+        elif check_time.tzinfo is None:
+            check_time = self.local_tz.localize(check_time)
+
+        check_utc = check_time.astimezone(self.utc_tz)
+        weekday = check_utc.weekday()  # 0=Monday, 6=Sunday
+        hour = check_utc.hour
+
+        if weekday == 5:  # Saturday
+            return False
+        if weekday == 6:  # Sunday
+            return hour >= 22
+        if weekday == 4:  # Friday
+            return hour < 22
+        return True
     
     def is_market_hours(self, check_time: Optional[datetime] = None) -> bool:
         """
@@ -81,17 +100,7 @@ class TimezoneManager:
                 elif check_time.tzinfo != self.local_tz:
                     check_time = check_time.astimezone(self.local_tz)
                 
-                weekday = check_time.weekday()  # 0=Monday, 6=Sunday
-                
-                # Forex 24/5: Monday 00:00 to Friday 23:59 + Sunday evening
-                if weekday == 6:  # Sunday
-                    # Sunday evening from 21:00 (markets open)
-                    return check_time.hour >= 21
-                elif weekday == 5:  # Saturday  
-                    # Saturday morning until 01:00 (markets close)
-                    return check_time.hour <= 1
-                else:  # Monday-Friday
-                    return True
+                return self._is_forex_24_5_open_utc(check_time)
         
         # Original market hours logic (when RESPECT_MARKET_HOURS = True)
         if check_time is None:
@@ -118,13 +127,7 @@ class TimezoneManager:
         
         # Check if 24/5 mode is enabled
         if trading_hours.get('enable_24_5', True):
-            # 24/5 forex hours
-            if weekday == 6:  # Sunday evening
-                return hour >= 21
-            elif weekday == 5:  # Saturday morning
-                return hour <= 1
-            else:  # Monday-Friday
-                return True
+            return self._is_forex_24_5_open_utc(check_time)
         
         # Custom hours mode
         start_hour = trading_hours.get('start_hour', 0)
