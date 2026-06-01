@@ -105,6 +105,19 @@ const STRATEGIES = {
     defaultGlobalEnabled: false,
     defaultMonitorOnly: true,
   },
+  "inside-day": {
+    label: "INSIDE_DAY",
+    globalTable: "",
+    overrideTable: "inside_day_pair_overrides",
+    configSetColumn: "config_set",
+    overrideConfigJoin: false,
+    globalDefaults: {
+      enabled_pairs: ["CS.D.EURUSD.CEEM.IP", "CS.D.USDJPY.MINI.IP"],
+      monitor_only: true,
+    },
+    defaultGlobalEnabled: false,
+    defaultMonitorOnly: true,
+  },
 } as const;
 
 function asRecord(value: unknown): Record<string, unknown> {

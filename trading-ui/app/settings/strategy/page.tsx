@@ -77,7 +77,7 @@ const PREFERRED_ORDER = [
   "Other",
 ];
 
-type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade" | "fa-or-atr-trail" | "donchian-turtle" | "kama2";
+type StrategyKey = "smc" | "xau-gold" | "mean-reversion" | "range-fade" | "smc-momentum" | "impulse-fade" | "fa-or-atr-trail" | "donchian-turtle" | "kama2" | "inside-day";
 
 const STRATEGIES: Record<StrategyKey, {
   label: string;
@@ -243,6 +243,21 @@ const STRATEGIES: Record<StrategyKey, {
       "Session",
       "Risk Management",
       "Cooldown",
+      "Confidence",
+      "Other",
+    ],
+  },
+  "inside-day": {
+    label: "INSIDE_DAY",
+    apiBase: "/api/settings/strategy/inside-day",
+    draftKey: "inside-day-global-settings-draft",
+    effectiveBase: "/api/settings/strategy/inside-day/effective",
+    columnEndpoint: "/api/settings/strategy/inside-day/pairs/columns",
+    snapshotCapable: false,
+    preferredOrder: [
+      "General",
+      "Setup Detection",
+      "Risk Management",
       "Confidence",
       "Other",
     ],
@@ -931,7 +946,7 @@ export default function UnifiedStrategySettings() {
       />
 
       <div className="settings-segment" style={{ marginBottom: 16 }}>
-        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade", "fa-or-atr-trail", "donchian-turtle", "kama2"] as const).map((key) => {
+        {(["smc", "xau-gold", "mean-reversion", "range-fade", "smc-momentum", "impulse-fade", "fa-or-atr-trail", "donchian-turtle", "kama2", "inside-day"] as const).map((key) => {
           const summary = statusSummary[key];
           const counts = summary?.counts;
           return (

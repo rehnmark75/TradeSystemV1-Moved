@@ -10,6 +10,7 @@ export const BACKTEST_STRATEGIES = [
   "IMPULSE_FADE",
   "RANGE_FADE",
   "XAU_GOLD",
+  "INSIDE_DAY",
 ] as const;
 
 export type BacktestStrategy = (typeof BACKTEST_STRATEGIES)[number];
@@ -21,6 +22,7 @@ export const BACKTEST_STRATEGY_LABELS: Record<BacktestStrategy, string> = {
   IMPULSE_FADE: "Impulse Fade",
   RANGE_FADE: "Range Fade",
   XAU_GOLD: "XAU Gold (4H/1H/15m)",
+  INSIDE_DAY: "Inside Day Breakout",
 };
 
 export const GOLD_EPIC = "CS.D.CFEGOLD.CEE.IP";
@@ -82,6 +84,7 @@ export const STRATEGY_METADATA_ENDPOINT: Record<BacktestStrategy, string> = {
   IMPULSE_FADE: "/trading/api/settings/strategy/impulse-fade/metadata",
   RANGE_FADE: "/trading/api/settings/strategy/range-fade/metadata",
   XAU_GOLD: "/trading/api/settings/strategy/xau-gold/metadata",
+  INSIDE_DAY: "/trading/api/settings/strategy/inside-day/metadata",
 };
 
 export function getStrategyLabel(strategyName: string | null | undefined): string {
@@ -94,6 +97,7 @@ export function getStrategyBadgeStyle(strategyName: string | null | undefined): 
   if (strategyName === "MEAN_REVERSION") return { background: "#ecfdf5", color: "#047857", borderColor: "#a7f3d0" };
   if (strategyName === "IMPULSE_FADE") return { background: "#eff6ff", color: "#1d4ed8", borderColor: "#bfdbfe" };
   if (strategyName === "RANGE_FADE") return { background: "#f5f3ff", color: "#6d28d9", borderColor: "#ddd6fe" };
+  if (strategyName === "INSIDE_DAY") return { background: "#eef2ff", color: "#3730a3", borderColor: "#c7d2fe" };
   if (strategyName?.startsWith("SMC")) return { background: "#f8fafc", color: "#334155", borderColor: "#cbd5e1" };
   return { background: "#f3f4f6", color: "#4b5563", borderColor: "#d1d5db" };
 }
