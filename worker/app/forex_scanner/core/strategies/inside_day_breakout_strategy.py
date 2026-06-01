@@ -35,6 +35,14 @@ try:
 except ImportError:  # pragma: no cover - dual-path import (see project memory)
     from forex_scanner.core.strategies.strategy_registry import register_strategy, StrategyInterface
 
+try:
+    from forex_scanner.services.inside_day_config_service import get_inside_day_config_service
+except ImportError:
+    try:
+        from services.inside_day_config_service import get_inside_day_config_service  # type: ignore
+    except ImportError:
+        get_inside_day_config_service = None  # type: ignore
+
 
 # Pairs that cleared the OOS + spread-stress gate. Everything else stands aside.
 _ENABLED = {
@@ -54,7 +62,7 @@ class InsideDayBreakoutStrategy(StrategyInterface):
     ATR_BUF_FRAC = 0.05         # SL buffer = 5% of daily ATR(14) beyond the ID extreme
     TP_R = 2.0                  # reward:risk
     ATR_PERIOD = 14
-    MONITOR_ONLY = True         # launch posture — log signals, do not trade
+    MONITOR_ONLY = True         # fallback if DB config is unavailable
 
     uses_smart_money_analysis = False
 
@@ -68,6 +76,7 @@ class InsideDayBreakoutStrategy(StrategyInterface):
         self.logger = logger or logging.getLogger(__name__)
         self.data_fetcher = None              # injected by SignalDetector
         self._last_signal_day: Dict[str, str] = {}   # epic -> 'YYYY-MM-DD' (one/day)
+        self._cfg_svc = get_inside_day_config_service() if get_inside_day_config_service else None
 
     @property
     def strategy_name(self) -> str:
@@ -124,6 +133,8 @@ class InsideDayBreakoutStrategy(StrategyInterface):
         try:
             cfg = _ENABLED.get(epic)
             if cfg is None:
+                return None
+            if self._cfg_svc is not None and not self._cfg_svc.is_pair_enabled(epic):
                 return None
             if df_4h is None or df_5m is None or len(df_4h) < 60 or len(df_5m) < 2:
                 return None
@@ -210,6 +221,9 @@ class InsideDayBreakoutStrategy(StrategyInterface):
 
     def _build_signal(self, epic, pair, direction, entry, sl, tp,
                       risk_pips, reward_pips, id_range_pips, atr, bias, ts) -> Dict:
+        monitor_only = self.MONITOR_ONLY
+        if self._cfg_svc is not None:
+            monitor_only = self._cfg_svc.is_monitor_only(epic)
         return {
             "signal": direction,
             "signal_type": direction,      # all three direction keys (TradeValidator + LPF)
@@ -226,7 +240,7 @@ class InsideDayBreakoutStrategy(StrategyInterface):
             "timestamp": ts.to_pydatetime() if hasattr(ts, "to_pydatetime") else ts,
             "entry_type": "INSIDE_DAY_BREAKOUT",
             "version": VERSION,
-            "monitor_only": self.MONITOR_ONLY,
+            "monitor_only": monitor_only,
             "strategy_indicators": {
                 "weekly_bias": bias,
                 "inside_day_range_pips": round(id_range_pips, 1),

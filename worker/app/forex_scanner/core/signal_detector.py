@@ -40,6 +40,7 @@ try:
     from services.impulse_fade_config_service import ImpulseFadeConfigService
     from services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
     from services.donchian_turtle_config_service import DonchianTurtleConfigService
+    from services.inside_day_config_service import get_inside_day_config_service
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -49,6 +50,7 @@ except ImportError:
     from forex_scanner.services.impulse_fade_config_service import ImpulseFadeConfigService
     from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
     from forex_scanner.services.donchian_turtle_config_service import DonchianTurtleConfigService
+    from forex_scanner.services.inside_day_config_service import get_inside_day_config_service
 
 
 class SignalDetector:
@@ -962,14 +964,19 @@ class SignalDetector:
                     self.logger.error(f"❌ [IMPULSE_FADE] Error for {epic}: {e}")
                     individual_results['impulse_fade'] = None
 
-            if self.inside_day_enabled and not self._is_gold_epic(epic):
+            if (
+                self.inside_day_enabled
+                and not self._is_gold_epic(epic)
+                and get_inside_day_config_service().is_pair_enabled(epic)
+            ):
                 try:
                     id_signal = self.detect_inside_day_signals(epic, pair, spread_pips, timeframe)
                     individual_results['inside_day'] = id_signal
                     if id_signal:
                         all_signals.append(id_signal)
+                        mode = "MONITOR" if id_signal.get("monitor_only") else "ACTIVE"
                         self.logger.info(
-                            f"✅ [INSIDE_DAY] Signal detected for {epic}: "
+                            f"✅ [INSIDE_DAY:{mode}] Signal detected for {epic}: "
                             f"{id_signal.get('signal')} @ {id_signal.get('entry_price', 0):.5f}"
                         )
                     else:
@@ -1037,8 +1044,9 @@ class SignalDetector:
                     individual_results['kama_v2'] = kv2_signal
                     if kv2_signal:
                         all_signals.append(kv2_signal)
+                        mode = "MONITOR" if kv2_signal.get("monitor_only") else "ACTIVE"
                         self.logger.info(
-                            f"✅ [KAMA_V2:MONITOR] Signal detected for {epic}: "
+                            f"✅ [KAMA_V2:{mode}] Signal detected for {epic}: "
                             f"{kv2_signal.get('signal')} @ {kv2_signal.get('entry_price', 0):.5f}"
                         )
                     else:
@@ -1993,6 +2001,8 @@ class SignalDetector:
         """
         try:
             if epic not in self.INSIDE_DAY_EPICS:
+                return None
+            if not get_inside_day_config_service().is_pair_enabled(epic):
                 return None
             strat = self._get_strategy('INSIDE_DAY')
             if strat is None:
