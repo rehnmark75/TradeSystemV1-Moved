@@ -111,6 +111,18 @@ except ImportError:
         XAU_GOLD_CONFIG_AVAILABLE = False
         get_xau_gold_config = None
 
+# Import KAMA_V2 config service to inject enabled KAMA-only epics into the scan loop
+try:
+    from forex_scanner.services.kama_v2_config_service import get_kama_v2_config_service
+    KAMA_V2_CONFIG_AVAILABLE = True
+except ImportError:
+    try:
+        from services.kama_v2_config_service import get_kama_v2_config_service
+        KAMA_V2_CONFIG_AVAILABLE = True
+    except ImportError:
+        KAMA_V2_CONFIG_AVAILABLE = False
+        get_kama_v2_config_service = None
+
 # Import intelligence config service for cleanup settings
 try:
     from forex_scanner.services.intelligence_config_service import get_intelligence_config
@@ -191,7 +203,21 @@ class IntelligentForexScanner:
             except Exception as _xau_e:
                 self.logger.warning(f"⚠️ XAU_GOLD config load failed (gold epics skipped): {_xau_e}")
 
-        self.epic_list = base_epics + gold_epics
+        # Inject KAMA_V2 enabled epics into scan loop. The base universe comes
+        # from SMC pairs, so KAMA-only pairs such as AUDUSD would otherwise never
+        # reach SignalDetector and would produce no rejection/signal logs.
+        kama_epics: List[str] = []
+        if KAMA_V2_CONFIG_AVAILABLE and get_kama_v2_config_service is not None:
+            try:
+                kama_cfg = get_kama_v2_config_service()
+                existing = set(base_epics) | set(gold_epics)
+                kama_epics = [e for e in kama_cfg.get_enabled_pairs() if e not in existing]
+                if kama_epics:
+                    self.logger.info(f"✅ KAMA_V2: injecting {kama_epics} into scan loop")
+            except Exception as _kama_e:
+                self.logger.warning(f"⚠️ KAMA_V2 config load failed (KAMA epics skipped): {_kama_e}")
+
+        self.epic_list = base_epics + gold_epics + kama_epics
         self.min_confidence = min_confidence if min_confidence is not None else self._scanner_cfg.min_confidence
         self.scan_interval = scan_interval
         self.use_bid_adjustment = use_bid_adjustment if use_bid_adjustment is not None else False

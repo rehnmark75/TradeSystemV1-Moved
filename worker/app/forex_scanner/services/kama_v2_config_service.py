@@ -48,6 +48,14 @@ class KamaV2ConfigService:
         row = self._get_pair_row(epic, config_set)
         return bool(row.get("monitor_only", True)) if row else True
 
+    def get_enabled_pairs(self, config_set: str = "demo") -> list[str]:
+        self._refresh_if_stale(config_set)
+        return sorted(
+            epic
+            for epic, row in self._pair_cache.items()
+            if bool(row.get("is_enabled", False))
+        )
+
     def get_pair_sl_pips(self, epic: str, default: float = 10.0) -> float:
         row = self._get_pair_row(epic)
         v = row.get("fixed_stop_loss_pips") if row else None

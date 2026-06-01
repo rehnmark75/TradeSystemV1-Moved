@@ -41,6 +41,7 @@ try:
     from services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
     from services.donchian_turtle_config_service import DonchianTurtleConfigService
     from services.inside_day_config_service import get_inside_day_config_service
+    from services.kama_v2_config_service import get_kama_v2_config_service
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -51,6 +52,7 @@ except ImportError:
     from forex_scanner.services.fa_or_atr_trail_config_service import FAORATRTrailConfigService
     from forex_scanner.services.donchian_turtle_config_service import DonchianTurtleConfigService
     from forex_scanner.services.inside_day_config_service import get_inside_day_config_service
+    from forex_scanner.services.kama_v2_config_service import get_kama_v2_config_service
 
 
 class SignalDetector:
@@ -1033,7 +1035,11 @@ class SignalDetector:
                     self.logger.error(f"❌ [DONCHIAN_TURTLE] Error for {epic}: {e}")
                     individual_results['donchian_turtle'] = None
 
-            if self.kama_v2_enabled and not self._is_gold_epic(epic):
+            if (
+                self.kama_v2_enabled
+                and not self._is_gold_epic(epic)
+                and get_kama_v2_config_service().is_pair_enabled(epic)
+            ):
                 try:
                     self.logger.debug(f"🔍 [KAMA_V2] Starting detection for {epic}")
                     _kv2_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)

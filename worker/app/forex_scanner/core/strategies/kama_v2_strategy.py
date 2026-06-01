@@ -303,6 +303,20 @@ class KamaV2Strategy(StrategyInterface):
             crossed_down = (close_now < kama_now) and (close_prev >= kama_prev)
 
             if not crossed_up and not crossed_down:
+                self._reject(
+                    pair_key,
+                    pair,
+                    "NO_CROSSOVER",
+                    "price did not cross KAMA",
+                    hour_utc=eval_ts.hour,
+                    details={
+                        "close_now": close_now,
+                        "close_prev": close_prev,
+                        "kama_now": kama_now,
+                        "kama_prev": kama_prev,
+                        "er": er_now,
+                    },
+                )
                 return None
 
             # ── Slope check (counter-slope rejection) ─────────────────────────
