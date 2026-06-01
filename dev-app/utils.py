@@ -77,15 +77,17 @@ def get_ig_point_size(epic: str) -> float:
     """
     Resolve IG broker-point size (price units per `stopDistance` point on the IG REST API).
 
-    For most instruments this equals the pip size returned by ``get_point_value``,
-    but for IG CFEGOLD an IG point equals 0.5 price units (= 5 XAU pips). Mixing
-    the two units when persisting a stop level produces a 5× error on gold orders.
+    For most instruments this equals the pip size returned by ``get_point_value``.
+    For IG CFEGOLD the stopDistance API field is in raw price units (1 IG point = 1 price
+    unit = 10 XAU pips).  Confirmed empirically: sending stopDistance=24 results in IG
+    placing the stop exactly 24 price units away (not 12 as the old 0.5 factor implied).
+    Using 0.5 caused all gold SL/TP to be 2× wider than intended.
     """
     if not epic:
         return 1.0
     epic_upper = epic.upper()
     if "CFEGOLD" in epic_upper or "GOLD" in epic_upper or "XAU" in epic_upper:
-        return 0.5
+        return 1.0  # 1 IG point = 1 price unit = 10 XAU pips (empirically confirmed)
     return get_point_value(epic)
 
 
