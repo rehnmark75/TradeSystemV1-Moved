@@ -26,6 +26,65 @@ import sys
 import subprocess
 import os
 
+
+def _preflight_backtest_data(base_cmd):
+    """Warn loudly if ig_candles_backtest is cold/sparse for the requested (epic, window).
+
+    Backtests read candles from ig_candles_backtest, which is lazily populated per
+    (epic, timeframe) on first run. A cold cache makes the strategy emit
+    NO_TRIGGER/BAND_WIDTH (no data -> no setup) and silently return ~0 signals -- which
+    reads as "no setups" rather than "no data" and has caused false "strategy/bt is
+    broken" conclusions. This preflight surfaces that condition. It NEVER blocks the run
+    on its own failure (any error just prints a skip note).
+    """
+    try:
+        def _opt(flag, default=None):
+            return base_cmd[base_cmd.index(flag) + 1] if flag in base_cmd else default
+
+        epic = _opt("--epic")
+        if not epic:
+            return  # --all / multi-pair: skip the per-epic check
+        try:
+            days = int(_opt("--days", "7"))
+        except (TypeError, ValueError):
+            return
+
+        import psycopg2
+        db_url = os.getenv("DATABASE_URL", "postgresql://postgres:postgres@localhost:5432/forex")
+        conn = psycopg2.connect(db_url)
+        try:
+            cur = conn.cursor()
+            # Strategies resample from the 5m base stored in ig_candles_backtest.
+            cur.execute(
+                "SELECT COUNT(*), COUNT(DISTINCT start_time::date) "
+                "FROM ig_candles_backtest "
+                "WHERE epic = %s AND timeframe = 5 "
+                "AND start_time >= (now() - (%s || ' days')::interval)",
+                (epic, days),
+            )
+            row = cur.fetchone()
+            n_rows, n_days = (row[0], row[1]) if row else (0, 0)
+        finally:
+            conn.close()
+
+        expected = max(1, int(days * 288 * 5 / 7))  # ~288 5m candles/day, ~5/7 trading days
+        pct = 100.0 * (n_rows or 0) / expected
+        if not n_rows:
+            print(f"⚠️  COLD BACKTEST CACHE: ig_candles_backtest has 0 rows for {epic} (5m) "
+                  f"over the last {days}d.")
+            print("     This cache is lazily populated on first run, so THIS run may emit ~0 "
+                  "signals (no data -> NO_TRIGGER/BAND_WIDTH). Re-run once it warms, or "
+                  "pre-populate (scripts/dukascopy_*). A 0-signal result here is DATA, not edge.")
+        elif pct < 50:
+            print(f"⚠️  SPARSE BACKTEST DATA: ~{n_rows} 5m candles / {n_days} days for {epic} over "
+                  f"{days}d (~{pct:.0f}% of expected). Signal counts may be unreliable -- re-run to "
+                  "warm the cache or extend coverage before trusting the result.")
+        else:
+            print(f"✅ Backtest data OK: {n_rows} 5m candles / {n_days} days for {epic} (last {days}d).")
+    except Exception as e:
+        print(f"ℹ️  (backtest data preflight skipped: {e})")
+
+
 def main():
     """Main wrapper function"""
 
@@ -377,6 +436,9 @@ def main():
             pass  # Let CLI handle defaults
 
         base_cmd.extend(processed_args)
+
+    # Preflight: warn if the backtest candle cache is cold/sparse for this epic+window
+    _preflight_backtest_data(base_cmd)
 
     # Execute the backtest CLI
     try:
