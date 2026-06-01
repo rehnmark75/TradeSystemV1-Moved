@@ -162,7 +162,7 @@ trade_scan.py (entry point)
 | **Strategy templates** | `worker/app/forex_scanner/core/strategies/templates/` | task-worker |
 | **Adding new strategies** | `worker/app/forex_scanner/docs/adding_new_strategy.md` | task-worker |
 | **Order executor** | `worker/app/forex_scanner/alerts/order_executor.py` | task-worker |
-| **TRAILING STOPS (LIVE)** | `dev-app/config.py` → `PAIR_TRAILING_CONFIGS` | **fastapi-dev** |
+| **TRAILING STOPS (LIVE)** | `trailing_pair_config` table (in `strategy_config` DB) via `dev-app/services/trailing_config_service.py` | **fastapi-dev** |
 | **Trailing stops (backtest)** | `worker/app/forex_scanner/config_trailing_stops.py` | task-worker |
 | **Trade monitoring** | `dev-app/trailing_class.py` | fastapi-dev |
 
@@ -310,7 +310,7 @@ See `scripts/dukascopy_download.py --list-epics` for the epic mapping.
 
 ## ⚡ Scalp Mode Trailing System (Jan 2026)
 
-**File**: `dev-app/config.py` → `SCALP_TRAILING_CONFIGS`
+**Source of truth**: `trailing_pair_config` DB rows where `is_scalp=true` (in `strategy_config` DB, read via `dev-app/services/trailing_config_service.py`). The `SCALP_TRAILING_CONFIGS` dict in `dev-app/config.py` is **legacy/seed-only — the live runtime no longer reads it** (DB-backed since Apr 2026).
 
 ### Background: VSL System Replacement
 
@@ -324,7 +324,8 @@ The Virtual Stop Loss (VSL) system was **deprecated in January 2026** after anal
 Scalp trades now use **IG native stops** with progressive trailing, differentiated by the `is_scalp_trade` flag.
 
 **Key Files:**
-- `dev-app/config.py` - `SCALP_TRAILING_CONFIGS` (12-20 pip stops, data-backed)
+- `trailing_pair_config` DB table (`is_scalp=true` rows) - scalp stops (12-20 pips, data-backed). The `SCALP_TRAILING_CONFIGS` dict in `dev-app/config.py` is legacy/seed-only.
+- `dev-app/services/trailing_config_service.py` - loads trailing rows from the DB (5-min cache)
 - `dev-app/enhanced_trade_processor.py` - Dynamic config selection via `get_config_for_trade()`
 - `dev-app/config_virtual_stop.py` - VSL disabled (`VIRTUAL_STOP_LOSS_ENABLED = False`)
 
@@ -359,7 +360,7 @@ def get_config_for_trade(self, trade: TradeLog) -> TrailingConfig:
     """Load scalp or regular config based on is_scalp_trade flag."""
     is_scalp = getattr(trade, 'is_scalp_trade', False)
     pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
-    # Returns SCALP_TRAILING_CONFIGS if scalp, else PAIR_TRAILING_CONFIGS
+    # Reads the DB trailing_pair_config row for (config_set, epic, is_scalp, strategy)
 ```
 
 **3. Processing (trade_monitor.py → enhanced_trade_processor.py):**
@@ -531,31 +532,40 @@ When adding new fields to `scanner_global_config` table, you MUST also add them 
 
 | Container | Purpose | Config Location | Owns |
 |-----------|---------|-----------------|------|
-| **fastapi-dev** | Live trade execution, trailing stops, breakeven | `dev-app/config.py` | **TRAILING STOPS (source of truth)** |
+| **fastapi-dev** | Live trade execution, trailing stops, breakeven | `dev-app/config.py` (flags/feature-switches) + `trailing_pair_config` DB (trailing values) | **Live execution; trailing VALUES live in the `strategy_config` DB** |
 | **task-worker** | Strategy scanning, backtesting, signal generation | `worker/app/forex_scanner/config.py` | Strategies, backtesting |
 | **streamlit** | Analytics dashboard, breakeven optimizer | Reads from fastapi-dev via mount | Display only |
 
 ### Trailing Stop Configuration
 
-**Source of Truth**: `dev-app/config.py` → `PAIR_TRAILING_CONFIGS`
+**Source of Truth (DB-backed since Apr 2026)**: the `trailing_pair_config` table in the `strategy_config` DB.
+The `dev-app/config.py` `PAIR_TRAILING_CONFIGS` / `SCALP_TRAILING_CONFIGS` dicts are **legacy/seed data only — the live runtime no longer reads them.** `get_trailing_config_for_epic()` in `dev-app/config.py` delegates to `dev-app/services/trailing_config_service.py`, which loads rows from the DB (5-min cache).
 
-This file controls:
-- `break_even_trigger_points` - When to move SL to breakeven
-- `early_breakeven_trigger_points` - Early BE trigger
-- `stage1/2/3_trigger_points` - Progressive trailing stages
+Rows are scoped by `config_set` ('live'/'demo'), `is_scalp` (true/false), `strategy` (e.g. `SMC_SIMPLE`, `XAU_GOLD`, or `DEFAULT`), and `epic`. Lookup falls back: pair+strategy row → `DEFAULT` row → empty. Key columns:
+- `break_even_trigger_points` / `early_breakeven_trigger_points` - BE triggers
+- `stage1/2/3_trigger_points` + matching `*_lock_points` - Progressive trailing stages
+- `stage3_atr_multiplier` / `stage3_min_distance` - ATR trail (final stage)
 - `min_trail_distance` - Minimum trailing distance
+- `enable_partial_close` / `partial_close_trigger_points` / `partial_close_size`
 
 **DO NOT** edit `worker/app/forex_scanner/config_trailing_stops.py` for live trading changes - that file is for backtesting only!
 
 ### When updating trailing stops:
-1. Edit `dev-app/config.py` (the ONLY source of truth)
-2. Restart `fastapi-dev`: `docker restart fastapi-dev` (NOT `docker compose up`)
-3. Verify: `docker exec fastapi-dev python3 -c "from config import PAIR_TRAILING_CONFIGS; print(PAIR_TRAILING_CONFIGS['CS.D.EURUSD.CEEM.IP'])"`
+1. Update the DB row (scope by `config_set` + `epic` + `is_scalp` + `strategy`), e.g.:
+   ```bash
+   docker exec postgres psql -U postgres -d strategy_config -c "
+   UPDATE trailing_pair_config SET break_even_trigger_points = 12
+   WHERE config_set='demo' AND epic='CS.D.EURUSD.CEEM.IP' AND is_scalp=true AND strategy='SMC_SIMPLE';"
+   ```
+2. The `TrailingConfigService` cache (5-min TTL) is invalidated on write via `trailing_config_router`; to force it immediately, restart `fastapi-dev`: `docker restart fastapi-dev` (NOT `docker compose up`)
+3. Verify:
+   ```bash
+   docker exec postgres psql -U postgres -d strategy_config -c "
+   SELECT config_set, epic, is_scalp, strategy, break_even_trigger_points, stage1_trigger_points
+   FROM trailing_pair_config WHERE epic='CS.D.EURUSD.CEEM.IP' ORDER BY config_set, is_scalp;"
+   ```
 
-### Streamlit reads trailing config via docker-compose mount:
-```yaml
-- ./dev-app/config.py:/app/trailing_config.py:ro
-```
+> ⚠️ The streamlit `./dev-app/config.py:/app/trailing_config.py:ro` docker-compose mount predates the DB migration — for trailing it now reflects only the legacy seed dicts, not live values. Read trailing values from the DB.
 
 ## 🤖 Agent Configuration
 

@@ -8,7 +8,8 @@ This document covers the trailing stop system implementation in the `fastapi-dev
 |------|---------|
 | `dev-app/trailing_class.py` | Main trailing stop logic with progressive stages |
 | `dev-app/enhanced_trade_processor.py` | Alternative trade processor (similar logic) |
-| `dev-app/config.py` | Pair-specific trailing configurations |
+| `trailing_pair_config` table (in `strategy_config` DB) | **Source of truth for trailing values** (DB-backed since Apr 2026) — rows scoped by `config_set`/`is_scalp`/`strategy`/`epic` |
+| `dev-app/services/trailing_config_service.py` | Loads trailing rows from the DB (5-min cache); `get_trailing_config_for_epic()` in `dev-app/config.py` delegates here. The `PAIR_TRAILING_CONFIGS`/`SCALP_TRAILING_CONFIGS` dicts in `config.py` are **legacy/seed-only — the runtime no longer reads them** |
 | `dev-app/services/adjust_stop_service.py` | IG API integration for stop adjustments |
 | `dev-app/services/ig_orders.py` | Partial close API calls |
 | `dev-app/trade_monitor.py` | Trade monitoring loop that calls trailing logic |
@@ -24,6 +25,8 @@ Entry → Break-Even (6-8 pips) → Stage 1 (10 pips) → Stage 2 (15 pips) → 
 ```
 
 ### Stage Configuration (Example: EURUSD)
+
+> **Note:** trailing values now live in the `trailing_pair_config` DB table (one row per `config_set`/`is_scalp`/`strategy`/`epic`). The dict below shows the legacy/seed format — each key is now a **column of the same name**. To change live trailing, `UPDATE` the DB row (then restart `fastapi-dev` or let the 5-min cache refresh), **not** this dict.
 
 ```python
 'CS.D.EURUSD.MINI.IP': {
