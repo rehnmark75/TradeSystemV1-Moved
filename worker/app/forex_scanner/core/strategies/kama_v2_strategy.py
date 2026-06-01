@@ -41,6 +41,14 @@ except ImportError:
     except ImportError:
         get_kama_v2_config_service = None  # type: ignore
 
+try:
+    from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from ...alerts.strategy_rejection_manager import StrategyRejectionManager  # type: ignore
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore
+
 
 @dataclass
 class KamaV2Config:
@@ -124,6 +132,7 @@ class KamaV2Strategy(StrategyInterface):
 
         # Config service for multi-pair DB-driven mode (None = not available)
         self._cfg_svc = get_kama_v2_config_service() if get_kama_v2_config_service else None
+        self._rej_mgr = StrategyRejectionManager("KAMA_V2", db_manager) if StrategyRejectionManager else None
 
         self.logger.info(
             "[KAMA_V2] initialized | epic=%s monitor_only=%s "
@@ -160,7 +169,8 @@ class KamaV2Strategy(StrategyInterface):
         self._cooldowns.clear()
 
     def flush_rejections(self) -> None:
-        pass
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
 
     def get_config(self) -> KamaV2Config:
         return self.config
@@ -210,13 +220,13 @@ class KamaV2Strategy(StrategyInterface):
             # ── Data check ───────────────────────────────────────────────────
             min_rows = cfg.kama_period + cfg.slope_bars + 5
             if df_trigger is None or len(df_trigger) < min_rows:
-                self.logger.debug("[KAMA_V2] %s: insufficient rows (%d)", pair_key, len(df_trigger) if df_trigger is not None else 0)
+                self._reject(pair_key, pair, "INSUFFICIENT_DATA", f"need {min_rows} rows, got {len(df_trigger) if df_trigger is not None else 0}")
                 return None
 
             required_cols = ["close", "kama_10", "kama_10_er"]
             for col in required_cols:
                 if col not in df_trigger.columns:
-                    self.logger.debug("[KAMA_V2] %s: missing column %s", pair_key, col)
+                    self._reject(pair_key, pair, "MISSING_INDICATOR", f"missing column {col}")
                     return None
 
             # ── Timestamp ────────────────────────────────────────────────────
@@ -242,7 +252,7 @@ class KamaV2Strategy(StrategyInterface):
                 try:
                     blocked = {int(h.strip()) for h in blocked_hours.split(",") if h.strip()}
                     if eval_ts.hour in blocked:
-                        self.logger.debug("[KAMA_V2] %s: session block (hour=%d UTC)", pair_key, eval_ts.hour)
+                        self._reject(pair_key, pair, "SESSION", f"hour={eval_ts.hour} UTC blocked", hour_utc=eval_ts.hour)
                         return None
                 except Exception:
                     pass
@@ -251,7 +261,14 @@ class KamaV2Strategy(StrategyInterface):
             if pair_key in self._cooldowns:
                 elapsed = (eval_ts - self._cooldowns[pair_key]).total_seconds() / 60
                 if elapsed < cfg.signal_cooldown_minutes:
-                    self.logger.debug("[KAMA_V2] %s: cooldown (%.1f / %.0f min)", pair_key, elapsed, cfg.signal_cooldown_minutes)
+                    self._reject(
+                        pair_key,
+                        pair,
+                        "COOLDOWN",
+                        f"{elapsed:.1f} / {cfg.signal_cooldown_minutes:.0f} min",
+                        hour_utc=eval_ts.hour,
+                        details={"elapsed_minutes": elapsed, "cooldown_minutes": cfg.signal_cooldown_minutes},
+                    )
                     return None
 
             # ── Extract series ────────────────────────────────────────────────
@@ -271,7 +288,14 @@ class KamaV2Strategy(StrategyInterface):
 
             # ── ER gate ───────────────────────────────────────────────────────
             if er_now < cross_er_min:
-                self.logger.debug("[KAMA_V2] %s: ER too low (%.3f < %.3f)", pair_key, er_now, cross_er_min)
+                self._reject(
+                    pair_key,
+                    pair,
+                    "ER_GATE",
+                    f"ER {er_now:.3f} < {cross_er_min:.3f}",
+                    hour_utc=eval_ts.hour,
+                    details={"er": er_now, "cross_er_min": cross_er_min},
+                )
                 return None
 
             # ── Crossover detection ───────────────────────────────────────────
@@ -287,10 +311,26 @@ class KamaV2Strategy(StrategyInterface):
             kama_delta_pips = (kama_now - kama_old) / _PIP
 
             if crossed_up and kama_delta_pips <= -cfg.slope_min_pips:
-                self.logger.debug("[KAMA_V2] %s: BUY blocked — KAMA counter-slope %.2f pips", pair_key, kama_delta_pips)
+                self._reject(
+                    pair_key,
+                    pair,
+                    "COUNTER_SLOPE",
+                    f"BUY KAMA counter-slope {kama_delta_pips:.2f} pips",
+                    direction="BUY",
+                    hour_utc=eval_ts.hour,
+                    details={"kama_delta_pips": kama_delta_pips, "slope_min_pips": cfg.slope_min_pips},
+                )
                 return None
             if crossed_down and kama_delta_pips >= cfg.slope_min_pips:
-                self.logger.debug("[KAMA_V2] %s: SELL blocked — KAMA counter-slope %.2f pips", pair_key, kama_delta_pips)
+                self._reject(
+                    pair_key,
+                    pair,
+                    "COUNTER_SLOPE",
+                    f"SELL KAMA counter-slope {kama_delta_pips:.2f} pips",
+                    direction="SELL",
+                    hour_utc=eval_ts.hour,
+                    details={"kama_delta_pips": kama_delta_pips, "slope_min_pips": cfg.slope_min_pips},
+                )
                 return None
 
             direction = "BUY" if crossed_up else "SELL"
@@ -299,7 +339,15 @@ class KamaV2Strategy(StrategyInterface):
             if adx_min > 0 and "adx" in df_trigger.columns:
                 adx_val = float(df_trigger["adx"].iloc[-1])
                 if not pd.isna(adx_val) and adx_val < adx_min:
-                    self.logger.debug("[KAMA_V2] %s: %s blocked — ADX=%.1f < min=%.1f", pair_key, direction, adx_val, adx_min)
+                    self._reject(
+                        pair_key,
+                        pair,
+                        "ADX_GATE",
+                        f"{direction} ADX {adx_val:.1f} < {adx_min:.1f}",
+                        direction=direction,
+                        hour_utc=eval_ts.hour,
+                        details={"adx": adx_val, "adx_min": adx_min},
+                    )
                     return None
 
             # ── EMA200 alignment ──────────────────────────────────────────────
@@ -307,10 +355,26 @@ class KamaV2Strategy(StrategyInterface):
                 ema200 = float(df_trigger["ema_200"].iloc[-1])
                 if not pd.isna(ema200):
                     if direction == "BUY" and close_now <= ema200:
-                        self.logger.debug("[KAMA_V2] %s: BUY blocked — price below EMA200", pair_key)
+                        self._reject(
+                            pair_key,
+                            pair,
+                            "EMA200_ALIGNMENT",
+                            "BUY price below EMA200",
+                            direction=direction,
+                            hour_utc=eval_ts.hour,
+                            details={"close": close_now, "ema_200": ema200},
+                        )
                         return None
                     if direction == "SELL" and close_now >= ema200:
-                        self.logger.debug("[KAMA_V2] %s: SELL blocked — price above EMA200", pair_key)
+                        self._reject(
+                            pair_key,
+                            pair,
+                            "EMA200_ALIGNMENT",
+                            "SELL price above EMA200",
+                            direction=direction,
+                            hour_utc=eval_ts.hour,
+                            details={"close": close_now, "ema_200": ema200},
+                        )
                         return None
 
             # ── MACD histogram sign ───────────────────────────────────────────
@@ -318,10 +382,26 @@ class KamaV2Strategy(StrategyInterface):
                 macd_hist = float(df_trigger["macd_histogram"].iloc[-1])
                 if not pd.isna(macd_hist):
                     if direction == "BUY" and macd_hist <= 0:
-                        self.logger.debug("[KAMA_V2] %s: BUY blocked — MACD histogram %.5f ≤ 0", pair_key, macd_hist)
+                        self._reject(
+                            pair_key,
+                            pair,
+                            "MACD_ALIGNMENT",
+                            f"BUY MACD histogram {macd_hist:.5f} <= 0",
+                            direction=direction,
+                            hour_utc=eval_ts.hour,
+                            details={"macd_histogram": macd_hist},
+                        )
                         return None
                     if direction == "SELL" and macd_hist >= 0:
-                        self.logger.debug("[KAMA_V2] %s: SELL blocked — MACD histogram %.5f ≥ 0", pair_key, macd_hist)
+                        self._reject(
+                            pair_key,
+                            pair,
+                            "MACD_ALIGNMENT",
+                            f"SELL MACD histogram {macd_hist:.5f} >= 0",
+                            direction=direction,
+                            hour_utc=eval_ts.hour,
+                            details={"macd_histogram": macd_hist},
+                        )
                         return None
 
             # ── RSI extreme rejection ─────────────────────────────────────────
@@ -329,16 +409,40 @@ class KamaV2Strategy(StrategyInterface):
                 rsi_val = float(df_trigger["rsi"].iloc[-1])
                 if not pd.isna(rsi_val):
                     if direction == "BUY" and rsi_val >= 70:
-                        self.logger.debug("[KAMA_V2] %s: BUY blocked — RSI=%.1f ≥ 70", pair_key, rsi_val)
+                        self._reject(
+                            pair_key,
+                            pair,
+                            "RSI_EXTREME",
+                            f"BUY RSI {rsi_val:.1f} >= 70",
+                            direction=direction,
+                            hour_utc=eval_ts.hour,
+                            details={"rsi": rsi_val},
+                        )
                         return None
                     if direction == "SELL" and rsi_val <= 30:
-                        self.logger.debug("[KAMA_V2] %s: SELL blocked — RSI=%.1f ≤ 30", pair_key, rsi_val)
+                        self._reject(
+                            pair_key,
+                            pair,
+                            "RSI_EXTREME",
+                            f"SELL RSI {rsi_val:.1f} <= 30",
+                            direction=direction,
+                            hour_utc=eval_ts.hour,
+                            details={"rsi": rsi_val},
+                        )
                         return None
 
             # ── Confidence ────────────────────────────────────────────────────
             confidence = self._score_confidence(er_now, abs(kama_delta_pips), cross_er_min)
             if confidence < cfg.min_confidence:
-                self.logger.debug("[KAMA_V2] %s: confidence %.3f < min %.3f", pair_key, confidence, cfg.min_confidence)
+                self._reject(
+                    pair_key,
+                    pair,
+                    "CONFIDENCE",
+                    f"confidence {confidence:.3f} < {cfg.min_confidence:.3f}",
+                    direction=direction,
+                    hour_utc=eval_ts.hour,
+                    details={"confidence": confidence, "min_confidence": cfg.min_confidence},
+                )
                 return None
             confidence = min(confidence, cfg.max_confidence)
 
@@ -402,3 +506,32 @@ class KamaV2Strategy(StrategyInterface):
         er_bonus = min(0.15, (er - cross_er_min) * 0.30)
         slope_bonus = min(0.05, abs_slope_pips * 0.02)
         return round(max(0.0, min(1.0, base + er_bonus + slope_bonus)), 4)
+
+    def _reject(
+        self,
+        epic: str,
+        pair: Optional[str],
+        stage: str,
+        reason: str,
+        direction: Optional[str] = None,
+        hour_utc: Optional[int] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        """Log and persist one strategy-level rejection."""
+        pair_name = pair or epic
+        self.logger.info("[KAMA_V2:REJECT] %s %s%s: %s", epic, stage, f" {direction}" if direction else "", reason)
+        if self._rej_mgr is None:
+            return
+        try:
+            self._rej_mgr.reject(
+                stage=stage,
+                reason=reason,
+                epic=epic,
+                pair=pair_name,
+                direction=direction,
+                hour_utc=hour_utc,
+                scan_timestamp=self._current_timestamp,
+                details=details,
+            )
+        except Exception as exc:
+            self.logger.debug("[KAMA_V2] failed to track rejection for %s: %s", epic, exc)

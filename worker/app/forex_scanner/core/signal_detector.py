@@ -2159,6 +2159,9 @@ class SignalDetector:
             if signal:
                 signal = self._add_complete_technical_indicators(signal, df_5m)
 
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
             return signal
 
         except Exception as e:
