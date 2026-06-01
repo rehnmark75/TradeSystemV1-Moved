@@ -650,8 +650,9 @@ The following pairs are in **monitor-only mode** - signals are logged but NOT tr
 | Pair | Reason | Check Status |
 |------|--------|--------------|
 | **USDCHF** | Breakeven (0.99 PF), all filters degrade | `parameter_overrides->>'monitor_only'` |
+| **AUDUSD** | No validated SMC edge; under-filtered config floods signals (see note) | `parameter_overrides->>'monitor_only'` |
 
-**Re-enabled:** AUDUSD was re-enabled Mar 14, 2026 after strong week (72.7% WR, +£505 in 11 trades).
+**AUDUSD status (corrected Jun 1, 2026):** AUDUSD is **disabled on live** (`config_id=2`, `is_enabled=f`) and **monitor-only on demo** (`config_id=3`, `is_enabled=t`, `monitor_only=true`) — i.e. **not traded anywhere**. (The prior "re-enabled Mar 14" claim is stale per the DB.) Its scalp config is deliberately stripped of the entry-quality gates the other pairs carry (loose `scalp_entry_rsi_buy_max=70` vs 44–55, no `scalp_min_adx` floor, no impulse-quality/MFI filters), so in a trend it fires a distinct BUY every ~15 min (cooldown floor) → ~445 signals/quarter at PF 0.50. Harmless while monitor-only (only spams `alert_history`), but do NOT flip to traded without re-tuning to peer gates AND OOS-validating first. Overlaying EURUSD's gate set collapses it 445→70 at PF 1.10 (n=75, marginal). The only actively-traded SMC_SIMPLE pair on demo is currently **EURUSD**.
 
 ```sql
 -- Check monitor-only status
