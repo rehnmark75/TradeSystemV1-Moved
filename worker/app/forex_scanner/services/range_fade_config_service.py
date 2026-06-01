@@ -78,6 +78,11 @@ class RangeFadeConfig:
     buy_adx_ceiling: Optional[float] = None
     sell_adx_ceiling: Optional[float] = None
     htf_adx_ceiling: float = 999.0
+    # NY/overlap-session-scoped 1h-ADX ceiling. Unlike htf_adx_ceiling (all sessions), this
+    # fires ONLY inside the NY window (is_in_ny_session) where a strong 1h trend breaks ranges
+    # and the fade has negative edge; outside NY the same condition is net-profitable so it is
+    # deliberately NOT gated there. 999 = off (enable per config_set via DB, e.g. demo=35).
+    ny_session_htf_adx_ceiling: float = 999.0
     er_floor: float = 0.0
     er_ceiling: float = 999.0
     buy_er_ceiling: Optional[float] = None
@@ -100,6 +105,8 @@ class RangeFadeConfig:
 
     london_start_hour_utc: int = 6
     new_york_end_hour_utc: int = 18
+    ny_session_start_hour_utc: int = 15  # NY/overlap window for ny_session_htf_adx_ceiling
+    ny_session_end_hour_utc: int = 20
     blocked_hours_utc: str = ""  # comma-separated hours to block, e.g. "7,8,15,16,18"
     buy_blocked_hours_utc: str = ""
     sell_blocked_hours_utc: str = ""
@@ -191,6 +198,14 @@ class RangeFadeConfig:
 
     def get_pair_htf_adx_ceiling(self, epic: str) -> float:
         return float(self._override(epic, "htf_adx_ceiling", self.htf_adx_ceiling))
+
+    def get_pair_ny_session_htf_adx_ceiling(self, epic: str) -> float:
+        return float(self._override(epic, "ny_session_htf_adx_ceiling", self.ny_session_htf_adx_ceiling))
+
+    def is_in_ny_session(self, hour_utc: int, epic: str = "") -> bool:
+        start_hour = int(self._override(epic, "ny_session_start_hour_utc", self.ny_session_start_hour_utc))
+        end_hour = int(self._override(epic, "ny_session_end_hour_utc", self.ny_session_end_hour_utc))
+        return start_hour <= hour_utc <= end_hour
 
     def get_pair_adx_ceiling(self, epic: str, direction: str) -> float:
         direction_key = f"{direction.lower()}_adx_ceiling"

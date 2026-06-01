@@ -304,6 +304,26 @@ class RangeFadeStrategy(StrategyInterface):
             )
             return None
 
+        # NY/overlap-session-scoped 1h-ADX ceiling. A strong 1h trend (ADX above the ceiling)
+        # breaks ranges inside the NY window, where the fade is a net loser (demo PF ~0.08);
+        # the SAME condition is net-profitable OUTSIDE NY (PF ~1.29), so it is gated by session,
+        # not globally. Layered on the (off-by-default) global htf_adx_ceiling above. Off unless
+        # ny_session_htf_adx_ceiling is set (>0) in DB config for this config_set.
+        ny_htf_adx_ceil = cfg.get_pair_ny_session_htf_adx_ceiling(epic)
+        if (
+            adx_htf_val is not None
+            and ny_htf_adx_ceil > 0
+            and cfg.is_in_ny_session(now.hour, epic)
+            and adx_htf_val > ny_htf_adx_ceil
+        ):
+            self._reject(
+                epic,
+                "ny_session_htf_adx_ceiling",
+                direction=direction,
+                details={"adx_htf": round(adx_htf_val, 1), "ny_ceiling": ny_htf_adx_ceil, "hour_utc": now.hour},
+            )
+            return None
+
         er_floor = cfg.get_pair_er_floor(epic)
         if latest_er is not None and er_floor > 0.0 and latest_er < er_floor:
             self._reject(
