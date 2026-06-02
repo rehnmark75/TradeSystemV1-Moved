@@ -91,6 +91,12 @@ class RangeFadeConfig:
     min_macd_histogram_pips: float = 0.0
     min_confidence: float = 0.52
     max_confidence: float = 0.84
+    # Confidence REJECT floor (distinct from min_confidence above, which is only a
+    # SCALING anchor). Signals whose computed confidence < this are rejected at the
+    # below_confidence_floor gate. The edge concentrates at conf>=0.60 (shipped in
+    # fa97512); the 0.55-0.59 band is a net loser. DB-tunable per config_set and
+    # per-pair (range_fade_pair_overrides.parameter_overrides). 0.0 = gate off.
+    min_reject_confidence: float = 0.60
 
     fixed_stop_loss_pips: float = 8.0
     fixed_take_profit_pips: float = 12.0
@@ -216,6 +222,9 @@ class RangeFadeConfig:
 
     def get_pair_er_floor(self, epic: str) -> float:
         return float(self._override(epic, "er_floor", self.er_floor))
+
+    def get_pair_min_reject_confidence(self, epic: str) -> float:
+        return float(self._override(epic, "min_reject_confidence", self.min_reject_confidence))
 
     def get_pair_er_ceiling(self, epic: str, direction: str) -> float:
         direction_key = f"{direction.lower()}_er_ceiling"

@@ -351,7 +351,7 @@ class RangeFadeStrategy(StrategyInterface):
         # gate — so penalized (score<0) signals were emitted below it and lost (forward PF
         # 0.80 sub-0.52; 0.55-0.59 band PF 0.51). The edge concentrates at conf>=0.60
         # (forward PF 1.65; OOS EURUSD PF 1.31 vs 0.93 below). Reject below the floor.
-        conf_floor = float(getattr(cfg, "min_reject_confidence", 0.60))
+        conf_floor = cfg.get_pair_min_reject_confidence(epic)
         if confidence < conf_floor:
             self._reject(
                 epic,
