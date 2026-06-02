@@ -711,7 +711,9 @@ class BrokerTradeSync:
 
             inserted = 0
             updated = 0
+            reconciled_closed = 0
             sl_tp_applied = 0
+            open_deal_ids = {p.deal_id for p in positions if p.deal_id}
 
             for p in positions:
                 signal_id = await self._resolve_signal_id(
@@ -760,8 +762,59 @@ class BrokerTradeSync:
                         if applied:
                             sl_tp_applied += 1
 
-            logger.info(f"Synced positions: {inserted} inserted, {updated} updated, {sl_tp_applied} SL/TP applied")
-            return {"inserted": inserted, "updated": updated, "total": len(positions), "sl_tp_applied": sl_tp_applied}
+            if open_deal_ids:
+                stale_rows = await self.db.fetch(
+                    """
+                    UPDATE broker_trades
+                    SET
+                        status = 'closed',
+                        close_time = COALESCE(close_time, updated_at, NOW()),
+                        duration_hours = COALESCE(
+                            duration_hours,
+                            EXTRACT(EPOCH FROM (COALESCE(close_time, updated_at, NOW()) - open_time)) / 3600
+                        ),
+                        updated_at = NOW()
+                    WHERE status = 'open'
+                      AND deal_id <> ALL($1::text[])
+                    RETURNING deal_id, ticker
+                    """,
+                    list(open_deal_ids)
+                )
+            else:
+                stale_rows = await self.db.fetch(
+                    """
+                    UPDATE broker_trades
+                    SET
+                        status = 'closed',
+                        close_time = COALESCE(close_time, updated_at, NOW()),
+                        duration_hours = COALESCE(
+                            duration_hours,
+                            EXTRACT(EPOCH FROM (COALESCE(close_time, updated_at, NOW()) - open_time)) / 3600
+                        ),
+                        updated_at = NOW()
+                    WHERE status = 'open'
+                    RETURNING deal_id, ticker
+                    """
+                )
+
+            reconciled_closed = len(stale_rows)
+            if reconciled_closed:
+                stale_labels = ", ".join(f"{row['ticker']}:{row['deal_id']}" for row in stale_rows[:10])
+                if reconciled_closed > 10:
+                    stale_labels += f", +{reconciled_closed - 10} more"
+                logger.info(f"Reconciled stale open broker trades as closed: {stale_labels}")
+
+            logger.info(
+                f"Synced positions: {inserted} inserted, {updated} updated, "
+                f"{reconciled_closed} reconciled closed, {sl_tp_applied} SL/TP applied"
+            )
+            return {
+                "inserted": inserted,
+                "updated": updated,
+                "total": len(positions),
+                "reconciled_closed": reconciled_closed,
+                "sl_tp_applied": sl_tp_applied
+            }
 
         except Exception as e:
             logger.error(f"Failed to sync positions: {e}")
@@ -926,7 +979,12 @@ class BrokerTradeSync:
 
             total_fetched = positions_result["total"] + trades_result["total"] + 1  # +1 for balance
             total_inserted = positions_result["inserted"] + trades_result["inserted"] + 1
-            total_updated = positions_result["updated"] + trades_result["updated"] + signal_backfill_result["updated"]
+            total_updated = (
+                positions_result["updated"]
+                + positions_result.get("reconciled_closed", 0)
+                + trades_result["updated"]
+                + signal_backfill_result["updated"]
+            )
 
             # Log sync completion
             await self.db.execute("""

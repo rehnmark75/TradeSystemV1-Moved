@@ -118,7 +118,14 @@ export async function GET(request: Request) {
     const closedTrades = closedTradesResult.rows || [];
 
     const openPositionsQuery = `
-      WITH open_trade_base AS (
+      WITH latest_successful_sync AS (
+        SELECT started_at
+        FROM broker_sync_log
+        WHERE status = 'completed'
+        ORDER BY completed_at DESC
+        LIMIT 1
+      ),
+      open_trade_base AS (
         SELECT
           bt.deal_id,
           bt.signal_id,
@@ -133,7 +140,12 @@ export async function GET(request: Request) {
           bt.take_profit,
           bt.open_time
         FROM broker_trades bt
+        LEFT JOIN latest_successful_sync lss ON TRUE
         WHERE bt.status = 'open'
+          AND (
+            lss.started_at IS NULL
+            OR bt.updated_at >= lss.started_at
+          )
       )
       SELECT
         otb.deal_id,

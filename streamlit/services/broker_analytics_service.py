@@ -178,12 +178,24 @@ class BrokerAnalyticsService:
             with _self._get_connection() as conn:
                 with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
                     cur.execute("""
+                        WITH latest_successful_sync AS (
+                            SELECT started_at
+                            FROM broker_sync_log
+                            WHERE status = 'completed'
+                            ORDER BY completed_at DESC
+                            LIMIT 1
+                        )
                         SELECT
                             deal_id, ticker, side, quantity, open_price,
                             current_price, profit, stop_loss, take_profit,
                             open_time, updated_at
-                        FROM broker_trades
-                        WHERE status = 'open'
+                        FROM broker_trades bt
+                        LEFT JOIN latest_successful_sync lss ON TRUE
+                        WHERE bt.status = 'open'
+                          AND (
+                              lss.started_at IS NULL
+                              OR bt.updated_at >= lss.started_at
+                          )
                         ORDER BY open_time DESC
                     """)
                     rows = cur.fetchall()

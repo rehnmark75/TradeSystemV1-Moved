@@ -1201,6 +1201,7 @@ class StockScheduler:
                     'positions_fetched': sync_result['positions']['total'],
                     'positions_inserted': sync_result['positions']['inserted'],
                     'positions_updated': sync_result['positions']['updated'],
+                    'positions_reconciled_closed': sync_result['positions'].get('reconciled_closed', 0),
                     'trades_fetched': sync_result['trades']['total'],
                     'trades_inserted': sync_result['trades']['inserted'],
                     'trades_updated': sync_result['trades']['updated'],
@@ -1209,7 +1210,9 @@ class StockScheduler:
 
                 logger.info(f"[OK] Broker sync complete:")
                 logger.info(f"     Positions: {results['positions_fetched']} fetched, "
-                           f"{results['positions_inserted']} new, {results['positions_updated']} updated")
+                           f"{results['positions_inserted']} new, "
+                           f"{results['positions_updated']} updated, "
+                           f"{results['positions_reconciled_closed']} reconciled closed")
                 logger.info(f"     Trades: {results['trades_fetched']} fetched, "
                            f"{results['trades_inserted']} new, {results['trades_updated']} updated")
 

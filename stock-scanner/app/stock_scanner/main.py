@@ -1605,7 +1605,9 @@ class StockScannerCLI:
 
             print(f"\n[RESULTS]")
             print(f"   Positions: {result['positions']['total']} fetched, "
-                  f"{result['positions']['inserted']} new, {result['positions']['updated']} updated")
+                  f"{result['positions']['inserted']} new, "
+                  f"{result['positions']['updated']} updated, "
+                  f"{result['positions'].get('reconciled_closed', 0)} reconciled closed")
             print(f"   Trades: {result['trades']['total']} fetched, "
                   f"{result['trades']['inserted']} new, {result['trades']['updated']} updated")
             print(f"\n   Total: {result['total_fetched']} fetched, "
