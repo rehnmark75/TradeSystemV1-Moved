@@ -91,6 +91,8 @@ class FAORATRTrailStrategy(StrategyInterface):
 
         self.sl_atr = float(self.config_override.get("fa_or_sl_atr", 1.2))
         self.tp_atr = float(self.config_override.get("fa_or_tp_atr", 2.0))
+        self.min_sl_pips = float(self.config_override.get("fa_or_min_sl_pips", 0.0))
+        self.min_tp_pips = float(self.config_override.get("fa_or_min_tp_pips", 0.0))
         self.trail_trigger_atr = float(self.config_override.get("fa_or_trail_trigger_atr", 0.25))
         self.trail_distance_atr = float(self.config_override.get("fa_or_trail_distance_atr", 0.10))
 
@@ -162,6 +164,8 @@ class FAORATRTrailStrategy(StrategyInterface):
         cooldown_bars = int(_cfg_value(cfg, epic, "fa_or_cooldown_bars", self.cooldown_bars, self.config_override))
         sl_atr = float(_cfg_value(cfg, epic, "fa_or_sl_atr", self.sl_atr, self.config_override))
         tp_atr = float(_cfg_value(cfg, epic, "fa_or_tp_atr", self.tp_atr, self.config_override))
+        min_sl_pips = float(_cfg_value(cfg, epic, "fa_or_min_sl_pips", self.min_sl_pips, self.config_override))
+        min_tp_pips = float(_cfg_value(cfg, epic, "fa_or_min_tp_pips", self.min_tp_pips, self.config_override))
         trail_trigger_atr = float(_cfg_value(cfg, epic, "fa_or_trail_trigger_atr", self.trail_trigger_atr, self.config_override))
         trail_distance_atr = float(_cfg_value(cfg, epic, "fa_or_trail_distance_atr", self.trail_distance_atr, self.config_override))
         usd_jpy_atr_floor_pips = float(_cfg_value(cfg, epic, "fa_or_usdjpy_atr_floor_pips", USDJPY_ATR_FLOOR_PIPS, self.config_override))
@@ -237,8 +241,10 @@ class FAORATRTrailStrategy(StrategyInterface):
             return None
 
         entry = float(row["close"])
-        risk_pips = max(0.1, atr_pips * sl_atr)
-        reward_pips = max(0.1, atr_pips * tp_atr)
+        atr_risk_pips = atr_pips * sl_atr
+        atr_reward_pips = atr_pips * tp_atr
+        risk_pips = max(0.1, atr_risk_pips, min_sl_pips)
+        reward_pips = max(0.1, atr_reward_pips, min_tp_pips)
         signal_type = "buy" if direction == "BUY" else "sell"
 
         if direction == "BUY":
@@ -269,6 +275,10 @@ class FAORATRTrailStrategy(StrategyInterface):
             "take_profit_price": take_profit,
             "risk_pips": risk_pips,
             "reward_pips": reward_pips,
+            "fa_or_atr_risk_pips": atr_risk_pips,
+            "fa_or_atr_reward_pips": atr_reward_pips,
+            "fa_or_min_sl_pips": min_sl_pips,
+            "fa_or_min_tp_pips": min_tp_pips,
             "stop_loss_pips": risk_pips,
             "take_profit_pips": reward_pips,
             "confidence_score": confidence,
@@ -301,6 +311,10 @@ class FAORATRTrailStrategy(StrategyInterface):
                 "adx": float(row["adx"]),
                 "rsi": float(row["rsi"]) if pd.notna(row["rsi"]) else None,
                 "atr_pips": atr_pips,
+                "atr_risk_pips": atr_risk_pips,
+                "atr_reward_pips": atr_reward_pips,
+                "min_sl_pips": min_sl_pips,
+                "min_tp_pips": min_tp_pips,
                 "vwap": float(row["vwap"]),
                 "value_high": float(row["value_high"]) if pd.notna(row["value_high"]) else None,
                 "value_low": float(row["value_low"]) if pd.notna(row["value_low"]) else None,

@@ -38,6 +38,8 @@ class FAORATRTrailConfig:
     fa_or_cooldown_bars: int = 5
     fa_or_sl_atr: float = 1.2
     fa_or_tp_atr: float = 2.0
+    fa_or_min_sl_pips: float = 0.0
+    fa_or_min_tp_pips: float = 0.0
     fa_or_trail_trigger_atr: float = 0.25
     fa_or_trail_distance_atr: float = 0.10
     fa_or_atr_period: int = 14
