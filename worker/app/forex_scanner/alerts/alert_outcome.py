@@ -72,4 +72,6 @@ def reason_from_executor_error(error_msg: str) -> str:
         return f"spread:{_truncate(error_msg)}"
     if "margin" in msg or "insufficient" in msg:
         return f"margin:{_truncate(error_msg)}"
+    if "broker order placement failed" in msg or "service bean method" in msg or "createposition" in msg:
+        return f"broker_error:{_truncate(error_msg)}"
     return f"executor_error:{_truncate(error_msg)}"

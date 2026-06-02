@@ -201,6 +201,7 @@ class OrderExecutor:
         # Performance tracking - store pending trades
         self.pending_trades = {}  # trade_id -> signal info
         self.completed_trades = []  # completed trade records
+        self.broker_error_cooldowns = {}  # external_epic -> epoch seconds
 
         # Request statistics tracking
         self.request_stats = {
@@ -910,6 +911,19 @@ class OrderExecutor:
         if not self.order_api_url or not self.api_subscription_key:
             self.logger.error("❌ Order API not configured")
             return {"status": "error", "message": "API not configured", "alert_id": alert_id}
+
+        broker_cooldown_until = self.broker_error_cooldowns.get(external_epic)
+        if broker_cooldown_until and time.time() < broker_cooldown_until:
+            remaining = int(broker_cooldown_until - time.time())
+            msg = f"Broker create-position error cooldown active for {external_epic} ({remaining}s remaining)"
+            self.logger.warning(f"🧯 {msg}")
+            return {
+                "status": "blocked",
+                "message": msg,
+                "alert_id": alert_id,
+                "reason": "broker_create_position_cooldown",
+                "cooldown_remaining_seconds": remaining,
+            }
         
         # Prepare order data
         order_data = {
@@ -1086,7 +1100,14 @@ class OrderExecutor:
                 # Other errors - log appropriately with full details
                 try:
                     error_detail = response.json()
-                    error_msg = f"Order failed: HTTP {response.status_code} - {error_detail}"
+                    broker_message = error_detail
+                    if isinstance(error_detail, dict):
+                        detail_obj_for_msg = error_detail.get("detail")
+                        if isinstance(detail_obj_for_msg, dict):
+                            broker_message = detail_obj_for_msg.get("message") or detail_obj_for_msg
+                        elif detail_obj_for_msg:
+                            broker_message = detail_obj_for_msg
+                    error_msg = f"Order failed: HTTP {response.status_code} - {broker_message}"
 
                     # Special handling for HTTP 400 - protective blocks (not real errors)
                     if response.status_code == 400:
@@ -1137,10 +1158,29 @@ class OrderExecutor:
                     if response.status_code == 500:
                         detail_obj = error_detail if isinstance(error_detail, dict) else {}
                         error_desc = detail_obj.get("detail", str(error_detail))
+                        error_text_lower = str(error_desc).lower()
+
+                        if (
+                            "service bean method" in error_text_lower
+                            and "createposition" in error_text_lower
+                            and "outputpropertiesfactory" in error_text_lower
+                        ):
+                            cooldown_seconds = int(os.getenv("BROKER_CREATE_POSITION_COOLDOWN_SECONDS", "900"))
+                            self.broker_error_cooldowns[external_epic] = time.time() + cooldown_seconds
+                            self.logger.error(f"🧯 Broker create-position backend failure for {external_epic}; cooling down order attempts for {cooldown_seconds}s")
+                            self.logger.error(f"   Broker response: {error_desc}")
+                            return {
+                                "status": "blocked",
+                                "message": f"Broker create-position backend failure: {error_desc}",
+                                "alert_id": alert_id,
+                                "status_code": response.status_code,
+                                "response_time": response_time,
+                                "reason": "broker_create_position_backend_error",
+                                "cooldown_seconds": cooldown_seconds,
+                            }
 
                         # Check if this is actually a "position exists" error that was incorrectly returned as 500
                         duplicate_indicators = ["already open", "duplicate", "position exists", "existing position"]
-                        error_text_lower = str(error_desc).lower()
 
                         if any(indicator in error_text_lower for indicator in duplicate_indicators):
                             self.logger.info(f"ℹ️ Position already open for {external_epic} (HTTP 500 converted to skip)")

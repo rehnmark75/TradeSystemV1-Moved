@@ -33,8 +33,10 @@ async def place_market_order(auth_headers, market_epic, direction, currency_code
         response = await client.post(
             f"{API_BASE_URL}/positions/otc",
             headers=auth_headers,
-            data=json.dumps(payload)
+            json=payload
         )
+        if response.status_code >= 400:
+            logger.error("IG market order failed: HTTP %s - %s", response.status_code, response.text[:1000])
         response.raise_for_status()
         return response.json()
 

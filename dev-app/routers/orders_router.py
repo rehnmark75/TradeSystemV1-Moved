@@ -1070,7 +1070,19 @@ async def ig_place_order(
                     # Re-raise other broker errors (will be caught by outer exception handler)
                     logger.error(f"❌ Broker rejected order for {symbol}: HTTP {error_status}")
                     logger.error(f"   Error details: {error_text[:500]}")
-                    raise
+                    raise HTTPException(
+                        status_code=error_status,
+                        detail={
+                            "error": "Broker order placement failed",
+                            "message": error_text[:1000],
+                            "broker_status_code": error_status,
+                            "epic": symbol,
+                            "direction": direction,
+                            "alert_id": alert_id,
+                            "stop_distance": sl_limit,
+                            "limit_distance": limit_distance,
+                        },
+                    )
         
         # BUGFIX: Add validation that result was actually returned
         if result is None:
