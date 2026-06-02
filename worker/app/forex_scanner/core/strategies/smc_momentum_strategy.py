@@ -88,9 +88,9 @@ def _htf_bias(df_4h: pd.DataFrame, ema_period: int = 50) -> Optional[str]:
     """
     if df_4h is None or len(df_4h) < ema_period:
         return None
-    closes = df_4h["close"].values
-    ema = float(np.mean(closes[-ema_period:]))
-    last_close = float(closes[-1])
+    closes = pd.Series(df_4h["close"].astype(float).values)
+    ema = float(closes.ewm(span=ema_period, adjust=False).mean().iloc[-1])
+    last_close = float(closes.iloc[-1])
     return "bullish" if last_close > ema else "bearish"
 
 
@@ -98,9 +98,9 @@ def _htf_distance_pips(df_4h: pd.DataFrame, ema_period: int, pair: str) -> Optio
     """Return absolute distance in pips between 4H close and EMA50."""
     if df_4h is None or len(df_4h) < ema_period:
         return None
-    closes = df_4h["close"].values
-    ema = float(np.mean(closes[-ema_period:]))
-    last_close = float(closes[-1])
+    closes = pd.Series(df_4h["close"].astype(float).values)
+    ema = float(closes.ewm(span=ema_period, adjust=False).mean().iloc[-1])
+    last_close = float(closes.iloc[-1])
     pip = _PIP_JPY if _is_jpy(pair) else _PIP_FX
     return abs(last_close - ema) / pip
 
@@ -112,7 +112,8 @@ class SMCMomentumStrategy(StrategyInterface):
 
     Entry mechanic: 15m bar sweeps a liquidity pool by 3-15 pips and closes
     back inside. Entry WITH the 4H EMA50 trend direction (sweeping opposite,
-    reverting with trend). SL beyond swept level; TP = ATR(14, 1H) * multiplier.
+    reverting with trend). SL beyond the sweep candle extreme; TP = ATR(14, 1H)
+    * multiplier.
     """
 
     uses_smart_money_analysis: bool = True
@@ -268,14 +269,51 @@ class SMCMomentumStrategy(StrategyInterface):
                 self._log_rejection(epic, "HTF_MISALIGN", f"SELL but bias={bias}", direction="SELL", hour_utc=hour_utc)
                 return None
 
-        # --- 8. Momentum quality filter (optional) ---
+        # --- 8. Pair-specific direction/session quality gates ---
+        allowed_directions = cfg.get_pair_allowed_directions(epic)
+        if allowed_directions and sweep.direction not in allowed_directions:
+            self._log_rejection(
+                epic,
+                "PAIR_DIRECTION",
+                f"{sweep.direction} not in {allowed_directions}",
+                direction=sweep.direction,
+                hour_utc=hour_utc,
+                details={"allowed_directions": allowed_directions},
+            )
+            return None
+
+        allowed_hours = cfg.get_pair_allowed_hours_utc(epic)
+        if allowed_hours and hour_utc not in allowed_hours:
+            self._log_rejection(
+                epic,
+                "PAIR_ALLOWED_HOURS",
+                f"hour={hour_utc} not in {allowed_hours}",
+                direction=sweep.direction,
+                hour_utc=hour_utc,
+                details={"allowed_hours_utc": allowed_hours},
+            )
+            return None
+
+        blocked_hours = cfg.get_pair_blocked_hours_utc(epic)
+        if hour_utc in blocked_hours:
+            self._log_rejection(
+                epic,
+                "PAIR_BLOCKED_HOURS",
+                f"hour={hour_utc} blocked",
+                direction=sweep.direction,
+                hour_utc=hour_utc,
+                details={"blocked_hours_utc": blocked_hours},
+            )
+            return None
+
+        # --- 9. Momentum quality filter (optional) ---
         filter_mode = cfg.get_pair_momentum_filter_mode(epic)
         if filter_mode == "atr_expansion":
             if not self._atr_expansion_ok(df_trigger, cfg.atr_expansion_threshold):
                 self._log_rejection(epic, "ATR_EXPANSION", "sweep bar TR not expanded", hour_utc=hour_utc)
                 return None
 
-        # --- 9. ATR for TP ---
+        # --- 10. ATR for TP ---
         atr = _calculate_atr(df_1h, cfg.atr_period)
         if atr is None:
             # Fallback: estimate from 15m ATR, scale to 1H equivalent (~2× 15m ATR)
@@ -285,7 +323,7 @@ class SMCMomentumStrategy(StrategyInterface):
             self._log_rejection(epic, "ATR_UNAVAILABLE", "ATR is None or zero", hour_utc=hour_utc)
             return None
 
-        # --- 10. Confidence scoring ---
+        # --- 11. Confidence scoring ---
         confidence = self._score_confidence(sweep, bias, df_trigger, cfg, epic, is_jpy)
         min_conf = cfg.get_pair_min_confidence(epic)
         if confidence < min_conf:
@@ -294,7 +332,7 @@ class SMCMomentumStrategy(StrategyInterface):
                                 details={"confidence": round(confidence, 3), "min_confidence": min_conf})
             return None
 
-        # --- 11. SL / TP ---
+        # --- 12. SL / TP ---
         pip_size = _pip(pair)
         sl_buffer = cfg.get_pair_sl_buffer_pips(epic, is_jpy) * pip_size
         tp_atr_mult = cfg.get_pair_tp_atr_multiplier(epic)
@@ -303,12 +341,12 @@ class SMCMomentumStrategy(StrategyInterface):
         entry_price = float(bar["close"])
 
         if sweep.direction == "BUY":
-            sl_price = sweep.pool_level - sl_buffer
+            sl_price = float(bar["low"]) - sl_buffer
             sl_pips = (entry_price - sl_price) / pip_size
             tp_price = entry_price + atr * tp_atr_mult
             tp_pips = (tp_price - entry_price) / pip_size
         else:
-            sl_price = sweep.pool_level + sl_buffer
+            sl_price = float(bar["high"]) + sl_buffer
             sl_pips = (sl_price - entry_price) / pip_size
             tp_price = entry_price - atr * tp_atr_mult
             tp_pips = (entry_price - tp_price) / pip_size
@@ -317,7 +355,7 @@ class SMCMomentumStrategy(StrategyInterface):
             self.logger.debug(f"[SMC_MOMENTUM] Degenerate SL/TP for {epic}: sl={sl_pips:.1f} tp={tp_pips:.1f}")
             return None
 
-        # --- 12. Build signal ---
+        # --- 13. Build signal ---
         signal = self._build_signal(
             epic=epic,
             pair=pair,

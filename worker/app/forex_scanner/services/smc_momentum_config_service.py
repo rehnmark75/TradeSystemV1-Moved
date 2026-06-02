@@ -16,7 +16,7 @@ import os
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from threading import RLock
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import psycopg2
 import psycopg2.extras
@@ -44,6 +44,28 @@ def _coerce(value: str, value_type: str) -> Any:
     except Exception:
         logger.warning(f"SMC_MOMENTUM config: failed to coerce {value!r} as {t}")
     return value
+
+
+def _coerce_list(value: Any) -> List[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, tuple):
+        return list(value)
+    if isinstance(value, str):
+        text = value.strip()
+        if not text:
+            return []
+        if text.startswith("["):
+            try:
+                parsed = json.loads(text)
+                if isinstance(parsed, list):
+                    return parsed
+            except Exception:
+                pass
+        return [part.strip() for part in text.split(",") if part.strip()]
+    return [value]
 
 
 # ---------------------------------------------------------------------------
@@ -155,10 +177,12 @@ class SMCMomentumConfig:
         return bool(row.get("is_enabled", False))
 
     def is_monitor_only(self, epic: str) -> bool:
-        row = self._pair(epic)
         # Default to False (trade enabled pairs). Only return True if explicitly set in DB.
         # Bug fix (May 29 2026): was defaulting to True, blocking all enabled pairs.
-        return bool(row.get("monitor_only", False))
+        val = self._override(epic, "monitor_only", False)
+        if isinstance(val, str):
+            return val.strip().lower() in _TRUE_STR
+        return bool(val)
 
     def is_traded(self, epic: str) -> bool:
         row = self._pair(epic)
@@ -205,6 +229,42 @@ class SMCMomentumConfig:
         if isinstance(val, str):
             return val.strip().lower() in _TRUE_STR
         return bool(val)
+
+    def get_pair_allowed_directions(self, epic: str) -> List[str]:
+        values = _coerce_list(self._override(epic, "allowed_directions", []))
+        aliases = {
+            "BUY": "BUY",
+            "BULL": "BUY",
+            "BULLISH": "BUY",
+            "LONG": "BUY",
+            "SELL": "SELL",
+            "BEAR": "SELL",
+            "BEARISH": "SELL",
+            "SHORT": "SELL",
+        }
+        directions: List[str] = []
+        for value in values:
+            direction = aliases.get(str(value).strip().upper())
+            if direction and direction not in directions:
+                directions.append(direction)
+        return directions
+
+    def get_pair_allowed_hours_utc(self, epic: str) -> List[int]:
+        return self._get_hour_list(epic, "allowed_hours_utc")
+
+    def get_pair_blocked_hours_utc(self, epic: str) -> List[int]:
+        return self._get_hour_list(epic, "blocked_hours_utc")
+
+    def _get_hour_list(self, epic: str, key: str) -> List[int]:
+        hours: List[int] = []
+        for value in _coerce_list(self._override(epic, key, [])):
+            try:
+                hour = int(value)
+            except (TypeError, ValueError):
+                continue
+            if 0 <= hour <= 23 and hour not in hours:
+                hours.append(hour)
+        return hours
 
     def is_rollover_hour(self, hour_utc: int) -> bool:
         if not self.rollover_block_enabled:
@@ -359,6 +419,35 @@ def apply_config_overrides(
     if not overrides:
         return cfg
     for key, value in overrides.items():
+        if key == "_pair_overrides":
+            if isinstance(value, dict):
+                for epic, pair_params in value.items():
+                    if not isinstance(pair_params, dict):
+                        continue
+                    row = cfg.pair_overrides.setdefault(
+                        epic,
+                        {
+                            "epic": epic,
+                            "is_enabled": True,
+                            "is_traded": False,
+                            "monitor_only": False,
+                            "parameter_overrides": {},
+                        },
+                    )
+                    bag = row.get("parameter_overrides") or {}
+                    if isinstance(bag, str):
+                        try:
+                            bag = json.loads(bag)
+                        except Exception:
+                            bag = {}
+                    for pair_key, pair_value in pair_params.items():
+                        if pair_key in row:
+                            row[pair_key] = pair_value
+                        else:
+                            bag[pair_key] = pair_value
+                    row["parameter_overrides"] = bag
+                    logger.info(f"SMC_MOMENTUM pair override applied: {epic}={pair_params}")
+            continue
         if not hasattr(cfg, key):
             logger.debug(f"SMC_MOMENTUM override ignored (unknown key): {key}")
             continue
