@@ -435,7 +435,7 @@ export default function SignalsPage() {
     const loadTop = async () => {
       setTopLoading(true);
       try {
-        const res = await fetch(`${apiPath("signals/top")}?limit=10&maxPerScanner=3`);
+        const res = await fetch(`${apiPath("signals/top")}?limit=10`);
         const data = await res.json();
         setTopCandidates(data.rows || []);
         setTopMeta(data.meta || null);
@@ -1223,7 +1223,7 @@ export default function SignalsPage() {
             <div className="footer-note" style={{ marginBottom: 10 }}>
               Top candidates from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
               {" "}Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties.
-              {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; max {topMeta?.max_per_scanner ?? 3} per scanner. Scanner PF is shown so marginal scanners stay visible.
+              {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; scanner PF is shown so marginal scanners stay visible.
             </div>
             {topLoading ? (
               <div className="footer-note">Loading top candidates…</div>

@@ -27,7 +27,10 @@ const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Math.min(Math.max(1, Number(searchParams.get("limit") || 10)), 50);
-  const maxPerScanner = Math.max(1, Number(searchParams.get("maxPerScanner") || 3));
+  const maxPerScanner = Math.min(
+    limit,
+    Math.max(1, Number(searchParams.get("maxPerScanner") || limit))
+  );
 
   const client = await pool.connect();
   try {
