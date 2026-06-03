@@ -16,7 +16,8 @@ type ForexStats = {
   win_rate: number;
   avg_profit: number;
   avg_loss: number;
-  profit_factor: number;
+  profit_factor: number | null;
+  profit_factor_infinite?: boolean;
   largest_win: number;
   largest_loss: number;
   best_pair: string;
@@ -479,9 +480,9 @@ export default function ForexAnalyticsPage() {
               Profit Factor
               <strong>
                 {overview
-                  ? overview.stats.profit_factor === Number.POSITIVE_INFINITY
+                  ? overview.stats.profit_factor_infinite
                     ? "∞"
-                    : formatNumber(overview.stats.profit_factor, 2)
+                    : formatNumber(overview.stats.profit_factor ?? 0, 2)
                   : "-"}
               </strong>
             </div>

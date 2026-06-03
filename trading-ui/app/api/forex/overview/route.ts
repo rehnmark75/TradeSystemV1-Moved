@@ -29,6 +29,8 @@ export async function GET(request: Request) {
         COUNT(CASE WHEN profit_loss < 0 THEN 1 END) as losing_trades,
         COUNT(CASE WHEN status IN ('pending', 'pending_limit') THEN 1 END) as pending_trades,
         COALESCE(SUM(profit_loss), 0) as total_profit_loss,
+        COALESCE(SUM(CASE WHEN profit_loss > 0 THEN profit_loss ELSE 0 END), 0) as gross_profit,
+        COALESCE(SUM(CASE WHEN profit_loss < 0 THEN profit_loss ELSE 0 END), 0) as gross_loss,
         COALESCE(AVG(CASE WHEN profit_loss > 0 THEN profit_loss END), 0) as avg_profit,
         COALESCE(AVG(CASE WHEN profit_loss < 0 THEN profit_loss END), 0) as avg_loss,
         COALESCE(MAX(profit_loss), 0) as largest_win,
@@ -46,15 +48,19 @@ export async function GET(request: Request) {
     const losingTrades = Number(statsRow.losing_trades ?? 0);
     const pendingTrades = Number(statsRow.pending_trades ?? 0);
     const totalProfitLoss = Number(statsRow.total_profit_loss ?? 0);
+    const grossProfit = Number(statsRow.gross_profit ?? 0);
+    const grossLoss = Number(statsRow.gross_loss ?? 0);
     const avgProfit = Number(statsRow.avg_profit ?? 0);
     const avgLoss = Number(statsRow.avg_loss ?? 0);
     const largestWin = Number(statsRow.largest_win ?? 0);
     const largestLoss = Number(statsRow.largest_loss ?? 0);
     const winRate = totalTrades > 0 ? (winningTrades / totalTrades) * 100 : 0;
+    const closedTrades = winningTrades + losingTrades;
+    const profitFactorInfinite = closedTrades > 0 && grossProfit > 0 && grossLoss === 0;
     const profitFactor =
-      losingTrades > 0 && avgLoss < 0
-        ? (avgProfit * winningTrades) / Math.abs(avgLoss * losingTrades)
-        : Number.POSITIVE_INFINITY;
+      grossLoss < 0
+        ? grossProfit / Math.abs(grossLoss)
+        : 0;
 
     const pairStatsResult = await forexPool.query(
       `
@@ -122,7 +128,8 @@ export async function GET(request: Request) {
         win_rate: winRate,
         avg_profit: avgProfit,
         avg_loss: avgLoss,
-        profit_factor: profitFactor,
+        profit_factor: profitFactorInfinite ? null : profitFactor,
+        profit_factor_infinite: profitFactorInfinite,
         largest_win: largestWin,
         largest_loss: largestLoss,
         best_pair: bestPair,
