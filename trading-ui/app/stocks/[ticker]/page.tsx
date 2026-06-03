@@ -4,6 +4,7 @@
 import Link from "next/link";
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import PlaceOrderForm from "../../../components/PlaceOrderForm";
 
 type StockInstrument = {
   ticker: string;
@@ -568,6 +569,14 @@ export default function StockDeepDivePage() {
                 </div>
               </div>
             </div>
+
+              <div className="panel-card">
+                <PlaceOrderForm
+                  ticker={ticker}
+                  entryPrice={numberOrNull(data?.metrics?.current_price ?? data?.watchlist?.price ?? data?.signal?.entry_price)}
+                  signalId={data?.signal_history?.[0]?.id}
+                />
+              </div>
 
               <div className="panel-card">
                 <h3>Notes & Journal</h3>

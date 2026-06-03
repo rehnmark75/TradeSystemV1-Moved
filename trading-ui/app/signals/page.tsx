@@ -2,7 +2,7 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import { Virtuoso } from "react-virtuoso";
 
 type SignalRow = {
@@ -139,6 +139,20 @@ type NoteEntry = {
   context: string | null;
   created_at: string;
   updated_at: string;
+};
+
+type TopCandidate = SignalRow & {
+  rank: number | string;
+  candidate_score: number | string;
+  scanner_pf: number | string | null;
+  scanner_closed_n: number | null;
+};
+
+type TopMeta = {
+  batch_date: string | null;
+  edge_window_days: number;
+  edge_pf_floor: number;
+  max_per_scanner: number;
 };
 
 const numberOrNull = (value: unknown) => {
@@ -311,6 +325,9 @@ const daqWeighted = (score: unknown, maxPoints: number) => {
   return Math.round((val / 100) * maxPoints);
 };
 
+const top10CellHead = { padding: "8px 10px", fontSize: 12, opacity: 0.7, fontWeight: 600 };
+const top10Cell = { padding: "8px 10px", fontSize: 13 };
+
 export default function SignalsPage() {
   const apiPath = (path: string) => `../api/${path}`;
   const [stats, setStats] = useState<SignalStats | null>(null);
@@ -352,6 +369,11 @@ export default function SignalsPage() {
   const [rsFilter, setRsFilter] = useState("All RS");
   const [rsTrendFilter, setRsTrendFilter] = useState("All Trends");
   const [orderBy, setOrderBy] = useState("date_desc");
+
+  const [viewMode, setViewMode] = useState<"all" | "top10">("all");
+  const [topCandidates, setTopCandidates] = useState<TopCandidate[]>([]);
+  const [topLoading, setTopLoading] = useState(false);
+  const [topMeta, setTopMeta] = useState<TopMeta | null>(null);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -407,6 +429,22 @@ export default function SignalsPage() {
     };
     loadSignals();
   }, [scannerFilter, tierFilter, statusFilter, claudeFilter, dateFrom, dateTo, rsFilter, rsTrendFilter, orderBy]);
+
+  useEffect(() => {
+    if (viewMode !== "top10") return;
+    const loadTop = async () => {
+      setTopLoading(true);
+      try {
+        const res = await fetch(`${apiPath("signals/top")}?limit=10&maxPerScanner=3`);
+        const data = await res.json();
+        setTopCandidates(data.rows || []);
+        setTopMeta(data.meta || null);
+      } finally {
+        setTopLoading(false);
+      }
+    };
+    loadTop();
+  }, [viewMode]);
 
   const toggleExpand = async (signal: SignalRow) => {
     const next = !expanded[signal.id];
@@ -613,6 +651,519 @@ export default function SignalsPage() {
     });
   };
 
+  const renderSignalDetail = (signal: SignalRow) => {
+    const badges = riskBadges(signal);
+    const entry = numberOrNull(signal.entry_price) || 0;
+    const entryLow = entry * 0.995;
+    const entryHigh = entry * 1.01;
+    const stop = entry * 0.97;
+    const target1 = entry * 1.05;
+    const target2 = entry * 1.1;
+    const tradeCount = numberOrNull(signal.trade_count) ?? 0;
+    const openTrades = numberOrNull(signal.open_trade_count) ?? 0;
+    const hasTrades = tradeCount > 0;
+    const lastClosed = tradeOutcome(signal.last_closed_profit);
+    const lastTradeDate = formatTradeDate(signal.last_trade_open_time || signal.last_trade_close_time);
+    const lastClosedDate = formatTradeDate(signal.last_closed_time);
+    const lastStatus = (signal.last_trade_status || "").toLowerCase();
+    const isRunning = lastStatus ? lastStatus === "open" : openTrades > 0;
+    return (
+      <div>
+        <div className="detail-section notes-panel">
+          <button
+            className="detail-toggle"
+            onClick={() => setNotesOpen((prev) => ({ ...prev, [signal.ticker]: !prev[signal.ticker] }))}
+          >
+            {notesOpen[signal.ticker] ? "▾" : "▸"} Notes & Journal ({notes[signal.ticker]?.length ?? 0})
+          </button>
+          {notesOpen[signal.ticker] ? (
+            <div className="notes-content">
+              <textarea
+                value={noteDraft[signal.ticker] || ""}
+                onChange={(e) => setNoteDraft((prev) => ({ ...prev, [signal.ticker]: e.target.value }))}
+                placeholder="Add thesis, risk plan, or post-mortem notes..."
+              />
+              <div className="notes-actions">
+                <button
+                  className="notes-btn"
+                  onClick={() => saveNote(signal.ticker)}
+                  disabled={noteLoading[signal.ticker] || !(noteDraft[signal.ticker] || "").trim()}
+                >
+                  {noteLoading[signal.ticker] ? "Saving..." : "Save note"}
+                </button>
+                {noteMessage[signal.ticker] ? <span className="notes-status">{noteMessage[signal.ticker]}</span> : null}
+              </div>
+              <div className="notes-list">
+                {noteLoading[signal.ticker] && !notes[signal.ticker] ? (
+                  <div className="footer-note">Loading notes...</div>
+                ) : notes[signal.ticker]?.length ? (
+                  notes[signal.ticker]?.map((note) => (
+                    <div className="note-item" key={note.id}>
+                      <div className="note-meta">
+                        {formatNoteTime(note.created_at)}
+                        <span className="note-actions">
+                          <button
+                            className="note-link"
+                            onClick={() => {
+                              setNoteEditing((prev) => ({ ...prev, [signal.ticker]: note.id }));
+                              setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: note.note_text }));
+                            }}
+                          >
+                            Edit
+                          </button>
+                          <button className="note-link danger" onClick={() => deleteNote(signal.ticker, note.id)}>
+                            Delete
+                          </button>
+                        </span>
+                      </div>
+                      {noteEditing[signal.ticker] === note.id ? (
+                        <div>
+                          <textarea
+                            value={noteEditDraft[signal.ticker] || ""}
+                            onChange={(e) => setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: e.target.value }))}
+                          />
+                          <div className="notes-actions">
+                            <button
+                              className="notes-btn"
+                              onClick={() => saveNoteEdit(signal.ticker)}
+                              disabled={noteLoading[signal.ticker] || !(noteEditDraft[signal.ticker] || "").trim()}
+                            >
+                              {noteLoading[signal.ticker] ? "Saving..." : "Save edit"}
+                            </button>
+                            <button
+                              className="notes-btn secondary"
+                              onClick={() => {
+                                setNoteEditing((prev) => ({ ...prev, [signal.ticker]: null }));
+                                setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: "" }));
+                              }}
+                            >
+                              Cancel
+                            </button>
+                          </div>
+                        </div>
+                      ) : (
+                        <div className="note-text">{note.note_text}</div>
+                      )}
+                    </div>
+                  ))
+                ) : (
+                  <div className="footer-note">No notes yet.</div>
+                )}
+              </div>
+            </div>
+          ) : null}
+        </div>
+        <div className="expander">
+          <div>
+            <h4>Trade Plan (3% SL / 5% TP)</h4>
+            <div className="detail-grid">
+              <div className="detail-item">Entry Zone: {formatValue(entryLow)} - {formatValue(entryHigh)}</div>
+              <div className="detail-item">Stop Loss: {formatValue(stop)}</div>
+              <div className="detail-item">Target 1: {formatValue(target1)}</div>
+              <div className="detail-item">Target 2: {formatValue(target2)}</div>
+              <div className="detail-item">R:R: 1.67</div>
+              <div className="detail-item">ATR%: {formatValue(signal.atr_percent, 2)}</div>
+              <div className="detail-item">Relative Vol: {formatValue(signal.relative_volume, 2)}x</div>
+              <div className="detail-item">RS: {signal.rs_percentile ?? "-"} {signal.rs_trend ? `(${rsTrendText(signal.rs_trend)})` : ""}</div>
+              <div className="detail-item">
+                Analyst: {signal.analyst_rating ?? "-"}
+                {signal.number_of_analysts ? ` (${signal.number_of_analysts})` : ""}
+              </div>
+              <div className="detail-item">Target: {signal.target_price ? `$${Number(signal.target_price).toFixed(2)}` : "-"}</div>
+            </div>
+            <h4>Trade History</h4>
+            {hasTrades ? (
+              <div className="detail-grid">
+                <div className="detail-item">Trades: {tradeCount}</div>
+                <div className="detail-item">Open: {openTrades}</div>
+                <div className="detail-item">
+                  Last Trade:{" "}
+                  <span className={`pill ${isRunning ? "warn" : "good"}`}>
+                    {isRunning ? "OPEN" : "CLOSED"}
+                  </span>{" "}
+                  {lastTradeDate}
+                </div>
+                <div className="detail-item">
+                  Last Closed:{" "}
+                  <span className={`pill ${lastClosed.tone}`}>{lastClosed.label}</span>{" "}
+                  {lastClosedDate}
+                </div>
+                <div className="detail-item">
+                  Last P/L: {formatTradePnl(signal.last_closed_profit, signal.last_closed_profit_pct)}
+                </div>
+                <div className="detail-item">
+                  Side: {signal.last_trade_side ?? signal.last_closed_side ?? "-"}
+                </div>
+              </div>
+            ) : (
+              <div className="footer-note">No recorded broker trades for this ticker.</div>
+            )}
+            {badges.length ? (
+              <div className="daq-badges">
+                {badges.map((badge) => (
+                  <span className={`risk-badge ${badge.toLowerCase().replace(" ", "-")}`} key={badge}>{badge}</span>
+                ))}
+              </div>
+            ) : null}
+          </div>
+          <div>
+            <h4>Technical Summary</h4>
+            <div className="gauge-row">
+              <div className="gauge-card">
+                <div className="gauge-title">Oscillators</div>
+                <div className="gauge">
+                  <div className="gauge-needle" style={{ transform: `rotate(${(clampScore(gaugeScoreFromCounts(signal.tv_osc_buy, signal.tv_osc_sell, signal.tv_osc_neutral)) / 100) * 90}deg)` }} />
+                  <div className="gauge-dot" />
+                </div>
+                <div className="gauge-meta">
+                  Sell: {numberOrNull(signal.tv_osc_sell) ?? 0} | Neutral: {numberOrNull(signal.tv_osc_neutral) ?? 0} | Buy: {numberOrNull(signal.tv_osc_buy) ?? 0}
+                </div>
+              </div>
+              <div className="gauge-card">
+                <div className="gauge-title">Moving Averages</div>
+                <div className="gauge">
+                  <div className="gauge-needle" style={{ transform: `rotate(${(clampScore(gaugeScoreFromCounts(signal.tv_ma_buy, signal.tv_ma_sell, signal.tv_ma_neutral)) / 100) * 90}deg)` }} />
+                  <div className="gauge-dot" />
+                </div>
+                <div className="gauge-meta">
+                  Sell: {numberOrNull(signal.tv_ma_sell) ?? 0} | Neutral: {numberOrNull(signal.tv_ma_neutral) ?? 0} | Buy: {numberOrNull(signal.tv_ma_buy) ?? 0}
+                </div>
+              </div>
+              <div className="gauge-card">
+                <div className="gauge-title">Overall</div>
+                <div className="gauge">
+                  <div className="gauge-needle" style={{ transform: `rotate(${(clampScore(signal.tv_overall_score) / 100) * 90}deg)` }} />
+                  <div className="gauge-dot" />
+                </div>
+                <div className="gauge-meta">
+                  {signal.tv_overall_signal || "NEUTRAL"} | Score: {formatValue(signal.tv_overall_score, 1)}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="daq-panel">
+          <div className="daq-header">
+            <div className="daq-grade">{signal.daq_score ?? "-"} {signal.daq_grade ?? ""}</div>
+          </div>
+          <div className="daq-grid">
+            <div className="daq-block">
+              <h5>Technical ({daqWeighted(signal.mtf_score, 20) + daqWeighted(signal.daq_volume_score, 10) + daqWeighted(signal.daq_smc_score, 15)}/45)</h5>
+              <div className="daq-row">
+                <span>MTF</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.mtf_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.mtf_score, 20)}/20</span>
+              </div>
+              <div className="daq-row">
+                <span>Volume</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_volume_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_volume_score, 10)}/10</span>
+              </div>
+              <div className="daq-row">
+                <span>SMC</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_smc_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_smc_score, 15)}/15</span>
+              </div>
+            </div>
+            <div className="daq-block">
+              <h5>Fundamental ({daqWeighted(signal.daq_quality_score, 15) + daqWeighted(signal.daq_catalyst_score, 10)}/25)</h5>
+              <div className="daq-row">
+                <span>Quality</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_quality_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_quality_score, 15)}/15</span>
+              </div>
+              <div className="daq-row">
+                <span>Catalyst</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_catalyst_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_catalyst_score, 10)}/10</span>
+              </div>
+            </div>
+            <div className="daq-block">
+              <h5>Contextual ({daqWeighted(signal.daq_news_score, 10) + daqWeighted(signal.daq_regime_score, 10) + daqWeighted(signal.daq_sector_score, 10)}/30)</h5>
+              <div className="daq-row">
+                <span>News</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_news_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_news_score, 10)}/10</span>
+              </div>
+              <div className="daq-row">
+                <span>Regime</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_regime_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_regime_score, 10)}/10</span>
+              </div>
+              <div className="daq-row">
+                <span>Sector</span>
+                <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_sector_score) ?? 0}%` }} /></div>
+                <span>{daqWeighted(signal.daq_sector_score, 10)}/10</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div className="detail-section">
+          <button className="detail-toggle" onClick={() => setOscOpen((prev) => ({ ...prev, [signal.id]: !prev[signal.id] }))}>
+            {oscOpen[signal.id] ? "▾" : "▸"} Oscillator Details
+          </button>
+          {oscOpen[signal.id] ? (
+            <div className="detail-table">
+              {[
+                ["RSI (14)", signal.rsi_14, classifyRsi(signal.rsi_14)],
+                ["Stochastic %K (14,3,3)", signal.stoch_k, classifyStoch(signal.stoch_k)],
+                ["CCI (20)", signal.cci_20, classifyCci(signal.cci_20)],
+                ["ADX (14)", signal.adx_14, classifyAdx(signal.adx_14, signal.plus_di, signal.minus_di)],
+                ["Awesome Oscillator", signal.ao_value, classifyAo(signal.ao_value)],
+                ["Momentum (10)", signal.momentum_10, classifyMomentum(signal.momentum_10)],
+                ["MACD Level (12,26)", signal.macd, classifyMacd(signal.macd, signal.macd_signal)],
+                ["Stochastic RSI (3,3,14,14)", signal.stoch_rsi_k, classifyStoch(signal.stoch_rsi_k)],
+                ["Williams %R (14)", signal.williams_r, classifyWilliams(signal.williams_r)],
+                ["Bull Bear Power", signal.bull_power, classifyBbp(signal.bull_power, signal.bear_power)],
+                ["Ultimate Oscillator (7,14,28)", signal.ultimate_osc, classifyUo(signal.ultimate_osc)]
+              ].map(([name, value, result]) => (
+                <div className="detail-row" key={String(name)}>
+                  <div>{name}</div>
+                  <div>{formatValue(value)}</div>
+                  <div className={`signal ${String(result).toLowerCase()}`}>{result}</div>
+                </div>
+              ))}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="detail-section">
+          <button className="detail-toggle" onClick={() => setMaOpen((prev) => ({ ...prev, [signal.id]: !prev[signal.id] }))}>
+            {maOpen[signal.id] ? "▾" : "▸"} Moving Averages
+          </button>
+          {maOpen[signal.id] ? (
+            <div className="detail-table">
+              {[
+                ["EMA (10)", signal.ema_10],
+                ["SMA (10)", signal.sma_10],
+                ["EMA (20)", signal.ema_20],
+                ["SMA (20)", signal.sma_20],
+                ["EMA (30)", signal.ema_30],
+                ["SMA (30)", signal.sma_30],
+                ["EMA (50)", signal.ema_50],
+                ["SMA (50)", signal.sma_50],
+                ["EMA (100)", signal.ema_100],
+                ["SMA (100)", signal.sma_100],
+                ["EMA (200)", signal.ema_200],
+                ["SMA (200)", signal.sma_200],
+                ["Ichimoku Base (26)", signal.ichimoku_base],
+                ["VWMA (20)", signal.vwma_20]
+              ].map(([name, value]) => {
+                const result = classifyMa(signal.entry_price, value);
+                return (
+                  <div className="detail-row" key={String(name)}>
+                    <div>{name}</div>
+                    <div>{formatValue(value)}</div>
+                    <div className={`signal ${result.toLowerCase()}`}>{result}</div>
+                  </div>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
+
+        <div className="detail-section">
+          <div className="chart-grid">
+            <div className="chart-card">
+              <div className="chart-title">Daily Chart</div>
+              <iframe
+                src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
+                  tvSymbol(signal.exchange, signal.ticker)
+                )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                className="tv-frame"
+                loading="lazy"
+                title={`${signal.ticker} daily chart`}
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+            <div className="chart-card">
+              <div className="chart-title">Weekly Chart</div>
+              <iframe
+                src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
+                  tvSymbol(signal.exchange, signal.ticker)
+                )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
+                className="tv-frame"
+                loading="lazy"
+                title={`${signal.ticker} weekly chart`}
+                allowFullScreen
+                referrerPolicy="no-referrer-when-downgrade"
+              />
+            </div>
+          </div>
+        </div>
+
+        <div className="detail-section">
+          <div className="signal-text">
+            <div className="claude-header">
+              <h4>Claude Analysis</h4>
+              <button
+                className="claude-btn"
+                onClick={() => runClaudeAnalysis(signal)}
+                disabled={claudeLoading[signal.id]}
+              >
+                {claudeLoading[signal.id] ? "Analyzing..." : "Analyze with Claude"}
+              </button>
+            </div>
+            <p><strong>{signal.claude_grade ?? "-"} {signal.claude_action ?? ""}</strong></p>
+            <p>{signal.claude_thesis || "No Claude thesis yet."}</p>
+            {signal.claude_key_strengths ? <p><strong>Strengths:</strong> {signal.claude_key_strengths}</p> : null}
+            {signal.claude_key_risks ? <p><strong>Risks:</strong> {signal.claude_key_risks}</p> : null}
+            {claudeMessage[signal.id] ? <div className="footer-note">{claudeMessage[signal.id]}</div> : null}
+          </div>
+        </div>
+
+        {/* Place Order Panel */}
+        <div className="order-panel">
+          <h4>
+            Place Order
+            <button className="order-toggle-btn" onClick={() => toggleOrder(signal)}>
+              {orderOpen[signal.id] ? "Close" : "Open"}
+            </button>
+          </h4>
+          {orderOpen[signal.id] && orderState[signal.id] && (() => {
+            const os = orderState[signal.id]!;
+            const refPrice = os.orderType === "limit" ? os.price : (numberOrNull(signal.entry_price) || 0);
+            const posValue = os.quantity * refPrice;
+            const riskPerShare = refPrice - os.stopLoss;
+            const rrRatio = riskPerShare > 0 && os.takeProfit > 0 && refPrice > 0
+              ? ((os.takeProfit - refPrice) / riskPerShare).toFixed(2)
+              : "-";
+            const canReview = os.quantity > 0 && os.stopLoss > 0 && (os.orderType === "market" || os.price > 0);
+            return (
+              <div>
+                <div className="order-summary-bar">
+                  <span>Budget: ${BUDGET}</span>
+                  <span>Position: ${posValue.toFixed(2)}</span>
+                  <span>Risk/share: ${riskPerShare > 0 ? riskPerShare.toFixed(2) : "-"}</span>
+                  <span>R:R: {rrRatio}</span>
+                </div>
+                <div className="order-grid">
+                  <div>
+                    <label>Order Type</label>
+                    <select
+                      value={os.orderType}
+                      onChange={(e) => updateOrder(signal.id, { orderType: e.target.value as "limit" | "market" })}
+                    >
+                      <option value="limit">Limit</option>
+                      <option value="market">Market</option>
+                    </select>
+                  </div>
+                  {os.orderType === "limit" && (
+                    <div>
+                      <label>Limit Price</label>
+                      <input
+                        type="number"
+                        step="0.01"
+                        value={os.price}
+                        onChange={(e) => updateOrder(signal.id, { price: Number(e.target.value) })}
+                      />
+                    </div>
+                  )}
+                  <div>
+                    <label>Shares</label>
+                    <input
+                      type="number"
+                      step="1"
+                      min="1"
+                      value={os.quantity}
+                      onChange={(e) => setOrderState((prev) => ({
+                        ...prev,
+                        [signal.id]: { ...prev[signal.id]!, quantity: Number(e.target.value) }
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <label>Stop Loss</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={os.stopLoss}
+                      onChange={(e) => setOrderState((prev) => ({
+                        ...prev,
+                        [signal.id]: { ...prev[signal.id]!, stopLoss: Number(e.target.value) }
+                      }))}
+                    />
+                  </div>
+                  <div>
+                    <label>Take Profit</label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      value={os.takeProfit}
+                      onChange={(e) => setOrderState((prev) => ({
+                        ...prev,
+                        [signal.id]: { ...prev[signal.id]!, takeProfit: Number(e.target.value) }
+                      }))}
+                    />
+                  </div>
+                </div>
+                <div className="order-override-row">
+                  <input
+                    type="checkbox"
+                    checked={os.override}
+                    onChange={(e) => setOrderState((prev) => ({
+                      ...prev,
+                      [signal.id]: { ...prev[signal.id]!, override: e.target.checked }
+                    }))}
+                  />
+                  <span>Override trade-ready gate.</span>
+                </div>
+                {!orderConfirming[signal.id] ? (
+                  <div className="order-actions">
+                    <button
+                      className="order-review-btn"
+                      disabled={!canReview || orderLoading[signal.id]}
+                      onClick={() => setOrderConfirming((prev) => ({ ...prev, [signal.id]: true }))}
+                    >
+                      Review Order
+                    </button>
+                  </div>
+                ) : (
+                  <div className="order-confirm-box">
+                    <h5>Confirm Order</h5>
+                    <div className="order-confirm-summary">
+                      <div>Ticker: <strong>{signal.ticker}</strong></div>
+                      <div>Side: <strong>BUY</strong></div>
+                      <div>Type: <strong>{os.orderType.toUpperCase()}</strong></div>
+                      <div>Shares: <strong>{os.quantity}</strong></div>
+                      {os.orderType === "limit" && <div>Limit: <strong>${os.price.toFixed(2)}</strong></div>}
+                      <div>Stop Loss: <strong>${os.stopLoss.toFixed(2)}</strong></div>
+                      <div>Take Profit: <strong>{os.takeProfit > 0 ? `$${os.takeProfit.toFixed(2)}` : "None"}</strong></div>
+                      <div>Total: <strong>${posValue.toFixed(2)}</strong></div>
+                    </div>
+                    <div className="order-confirm-actions">
+                      <button
+                        className="order-confirm-btn"
+                        disabled={orderLoading[signal.id]}
+                        onClick={() => placeOrder(signal)}
+                      >
+                        {orderLoading[signal.id] ? "Placing..." : "Confirm & Place"}
+                      </button>
+                      <button
+                        className="order-back-btn"
+                        onClick={() => setOrderConfirming((prev) => ({ ...prev, [signal.id]: false }))}
+                      >
+                        Back
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {orderMessage[signal.id] && (
+                  <div className={orderMessage[signal.id]!.type === "success" ? "order-message-success" : "order-message-error"}>
+                    {orderMessage[signal.id]!.text}
+                  </div>
+                )}
+              </div>
+            );
+          })()}
+        </div>
+      </div>
+    );
+  };
+
   return (
     <div className="page">
       <div className="topbar">
@@ -662,6 +1213,83 @@ export default function SignalsPage() {
           <div className="summary-card">Awaiting Analysis<strong>{stats?.awaiting_analysis ?? 0}</strong></div>
         </div>
 
+        <div className="view-toggle" style={{ display: "flex", gap: 8, margin: "4px 0 14px" }}>
+          <button className="claude-btn" style={{ opacity: viewMode === "all" ? 1 : 0.5 }} onClick={() => setViewMode("all")}>All Signals</button>
+          <button className="claude-btn" style={{ opacity: viewMode === "top10" ? 1 : 0.5 }} onClick={() => setViewMode("top10")}>Top 10 Candidates</button>
+        </div>
+
+        {viewMode === "top10" ? (
+          <div className="top10-view">
+            <div className="footer-note" style={{ marginBottom: 10 }}>
+              Top candidates from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
+              {" "}Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties.
+              {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; max {topMeta?.max_per_scanner ?? 3} per scanner. Scanner PF is shown so marginal scanners stay visible.
+            </div>
+            {topLoading ? (
+              <div className="footer-note">Loading top candidates…</div>
+            ) : topCandidates.length === 0 ? (
+              <div className="footer-note">No candidates in the latest batch.</div>
+            ) : (
+              <table style={{ width: "100%", borderCollapse: "collapse" }}>
+                <thead>
+                  <tr style={{ textAlign: "left", borderBottom: "1px solid #24344d" }}>
+                    <th style={top10CellHead}></th>
+                    <th style={top10CellHead}>#</th>
+                    <th style={top10CellHead}>Ticker</th>
+                    <th style={top10CellHead}>Scanner</th>
+                    <th style={top10CellHead}>Score</th>
+                    <th style={top10CellHead}>RS</th>
+                    <th style={top10CellHead}>Trend</th>
+                    <th style={top10CellHead}>TV</th>
+                    <th style={top10CellHead}>Scanner PF</th>
+                    <th style={top10CellHead}>Flags</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {topCandidates.map((c) => (
+                    <Fragment key={c.id}>
+                      <tr onClick={() => toggleExpand(c)} style={{ cursor: "pointer", borderBottom: "1px solid #16223a" }}>
+                        <td style={top10Cell}>{expanded[c.id] ? "▾" : "▸"}</td>
+                        <td style={top10Cell}><strong>{c.rank}</strong></td>
+                        <td style={top10Cell}>
+                          <span className="ticker-cell" onClick={(e) => e.stopPropagation()}>
+                            <Link className="ticker-btn" href={`/stocks/${c.ticker}`}>{c.ticker}</Link>
+                            <Link className="deep-link" href={`/stocks/${c.ticker}`} title="Open deep dive">↗</Link>
+                          </span>
+                          {c.company_name ? <div style={{ fontSize: 11, opacity: 0.55 }}>{c.company_name}</div> : null}
+                        </td>
+                        <td style={top10Cell}>{c.scanner_name?.replace(/_/g, " ")}</td>
+                        <td style={top10Cell}><strong>{c.candidate_score}</strong></td>
+                        <td style={top10Cell}>{c.rs_percentile ?? "-"}</td>
+                        <td style={top10Cell}>
+                          <span className={`pill ${c.rs_trend === "improving" ? "good" : c.rs_trend === "deteriorating" ? "bad" : "warn"}`}>
+                            {c.rs_trend === "improving" ? "↑ rising" : c.rs_trend === "deteriorating" ? "↓ falling" : "→ flat"}
+                          </span>
+                        </td>
+                        <td style={top10Cell}>{c.tv_overall_score != null ? Number(c.tv_overall_score).toFixed(0) : "-"}</td>
+                        <td style={top10Cell}>
+                          {c.scanner_pf != null ? Number(c.scanner_pf).toFixed(2) : "n/a"}
+                          <span style={{ fontSize: 11, opacity: 0.55 }}> (n={c.scanner_closed_n ?? 0})</span>
+                        </td>
+                        <td style={top10Cell}>
+                          {c.earnings_within_7d ? <span className="pill bad">ER</span> : null}
+                          {c.high_short_interest ? <span className="pill warn">SI</span> : null}
+                          {(Number(c.rsi_14) || 0) > 80 ? <span className="pill warn">OB</span> : null}
+                        </td>
+                      </tr>
+                      {expanded[c.id] ? (
+                        <tr>
+                          <td colSpan={10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
+                        </tr>
+                      ) : null}
+                    </Fragment>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </div>
+        ) : (
+          <>
         <div className="signals-filters">
           <div>
             <label>Scanner</label>
@@ -747,23 +1375,8 @@ export default function SignalsPage() {
           <Virtuoso
             style={{ height: 620 }}
             data={signals}
-            itemContent={(index, signal) => {
+            itemContent={(_index, signal) => {
               const expandedRow = expanded[signal.id] || false;
-              const badges = riskBadges(signal);
-              const entry = numberOrNull(signal.entry_price) || 0;
-              const entryLow = entry * 0.995;
-              const entryHigh = entry * 1.01;
-              const stop = entry * 0.97;
-              const target1 = entry * 1.05;
-              const target2 = entry * 1.1;
-              const tradeCount = numberOrNull(signal.trade_count) ?? 0;
-              const openTrades = numberOrNull(signal.open_trade_count) ?? 0;
-              const hasTrades = tradeCount > 0;
-              const lastClosed = tradeOutcome(signal.last_closed_profit);
-              const lastTradeDate = formatTradeDate(signal.last_trade_open_time || signal.last_trade_close_time);
-              const lastClosedDate = formatTradeDate(signal.last_closed_time);
-              const lastStatus = (signal.last_trade_status || "").toLowerCase();
-              const isRunning = lastStatus ? lastStatus === "open" : openTrades > 0;
 
               return (
                 <div>
@@ -788,507 +1401,15 @@ export default function SignalsPage() {
                     <span className="scan-cell">{signal.signal_timestamp ? new Date(signal.signal_timestamp).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" }) : "-"}</span>
                   </div>
 
-                  {expandedRow ? (
-                    <div>
-                      <div className="detail-section notes-panel">
-                        <button
-                          className="detail-toggle"
-                          onClick={() => setNotesOpen((prev) => ({ ...prev, [signal.ticker]: !prev[signal.ticker] }))}
-                        >
-                          {notesOpen[signal.ticker] ? "▾" : "▸"} Notes & Journal ({notes[signal.ticker]?.length ?? 0})
-                        </button>
-                        {notesOpen[signal.ticker] ? (
-                          <div className="notes-content">
-                            <textarea
-                              value={noteDraft[signal.ticker] || ""}
-                              onChange={(e) => setNoteDraft((prev) => ({ ...prev, [signal.ticker]: e.target.value }))}
-                              placeholder="Add thesis, risk plan, or post-mortem notes..."
-                            />
-                            <div className="notes-actions">
-                              <button
-                                className="notes-btn"
-                                onClick={() => saveNote(signal.ticker)}
-                                disabled={noteLoading[signal.ticker] || !(noteDraft[signal.ticker] || "").trim()}
-                              >
-                                {noteLoading[signal.ticker] ? "Saving..." : "Save note"}
-                              </button>
-                              {noteMessage[signal.ticker] ? <span className="notes-status">{noteMessage[signal.ticker]}</span> : null}
-                            </div>
-                            <div className="notes-list">
-                              {noteLoading[signal.ticker] && !notes[signal.ticker] ? (
-                                <div className="footer-note">Loading notes...</div>
-                              ) : notes[signal.ticker]?.length ? (
-                                notes[signal.ticker]?.map((note) => (
-                                  <div className="note-item" key={note.id}>
-                                    <div className="note-meta">
-                                      {formatNoteTime(note.created_at)}
-                                      <span className="note-actions">
-                                        <button
-                                          className="note-link"
-                                          onClick={() => {
-                                            setNoteEditing((prev) => ({ ...prev, [signal.ticker]: note.id }));
-                                            setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: note.note_text }));
-                                          }}
-                                        >
-                                          Edit
-                                        </button>
-                                        <button className="note-link danger" onClick={() => deleteNote(signal.ticker, note.id)}>
-                                          Delete
-                                        </button>
-                                      </span>
-                                    </div>
-                                    {noteEditing[signal.ticker] === note.id ? (
-                                      <div>
-                                        <textarea
-                                          value={noteEditDraft[signal.ticker] || ""}
-                                          onChange={(e) => setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: e.target.value }))}
-                                        />
-                                        <div className="notes-actions">
-                                          <button
-                                            className="notes-btn"
-                                            onClick={() => saveNoteEdit(signal.ticker)}
-                                            disabled={noteLoading[signal.ticker] || !(noteEditDraft[signal.ticker] || "").trim()}
-                                          >
-                                            {noteLoading[signal.ticker] ? "Saving..." : "Save edit"}
-                                          </button>
-                                          <button
-                                            className="notes-btn secondary"
-                                            onClick={() => {
-                                              setNoteEditing((prev) => ({ ...prev, [signal.ticker]: null }));
-                                              setNoteEditDraft((prev) => ({ ...prev, [signal.ticker]: "" }));
-                                            }}
-                                          >
-                                            Cancel
-                                          </button>
-                                        </div>
-                                      </div>
-                                    ) : (
-                                      <div className="note-text">{note.note_text}</div>
-                                    )}
-                                  </div>
-                                ))
-                              ) : (
-                                <div className="footer-note">No notes yet.</div>
-                              )}
-                            </div>
-                          </div>
-                        ) : null}
-                      </div>
-                      <div className="expander">
-                        <div>
-                          <h4>Trade Plan (3% SL / 5% TP)</h4>
-                          <div className="detail-grid">
-                            <div className="detail-item">Entry Zone: {formatValue(entryLow)} - {formatValue(entryHigh)}</div>
-                            <div className="detail-item">Stop Loss: {formatValue(stop)}</div>
-                            <div className="detail-item">Target 1: {formatValue(target1)}</div>
-                            <div className="detail-item">Target 2: {formatValue(target2)}</div>
-                            <div className="detail-item">R:R: 1.67</div>
-                            <div className="detail-item">ATR%: {formatValue(signal.atr_percent, 2)}</div>
-                            <div className="detail-item">Relative Vol: {formatValue(signal.relative_volume, 2)}x</div>
-                            <div className="detail-item">RS: {signal.rs_percentile ?? "-"} {signal.rs_trend ? `(${rsTrendText(signal.rs_trend)})` : ""}</div>
-                            <div className="detail-item">
-                              Analyst: {signal.analyst_rating ?? "-"}
-                              {signal.number_of_analysts ? ` (${signal.number_of_analysts})` : ""}
-                            </div>
-                            <div className="detail-item">Target: {signal.target_price ? `$${Number(signal.target_price).toFixed(2)}` : "-"}</div>
-                          </div>
-                          <h4>Trade History</h4>
-                          {hasTrades ? (
-                            <div className="detail-grid">
-                              <div className="detail-item">Trades: {tradeCount}</div>
-                              <div className="detail-item">Open: {openTrades}</div>
-                              <div className="detail-item">
-                                Last Trade:{" "}
-                                <span className={`pill ${isRunning ? "warn" : "good"}`}>
-                                  {isRunning ? "OPEN" : "CLOSED"}
-                                </span>{" "}
-                                {lastTradeDate}
-                              </div>
-                              <div className="detail-item">
-                                Last Closed:{" "}
-                                <span className={`pill ${lastClosed.tone}`}>{lastClosed.label}</span>{" "}
-                                {lastClosedDate}
-                              </div>
-                              <div className="detail-item">
-                                Last P/L: {formatTradePnl(signal.last_closed_profit, signal.last_closed_profit_pct)}
-                              </div>
-                              <div className="detail-item">
-                                Side: {signal.last_trade_side ?? signal.last_closed_side ?? "-"}
-                              </div>
-                            </div>
-                          ) : (
-                            <div className="footer-note">No recorded broker trades for this ticker.</div>
-                          )}
-                          {badges.length ? (
-                            <div className="daq-badges">
-                              {badges.map((badge) => (
-                                <span className={`risk-badge ${badge.toLowerCase().replace(" ", "-")}`} key={badge}>{badge}</span>
-                              ))}
-                            </div>
-                          ) : null}
-                        </div>
-                        <div>
-                          <h4>Technical Summary</h4>
-                          <div className="gauge-row">
-                            <div className="gauge-card">
-                              <div className="gauge-title">Oscillators</div>
-                              <div className="gauge">
-                                <div className="gauge-needle" style={{ transform: `rotate(${(clampScore(gaugeScoreFromCounts(signal.tv_osc_buy, signal.tv_osc_sell, signal.tv_osc_neutral)) / 100) * 90}deg)` }} />
-                                <div className="gauge-dot" />
-                              </div>
-                              <div className="gauge-meta">
-                                Sell: {numberOrNull(signal.tv_osc_sell) ?? 0} | Neutral: {numberOrNull(signal.tv_osc_neutral) ?? 0} | Buy: {numberOrNull(signal.tv_osc_buy) ?? 0}
-                              </div>
-                            </div>
-                            <div className="gauge-card">
-                              <div className="gauge-title">Moving Averages</div>
-                              <div className="gauge">
-                                <div className="gauge-needle" style={{ transform: `rotate(${(clampScore(gaugeScoreFromCounts(signal.tv_ma_buy, signal.tv_ma_sell, signal.tv_ma_neutral)) / 100) * 90}deg)` }} />
-                                <div className="gauge-dot" />
-                              </div>
-                              <div className="gauge-meta">
-                                Sell: {numberOrNull(signal.tv_ma_sell) ?? 0} | Neutral: {numberOrNull(signal.tv_ma_neutral) ?? 0} | Buy: {numberOrNull(signal.tv_ma_buy) ?? 0}
-                              </div>
-                            </div>
-                            <div className="gauge-card">
-                              <div className="gauge-title">Overall</div>
-                              <div className="gauge">
-                                <div className="gauge-needle" style={{ transform: `rotate(${(clampScore(signal.tv_overall_score) / 100) * 90}deg)` }} />
-                                <div className="gauge-dot" />
-                              </div>
-                              <div className="gauge-meta">
-                                {signal.tv_overall_signal || "NEUTRAL"} | Score: {formatValue(signal.tv_overall_score, 1)}
-                              </div>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="daq-panel">
-                        <div className="daq-header">
-                          <div className="daq-grade">{signal.daq_score ?? "-"} {signal.daq_grade ?? ""}</div>
-                        </div>
-                        <div className="daq-grid">
-                          <div className="daq-block">
-                            <h5>Technical ({daqWeighted(signal.mtf_score, 20) + daqWeighted(signal.daq_volume_score, 10) + daqWeighted(signal.daq_smc_score, 15)}/45)</h5>
-                            <div className="daq-row">
-                              <span>MTF</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.mtf_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.mtf_score, 20)}/20</span>
-                            </div>
-                            <div className="daq-row">
-                              <span>Volume</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_volume_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_volume_score, 10)}/10</span>
-                            </div>
-                            <div className="daq-row">
-                              <span>SMC</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_smc_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_smc_score, 15)}/15</span>
-                            </div>
-                          </div>
-                          <div className="daq-block">
-                            <h5>Fundamental ({daqWeighted(signal.daq_quality_score, 15) + daqWeighted(signal.daq_catalyst_score, 10)}/25)</h5>
-                            <div className="daq-row">
-                              <span>Quality</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_quality_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_quality_score, 15)}/15</span>
-                            </div>
-                            <div className="daq-row">
-                              <span>Catalyst</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_catalyst_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_catalyst_score, 10)}/10</span>
-                            </div>
-                          </div>
-                          <div className="daq-block">
-                            <h5>Contextual ({daqWeighted(signal.daq_news_score, 10) + daqWeighted(signal.daq_regime_score, 10) + daqWeighted(signal.daq_sector_score, 10)}/30)</h5>
-                            <div className="daq-row">
-                              <span>News</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_news_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_news_score, 10)}/10</span>
-                            </div>
-                            <div className="daq-row">
-                              <span>Regime</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_regime_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_regime_score, 10)}/10</span>
-                            </div>
-                            <div className="daq-row">
-                              <span>Sector</span>
-                              <div className="bar"><span style={{ width: `${numberOrNull(signal.daq_sector_score) ?? 0}%` }} /></div>
-                              <span>{daqWeighted(signal.daq_sector_score, 10)}/10</span>
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="detail-section">
-                        <button className="detail-toggle" onClick={() => setOscOpen((prev) => ({ ...prev, [signal.id]: !prev[signal.id] }))}>
-                          {oscOpen[signal.id] ? "▾" : "▸"} Oscillator Details
-                        </button>
-                        {oscOpen[signal.id] ? (
-                          <div className="detail-table">
-                            {[
-                              ["RSI (14)", signal.rsi_14, classifyRsi(signal.rsi_14)],
-                              ["Stochastic %K (14,3,3)", signal.stoch_k, classifyStoch(signal.stoch_k)],
-                              ["CCI (20)", signal.cci_20, classifyCci(signal.cci_20)],
-                              ["ADX (14)", signal.adx_14, classifyAdx(signal.adx_14, signal.plus_di, signal.minus_di)],
-                              ["Awesome Oscillator", signal.ao_value, classifyAo(signal.ao_value)],
-                              ["Momentum (10)", signal.momentum_10, classifyMomentum(signal.momentum_10)],
-                              ["MACD Level (12,26)", signal.macd, classifyMacd(signal.macd, signal.macd_signal)],
-                              ["Stochastic RSI (3,3,14,14)", signal.stoch_rsi_k, classifyStoch(signal.stoch_rsi_k)],
-                              ["Williams %R (14)", signal.williams_r, classifyWilliams(signal.williams_r)],
-                              ["Bull Bear Power", signal.bull_power, classifyBbp(signal.bull_power, signal.bear_power)],
-                              ["Ultimate Oscillator (7,14,28)", signal.ultimate_osc, classifyUo(signal.ultimate_osc)]
-                            ].map(([name, value, result]) => (
-                              <div className="detail-row" key={String(name)}>
-                                <div>{name}</div>
-                                <div>{formatValue(value)}</div>
-                                <div className={`signal ${String(result).toLowerCase()}`}>{result}</div>
-                              </div>
-                            ))}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="detail-section">
-                        <button className="detail-toggle" onClick={() => setMaOpen((prev) => ({ ...prev, [signal.id]: !prev[signal.id] }))}>
-                          {maOpen[signal.id] ? "▾" : "▸"} Moving Averages
-                        </button>
-                        {maOpen[signal.id] ? (
-                          <div className="detail-table">
-                            {[
-                              ["EMA (10)", signal.ema_10],
-                              ["SMA (10)", signal.sma_10],
-                              ["EMA (20)", signal.ema_20],
-                              ["SMA (20)", signal.sma_20],
-                              ["EMA (30)", signal.ema_30],
-                              ["SMA (30)", signal.sma_30],
-                              ["EMA (50)", signal.ema_50],
-                              ["SMA (50)", signal.sma_50],
-                              ["EMA (100)", signal.ema_100],
-                              ["SMA (100)", signal.sma_100],
-                              ["EMA (200)", signal.ema_200],
-                              ["SMA (200)", signal.sma_200],
-                              ["Ichimoku Base (26)", signal.ichimoku_base],
-                              ["VWMA (20)", signal.vwma_20]
-                            ].map(([name, value]) => {
-                              const result = classifyMa(signal.entry_price, value);
-                              return (
-                                <div className="detail-row" key={String(name)}>
-                                  <div>{name}</div>
-                                  <div>{formatValue(value)}</div>
-                                  <div className={`signal ${result.toLowerCase()}`}>{result}</div>
-                                </div>
-                              );
-                            })}
-                          </div>
-                        ) : null}
-                      </div>
-
-                      <div className="detail-section">
-                        <div className="chart-grid">
-                          <div className="chart-card">
-                            <div className="chart-title">Daily Chart</div>
-                            <iframe
-                              src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
-                                tvSymbol(signal.exchange, signal.ticker)
-                              )}&interval=D&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
-                              className="tv-frame"
-                              loading="lazy"
-                              title={`${signal.ticker} daily chart`}
-                              allowFullScreen
-                              referrerPolicy="no-referrer-when-downgrade"
-                            />
-                          </div>
-                          <div className="chart-card">
-                            <div className="chart-title">Weekly Chart</div>
-                            <iframe
-                              src={`https://www.tradingview.com/widgetembed/?symbol=${encodeURIComponent(
-                                tvSymbol(signal.exchange, signal.ticker)
-                              )}&interval=W&hidesidetoolbar=1&symboledit=0&saveimage=0&toolbarbg=0b1728&studies=[]&theme=dark&style=1&timezone=Etc%2FUTC&withdateranges=1&hideideas=1`}
-                              className="tv-frame"
-                              loading="lazy"
-                              title={`${signal.ticker} weekly chart`}
-                              allowFullScreen
-                              referrerPolicy="no-referrer-when-downgrade"
-                            />
-                          </div>
-                        </div>
-                      </div>
-
-                      <div className="detail-section">
-                        <div className="signal-text">
-                          <div className="claude-header">
-                            <h4>Claude Analysis</h4>
-                            <button
-                              className="claude-btn"
-                              onClick={() => runClaudeAnalysis(signal)}
-                              disabled={claudeLoading[signal.id]}
-                            >
-                              {claudeLoading[signal.id] ? "Analyzing..." : "Analyze with Claude"}
-                            </button>
-                          </div>
-                          <p><strong>{signal.claude_grade ?? "-"} {signal.claude_action ?? ""}</strong></p>
-                          <p>{signal.claude_thesis || "No Claude thesis yet."}</p>
-                          {signal.claude_key_strengths ? <p><strong>Strengths:</strong> {signal.claude_key_strengths}</p> : null}
-                          {signal.claude_key_risks ? <p><strong>Risks:</strong> {signal.claude_key_risks}</p> : null}
-                          {claudeMessage[signal.id] ? <div className="footer-note">{claudeMessage[signal.id]}</div> : null}
-                        </div>
-                      </div>
-
-                      {/* Place Order Panel */}
-                      <div className="order-panel">
-                        <h4>
-                          Place Order
-                          <button className="order-toggle-btn" onClick={() => toggleOrder(signal)}>
-                            {orderOpen[signal.id] ? "Close" : "Open"}
-                          </button>
-                        </h4>
-                        {orderOpen[signal.id] && orderState[signal.id] && (() => {
-                          const os = orderState[signal.id]!;
-                          const refPrice = os.orderType === "limit" ? os.price : (numberOrNull(signal.entry_price) || 0);
-                          const posValue = os.quantity * refPrice;
-                          const riskPerShare = refPrice - os.stopLoss;
-                          const rrRatio = riskPerShare > 0 && os.takeProfit > 0 && refPrice > 0
-                            ? ((os.takeProfit - refPrice) / riskPerShare).toFixed(2)
-                            : "-";
-                          const canReview = os.quantity > 0 && os.stopLoss > 0 && (os.orderType === "market" || os.price > 0);
-                          return (
-                            <div>
-                              <div className="order-summary-bar">
-                                <span>Budget: ${BUDGET}</span>
-                                <span>Position: ${posValue.toFixed(2)}</span>
-                                <span>Risk/share: ${riskPerShare > 0 ? riskPerShare.toFixed(2) : "-"}</span>
-                                <span>R:R: {rrRatio}</span>
-                              </div>
-                              <div className="order-grid">
-                                <div>
-                                  <label>Order Type</label>
-                                  <select
-                                    value={os.orderType}
-                                    onChange={(e) => updateOrder(signal.id, { orderType: e.target.value as "limit" | "market" })}
-                                  >
-                                    <option value="limit">Limit</option>
-                                    <option value="market">Market</option>
-                                  </select>
-                                </div>
-                                {os.orderType === "limit" && (
-                                  <div>
-                                    <label>Limit Price</label>
-                                    <input
-                                      type="number"
-                                      step="0.01"
-                                      value={os.price}
-                                      onChange={(e) => updateOrder(signal.id, { price: Number(e.target.value) })}
-                                    />
-                                  </div>
-                                )}
-                                <div>
-                                  <label>Shares</label>
-                                  <input
-                                    type="number"
-                                    step="1"
-                                    min="1"
-                                    value={os.quantity}
-                                    onChange={(e) => setOrderState((prev) => ({
-                                      ...prev,
-                                      [signal.id]: { ...prev[signal.id]!, quantity: Number(e.target.value) }
-                                    }))}
-                                  />
-                                </div>
-                                <div>
-                                  <label>Stop Loss</label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={os.stopLoss}
-                                    onChange={(e) => setOrderState((prev) => ({
-                                      ...prev,
-                                      [signal.id]: { ...prev[signal.id]!, stopLoss: Number(e.target.value) }
-                                    }))}
-                                  />
-                                </div>
-                                <div>
-                                  <label>Take Profit</label>
-                                  <input
-                                    type="number"
-                                    step="0.01"
-                                    value={os.takeProfit}
-                                    onChange={(e) => setOrderState((prev) => ({
-                                      ...prev,
-                                      [signal.id]: { ...prev[signal.id]!, takeProfit: Number(e.target.value) }
-                                    }))}
-                                  />
-                                </div>
-                              </div>
-                              <div className="order-override-row">
-                                <input
-                                  type="checkbox"
-                                  checked={os.override}
-                                  onChange={(e) => setOrderState((prev) => ({
-                                    ...prev,
-                                    [signal.id]: { ...prev[signal.id]!, override: e.target.checked }
-                                  }))}
-                                />
-                                <span>Override trade-ready gate.</span>
-                              </div>
-                              {!orderConfirming[signal.id] ? (
-                                <div className="order-actions">
-                                  <button
-                                    className="order-review-btn"
-                                    disabled={!canReview || orderLoading[signal.id]}
-                                    onClick={() => setOrderConfirming((prev) => ({ ...prev, [signal.id]: true }))}
-                                  >
-                                    Review Order
-                                  </button>
-                                </div>
-                              ) : (
-                                <div className="order-confirm-box">
-                                  <h5>Confirm Order</h5>
-                                  <div className="order-confirm-summary">
-                                    <div>Ticker: <strong>{signal.ticker}</strong></div>
-                                    <div>Side: <strong>BUY</strong></div>
-                                    <div>Type: <strong>{os.orderType.toUpperCase()}</strong></div>
-                                    <div>Shares: <strong>{os.quantity}</strong></div>
-                                    {os.orderType === "limit" && <div>Limit: <strong>${os.price.toFixed(2)}</strong></div>}
-                                    <div>Stop Loss: <strong>${os.stopLoss.toFixed(2)}</strong></div>
-                                    <div>Take Profit: <strong>{os.takeProfit > 0 ? `$${os.takeProfit.toFixed(2)}` : "None"}</strong></div>
-                                    <div>Total: <strong>${posValue.toFixed(2)}</strong></div>
-                                  </div>
-                                  <div className="order-confirm-actions">
-                                    <button
-                                      className="order-confirm-btn"
-                                      disabled={orderLoading[signal.id]}
-                                      onClick={() => placeOrder(signal)}
-                                    >
-                                      {orderLoading[signal.id] ? "Placing..." : "Confirm & Place"}
-                                    </button>
-                                    <button
-                                      className="order-back-btn"
-                                      onClick={() => setOrderConfirming((prev) => ({ ...prev, [signal.id]: false }))}
-                                    >
-                                      Back
-                                    </button>
-                                  </div>
-                                </div>
-                              )}
-                              {orderMessage[signal.id] && (
-                                <div className={orderMessage[signal.id]!.type === "success" ? "order-message-success" : "order-message-error"}>
-                                  {orderMessage[signal.id]!.text}
-                                </div>
-                              )}
-                            </div>
-                          );
-                        })()}
-                      </div>
-                    </div>
-                  ) : null}
+                  {expandedRow ? renderSignalDetail(signal) : null}
                 </div>
               );
             }}
           />
         )}
         <div className="footer-note">Signals: {signals.length}</div>
+        </>
+        )}
       </div>
     </div>
   );
