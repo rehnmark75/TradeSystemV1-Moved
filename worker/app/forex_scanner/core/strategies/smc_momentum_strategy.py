@@ -361,6 +361,8 @@ class SMCMomentumStrategy(StrategyInterface):
             pair=pair,
             sweep=sweep,
             entry_price=entry_price,
+            sl_price=sl_price,
+            tp_price=tp_price,
             sl_pips=sl_pips,
             tp_pips=tp_pips,
             confidence=confidence,
@@ -455,6 +457,8 @@ class SMCMomentumStrategy(StrategyInterface):
         pair: str,
         sweep: SweepResult,
         entry_price: float,
+        sl_price: float,
+        tp_price: float,
         sl_pips: float,
         tp_pips: float,
         confidence: float,
@@ -473,6 +477,12 @@ class SMCMomentumStrategy(StrategyInterface):
             "monitor_only": self.config.is_monitor_only(epic),
             "is_traded": self.config.is_traded(epic),
             "entry_price": entry_price,
+            # Explicit price levels so the order executor uses the price-distance
+            # path (pip_size=0.01 for JPY) instead of relying on risk_pips alone.
+            # risk_pips/reward_pips are retained — the backtest trailing engine
+            # keys on those, so emitting prices does not change backtest results.
+            "stop_loss": sl_price,
+            "take_profit": tp_price,
             "risk_pips": round(sl_pips, 1),
             "reward_pips": round(tp_pips, 1),
             "entry_type": "REJECTION_WICK",
