@@ -220,6 +220,25 @@ Entry model: 20-bar Donchian channel breakout on 1H bars. Long-only — SELL dir
 
 ---
 
+### INSIDE_DAY
+
+Entry model: daily inside-day breakout with weekly directional bias. The strategy resamples 4H data to daily/weekly structure, waits for price to break the completed inside-day high/low on 5m, and places the stop beyond the opposite inside-day extreme plus a daily ATR buffer.
+
+**Baseline score: 6** if all gates pass.
+
+**Scoring guide:**
+- `weekly_bias` is the load-bearing directional filter. BUY should align with bullish/top-weekly-range bias; SELL should align with bearish/bottom-weekly-range bias.
+- `inside_day_range_pips` should be in the configured range. Very tiny ranges can be noise; very wide ranges make the stop inefficient.
+- Stop distance comes from the inside-day range plus ATR buffer; take-profit is `reward_risk` times risk. This is by design.
+- Confidence is fixed around the strategy baseline and is NOT a fine-grained quality ranker.
+
+**Strategy-aligned positives:**
+- EURUSD and USDJPY are the validated launch pairs. Treat valid signals on those epics as real strategy signals, not config anomalies.
+- Do not use SMC rejection density for this strategy. Its edge is daily compression plus weekly bias, not intraday SMC swing quality.
+- Monitor/tradability must come from `get_pair_config(strategy="INSIDE_DAY")`; do not infer it from notes or strategy descriptions.
+
+---
+
 ### RANGE_FADE
 
 Entry model: fades local extremes at 5m Bollinger Band boundaries when 1H HTF context is not expanding. ADX CEILING gates (not floors) — high ADX = trending market → strategy rejects the fade before it reaches the agent.
@@ -271,6 +290,25 @@ Key indicators: MODEL, ATR_PIPS, SLOPE (ema50_slope_pips), HTF_MARGIN_ATR.
 - Null fixed_stop_loss_pips in pair config is by design (ATR-based stops) — do NOT penalise.
 - ADX 18–22 is the TARGET zone, not a weakness.
 - MODEL=FA + strategy_regime=ranging is a valid combination — failed auctions occur at range extremes. Do NOT penalise ranging for FA entries.
+
+---
+
+### KAMA_V2
+
+Entry model: 5m KAMA(10,2,30) adaptive moving-average crossover, currently traded on AUDUSD demo. Signal requires price crossing KAMA, efficiency ratio above the configured threshold, EMA200 alignment, MACD histogram sign confirmation, and RSI not at an exhaustion extreme.
+
+**Baseline score: 6** if all gates pass.
+
+**Scoring guide:**
+- `ER` / efficiency ratio is the key quality metric. ER above the configured `cross_er_min` confirms directional efficiency; higher ER is positive.
+- KAMA slope is a guard against counter-trend crosses. A near-flat slope after a valid cross is not an automatic reject; penalise only if other evidence shows chop.
+- Fixed SL/TP defaults are 10/15 pips unless pair config overrides them. This gives ~1.5R by design and has a dedicated trade-validator override.
+- ADX is not a default hard gate. Do not reject solely because ADX is low unless the pair config enables an ADX threshold.
+- Session filter is default-off. Do not reject solely because the signal is outside London/NY unless `get_pair_config` shows a session filter or blocked hours.
+
+**Strategy-aligned positives:**
+- AUDUSD KAMA_V2 research baseline: n=93, WR=55.9%, PF=1.95. Treat a valid AUDUSD signal as a real strategy signal, not a config anomaly.
+- Monitor/tradability must come from `get_pair_config(strategy="KAMA_V2")`. If `is_enabled=true`, `monitor_only=false`, and the signal already passed trade validation, do not reject as an unknown or monitor-only strategy.
 
 ---
 

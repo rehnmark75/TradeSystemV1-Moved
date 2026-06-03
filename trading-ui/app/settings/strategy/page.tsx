@@ -57,7 +57,7 @@ const META_FIELDS = new Set([
   "id", "config_id", "epic", "created_at", "updated_at", "updated_by", "change_reason",
 ]);
 
-const STATUS_FIELDS = new Set(["is_enabled", "monitor_only"]);
+const STATUS_FIELDS = new Set(["is_enabled", "monitor_only", "is_traded"]);
 
 const PREFERRED_ORDER = [
   "Tier 1: 4H Directional Bias",
@@ -710,15 +710,27 @@ export default function UnifiedStrategySettings() {
     });
   }, [sections, mode, changes, draftOverrides]);
 
+  // Strategies whose override table has an `is_traded` column gate execution on it:
+  // the Claude validator (agent_analyzer Rule 1a) hard-rejects is_traded=false even
+  // when monitor_only=false. So "Active" must also set is_traded=true, otherwise the
+  // pair logs signals but never trades.
+  const tableHasIsTraded = useMemo(() => overrideColumns.includes("is_traded"), [overrideColumns]);
+
   // Trading status derived from draftOverrides
   const currentStatus = useMemo((): PairStatus => {
     if (draftOverrides.monitor_only === true || draftOverrides.monitor_only === "true") return "monitor";
     if (draftOverrides.is_enabled === false) return "disabled";
-    if (draftOverrides.is_enabled === true) return "active";
+    if (draftOverrides.is_enabled === true) {
+      // Enabled + non-monitor isn't "active" until promoted to traded, where tracked.
+      if (tableHasIsTraded && draftOverrides.is_traded !== true && draftOverrides.is_traded !== "true") {
+        return "monitor";
+      }
+      return "active";
+    }
     if (draftOverrides.is_enabled === null) return "inherit";
     if (!hasKey(draftOverrides, "is_enabled")) return "inherit";
     return "active";
-  }, [draftOverrides]);
+  }, [draftOverrides, tableHasIsTraded]);
 
   const setStatus = (status: PairStatus) => {
     setDraftOverrides((prev) => {
@@ -726,15 +738,19 @@ export default function UnifiedStrategySettings() {
       if (status === "inherit") {
         delete copy.is_enabled;
         delete copy.monitor_only;
+        if (tableHasIsTraded) delete copy.is_traded;
       } else if (status === "disabled") {
         copy.is_enabled = false;
         copy.monitor_only = true;
+        if (tableHasIsTraded) copy.is_traded = false;
       } else if (status === "monitor") {
         copy.is_enabled = true;
         copy.monitor_only = true;
+        if (tableHasIsTraded) copy.is_traded = false;
       } else {
         copy.is_enabled = true;
         copy.monitor_only = false;
+        if (tableHasIsTraded) copy.is_traded = true;
       }
       return copy;
     });

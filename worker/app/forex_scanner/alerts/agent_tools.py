@@ -311,13 +311,21 @@ _STRATEGY_CONFIG_TABLE: Dict[str, str] = {
     "SMC_MOMENTUM":     "smc_momentum_pair_overrides",
     "RANGE_FADE":       "range_fade_pair_overrides",
     "FA_OR_ATR_TRAIL":  "fa_or_atr_trail_pair_overrides",
+    "KAMA_V2":          "kama_v2_pair_overrides",
+    "INSIDE_DAY":       "inside_day_pair_overrides",
 }
 
 # Strategies whose pair_overrides table has a config_set column (demo/live split).
 # Tables without this column have one row per epic and don't need the filter.
 _STRATEGY_HAS_CONFIG_SET: frozenset = frozenset({
     "XAU_GOLD", "MEAN_REVERSION", "SMC_MOMENTUM",
-    "RANGE_FADE", "FA_OR_ATR_TRAIL",
+    "RANGE_FADE", "FA_OR_ATR_TRAIL", "KAMA_V2", "INSIDE_DAY",
+})
+
+_STRATEGY_HAS_IS_TRADED: frozenset = frozenset({
+    "XAU_GOLD", "IMPULSE_FADE", "DONCHIAN_TURTLE",
+    "SMC_MOMENTUM", "RANGE_FADE", "FA_OR_ATR_TRAIL", "KAMA_V2",
+    "INSIDE_DAY",
 })
 
 # Per-strategy SQL fragment for the four "extended" columns that not all tables have.
@@ -332,6 +340,10 @@ _STRATEGY_EXTENDED_COLS: Dict[str, str] = {
     "SMC_MOMENTUM":    "NULL AS fixed_stop_loss_pips, NULL AS fixed_take_profit_pips, min_confidence, NULL AS max_confidence",
     # FA_OR_ATR_TRAIL uses ATR-based stops — none of the four standard columns exist:
     "FA_OR_ATR_TRAIL": "NULL AS fixed_stop_loss_pips, NULL AS fixed_take_profit_pips, NULL AS min_confidence, NULL AS max_confidence",
+    # KAMA_V2 uses fixed SL/TP defaults in code, with optional pair-level overrides:
+    "KAMA_V2":         "fixed_stop_loss_pips, fixed_take_profit_pips, NULL AS min_confidence, NULL AS max_confidence",
+    # INSIDE_DAY derives stop from inside-day range + ATR buffer and TP from reward_risk:
+    "INSIDE_DAY":      "NULL AS fixed_stop_loss_pips, NULL AS fixed_take_profit_pips, base_confidence AS min_confidence, NULL AS max_confidence",
 }
 
 
@@ -343,7 +355,8 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
     own pair_overrides table (smc_simple_pair_overrides, xau_gold_pair_overrides,
     impulse_fade_pair_overrides, donchian_turtle_pair_overrides,
     mean_reversion_pair_overrides, smc_momentum_pair_overrides,
-    range_fade_pair_overrides, fa_or_atr_trail_pair_overrides).
+    range_fade_pair_overrides, fa_or_atr_trail_pair_overrides,
+    kama_v2_pair_overrides, inside_day_pair_overrides).
     Returns monitor_only flag, SL/TP pips, and confidence thresholds.
     """
     strategy_upper = strategy.upper()
@@ -363,6 +376,7 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
         else:
             monitor_col = "monitor_only"
 
+        traded_col = "is_traded" if strategy_upper in _STRATEGY_HAS_IS_TRADED else "NULL AS is_traded"
         extended_cols = _STRATEGY_EXTENDED_COLS.get(strategy_upper, _STRATEGY_EXTENDED_COLS["__default__"])
 
         # Tables with a config_set column have separate demo/live rows — always
@@ -377,6 +391,7 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
                 epic,
                 is_enabled,
                 {monitor_col}           AS monitor_only,
+                {traded_col},
                 {extended_cols},
                 parameter_overrides
             FROM {table}
@@ -393,7 +408,7 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
         if not row:
             return {"epic": epic, "strategy": strategy, "found": False, "table": table}
 
-        overrides = row[7]
+        overrides = row[8]
         if isinstance(overrides, str):
             try:
                 overrides = json.loads(overrides)
@@ -407,10 +422,11 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
             "found": True,
             "is_enabled": row[1],
             "monitor_only": bool(row[2]) if row[2] is not None else False,
-            "fixed_stop_loss_pips": row[3],
-            "fixed_take_profit_pips": row[4],
-            "min_confidence": float(row[5]) if row[5] else None,
-            "max_confidence": float(row[6]) if row[6] else None,
+            "is_traded": bool(row[3]) if row[3] is not None else None,
+            "fixed_stop_loss_pips": row[4],
+            "fixed_take_profit_pips": row[5],
+            "min_confidence": float(row[6]) if row[6] else None,
+            "max_confidence": float(row[7]) if row[7] else None,
             "parameter_overrides": overrides or {},
         }
 
@@ -503,7 +519,7 @@ TOOL_DEFINITIONS = [
             "Use this first to detect adverse environments before approving a signal. "
             "Key warning: XAU_GOLD in 'ranging' regime has historically shown <25% WR. "
             "Supported strategy values: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
-            "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL."
+            "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL, KAMA_V2, INSIDE_DAY."
         ),
         "input_schema": {
             "type": "object",
@@ -527,7 +543,8 @@ TOOL_DEFINITIONS = [
                     "description": (
                         "Strategy name to filter by, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
                         "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM', 'RANGE_FADE', "
-                        "'FA_OR_ATR_TRAIL'. Empty string aggregates all strategies (not recommended)."
+                        "'FA_OR_ATR_TRAIL', 'KAMA_V2', 'INSIDE_DAY'. Empty string aggregates all strategies "
+                        "(not recommended)."
                     ),
                     "default": "",
                 },
@@ -540,7 +557,7 @@ TOOL_DEFINITIONS = [
         "description": (
             "Count recent SMC structure rejections for a pair over the last N hours. "
             "NOTE: this table is populated by SMC_SIMPLE only — do not use for XAU_GOLD, "
-            "IMPULSE_FADE, DONCHIAN_TURTLE, or MEAN_REVERSION signals. "
+            "IMPULSE_FADE, DONCHIAN_TURTLE, MEAN_REVERSION, KAMA_V2, or INSIDE_DAY signals. "
             "High rejection density (>30 rejections, many distinct reasons) indicates "
             "choppy structure — a warning sign for new entries on EURUSD and JPY pairs."
         ),
@@ -603,7 +620,7 @@ TOOL_DEFINITIONS = [
             "SL/TP pips, and confidence thresholds. Each strategy has its own config table — "
             "always pass the strategy name so the correct table is queried. "
             "Supported strategies: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
-            "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL. "
+            "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL, KAMA_V2, INSIDE_DAY. "
             "Note: FA_OR_ATR_TRAIL uses ATR-based stops so fixed_stop_loss_pips will be null. "
             "Call this to verify the pair is actively traded before approving."
         ),
@@ -616,7 +633,7 @@ TOOL_DEFINITIONS = [
                     "description": (
                         "Strategy name, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
                         "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM', "
-                        "'RANGE_FADE', 'FA_OR_ATR_TRAIL'. Required."
+                        "'RANGE_FADE', 'FA_OR_ATR_TRAIL', 'KAMA_V2', 'INSIDE_DAY'. Required."
                     ),
                 },
             },

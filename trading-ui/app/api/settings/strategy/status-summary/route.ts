@@ -16,7 +16,23 @@ type StrategySummary = {
   }>;
 };
 
-const STATUS_FIELDS = new Set(["is_enabled", "monitor_only"]);
+const STATUS_FIELDS = new Set(["is_enabled", "monitor_only", "is_traded"]);
+
+// Strategies whose pair_overrides table has an `is_traded` column. For these,
+// the Claude validator (agent_analyzer Rule 1a) hard-rejects any signal where
+// is_traded=false, even when monitor_only=false. So a pair only counts as
+// "active" (will actually place trades) when is_traded=true. Mirrors
+// _STRATEGY_HAS_IS_TRADED in worker/.../alerts/agent_tools.py.
+const IS_TRADED_STRATEGIES = new Set([
+  "xau-gold",
+  "range-fade",
+  "smc-momentum",
+  "impulse-fade",
+  "fa-or-atr-trail",
+  "donchian-turtle",
+  "kama2",
+  "inside-day",
+]);
 
 const STRATEGIES = {
   smc: {
@@ -186,6 +202,7 @@ function resolveStatus(
   override: Record<string, unknown> | null,
   defaultGlobalEnabled: boolean,
   defaultMonitorOnly: boolean,
+  tracksIsTraded: boolean,
 ): PairStatus {
   const enabledPairs = Array.isArray(globalConfig?.enabled_pairs) ? globalConfig.enabled_pairs : null;
   const globalEnabled = enabledPairs ? enabledPairs.includes(epic) : defaultGlobalEnabled;
@@ -201,7 +218,14 @@ function resolveStatus(
       ? Boolean(parameterOverrides.monitor_only)
       : Boolean(globalConfig?.monitor_only ?? defaultMonitorOnly);
 
-  return monitorOnly ? "monitor" : "active";
+  if (monitorOnly) return "monitor";
+
+  // Where the strategy tracks is_traded, an enabled, non-monitor pair is still
+  // only "active" once promoted to traded — otherwise the Claude validator
+  // hard-rejects every signal (is_traded=false) and nothing executes.
+  if (tracksIsTraded && !Boolean(override?.is_traded)) return "monitor";
+
+  return "active";
 }
 
 async function loadGlobal(strategy: typeof STRATEGIES[keyof typeof STRATEGIES], configSet: string) {
@@ -306,6 +330,7 @@ async function buildStrategySummary(
         override,
         strategy.defaultGlobalEnabled,
         strategy.defaultMonitorOnly,
+        IS_TRADED_STRATEGIES.has(key),
       ),
       override_count: override ? countOverrides(override) : 0,
       inherited: !override,

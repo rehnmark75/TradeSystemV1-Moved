@@ -63,6 +63,94 @@ except ImportError:
     API_SUBSCRIPTION_KEY = os.getenv('API_SUBSCRIPTION_KEY', "")
 
 
+# ---------------------------------------------------------------------------
+# Deterministic is_traded execution gate (Jun 2026)
+# ---------------------------------------------------------------------------
+# Some strategies' pair_overrides tables carry an `is_traded` column meaning
+# "enabled / monitoring but NOT yet promoted to place orders". Historically this
+# was enforced only (and unreliably) by the Claude validator's LLM-judged
+# Rule 1a — the same pair could be approved one scan and rejected the next.
+# We enforce it deterministically here at the execution gate so a pair with
+# monitor_only=false but is_traded=false never trades. Mirrors
+# _STRATEGY_HAS_IS_TRADED in alerts/agent_tools.py. SMC_SIMPLE / MEAN_REVERSION
+# have no is_traded column and are intentionally absent (never blocked here).
+_IS_TRADED_OVERRIDE_TABLES = {
+    "XAU_GOLD": "xau_gold_pair_overrides",
+    "IMPULSE_FADE": "impulse_fade_pair_overrides",
+    "DONCHIAN_TURTLE": "donchian_turtle_pair_overrides",
+    "SMC_MOMENTUM": "smc_momentum_pair_overrides",
+    "RANGE_FADE": "range_fade_pair_overrides",
+    "FA_OR_ATR_TRAIL": "fa_or_atr_trail_pair_overrides",
+    "KAMA_V2": "kama_v2_pair_overrides",
+    "INSIDE_DAY": "inside_day_pair_overrides",
+}
+
+# Row scoping differs by table:
+#  - config_set ('demo'/'live') column  -> the six below
+#  - IMPULSE_FADE: config_id (3=demo, 2=live), mirroring impulse_fade_config_service
+#  - DONCHIAN_TURTLE: a single shared row per epic (no demo/live scoping)
+_IS_TRADED_TABLES_WITH_CONFIG_SET = {
+    "XAU_GOLD", "SMC_MOMENTUM", "RANGE_FADE",
+    "FA_OR_ATR_TRAIL", "KAMA_V2", "INSIDE_DAY",
+}
+
+
+def _pair_blocked_by_is_traded(strategy_name: str, epic: str) -> bool:
+    """Return True ONLY when the strategy's pair_overrides table has an is_traded
+    column and it is explicitly False for `epic` in the active config_set.
+
+    Fail-OPEN: strategies without the column, a missing row, or any error return
+    False (allow), matching the existing monitor_only fail-safe. Table names come
+    from a fixed allowlist (no SQL injection); epic/config_set are parameterised.
+    """
+    key = (strategy_name or "").upper()
+    table = _IS_TRADED_OVERRIDE_TABLES.get(key)
+    if not table:
+        return False
+    try:
+        import psycopg2
+        from forex_scanner.config import DATABASE_URL
+        url = DATABASE_URL.rsplit("/", 1)[0] + "/strategy_config"
+        conn = psycopg2.connect(url)
+        try:
+            cur = conn.cursor()
+            if key in _IS_TRADED_TABLES_WITH_CONFIG_SET:
+                # demo/live rows scoped by config_set
+                config_set = os.getenv("TRADING_CONFIG_SET", "demo")
+                cur.execute(
+                    f"SELECT is_traded FROM {table} "
+                    f"WHERE epic = %s AND config_set = %s ORDER BY id DESC LIMIT 1",
+                    (epic, config_set),
+                )
+            elif key == "IMPULSE_FADE":
+                # demo/live rows scoped by config_id (3=demo, 2=live)
+                config_id = 2 if os.getenv("TRADING_ENVIRONMENT", "demo") == "live" else 3
+                cur.execute(
+                    f"SELECT is_traded FROM {table} "
+                    f"WHERE epic = %s AND config_id = %s ORDER BY id DESC LIMIT 1",
+                    (epic, config_id),
+                )
+            else:
+                # DONCHIAN_TURTLE: single shared row per epic (no demo/live scoping)
+                cur.execute(
+                    f"SELECT is_traded FROM {table} "
+                    f"WHERE epic = %s ORDER BY id DESC LIMIT 1",
+                    (epic,),
+                )
+            row = cur.fetchone()
+            cur.close()
+        finally:
+            conn.close()
+        if not row:
+            return False
+        return row[0] is False
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            f"⚠️ is_traded gate check failed for {strategy_name}/{epic}: {e} — allowing (fail-open)"
+        )
+        return False
+
+
 class OrderManager:
     """
     Manages order execution, position sizing, and trade lifecycle
@@ -431,6 +519,23 @@ class OrderManager:
                     'status': 'monitor_only',
                     'executed': False,
                     'reason': f'{epic} ({strategy_name}) is in monitor-only mode - signal tracked but not traded',
+                    'alert_id': alert_id,
+                    'signal': signal
+                }
+
+            # Deterministic is_traded gate (runs after monitor_only, so mon=true
+            # pairs already returned above). Blocks pairs that are enabled and not
+            # monitor_only but have not been promoted to trade (is_traded=false),
+            # independent of the Claude validator's LLM-judged Rule 1a. Fail-open.
+            sig_strategy = signal.get('strategy', 'Unknown')
+            if _pair_blocked_by_is_traded(sig_strategy, epic):
+                self.logger.info(f"👁️ NOT TRADED: {epic} ({sig_strategy}) - is_traded=false, signal logged but NOT executed")
+                self.logger.info(f"   ℹ️ To enable trading: set this pair Active in trading-ui (is_traded=true)")
+                _record_block(alert_id, f"not_traded:{sig_strategy}:{epic}")
+                return {
+                    'status': 'not_traded',
+                    'executed': False,
+                    'reason': f'{epic} ({sig_strategy}) is_traded=false - signal tracked but not traded',
                     'alert_id': alert_id,
                     'signal': signal
                 }
