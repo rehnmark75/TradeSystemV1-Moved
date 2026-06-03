@@ -252,10 +252,12 @@ class TradingOrchestrator:
         )
 
         # Agent mode must run through IntegrationManager regardless of require_claude_approval
-        # or scalp overrides. Agent decisions gate trade execution — only APPROVE passes.
+        # or scalp overrides. Agent decisions gate execution: APPROVE and NEUTRAL both execute
+        # (NEUTRAL trades to build forward history); only an explicit REJECT blocks.
+        # See the agent-mode filter in scan loop (execute approved + neutral; block rejects).
         if self.claude_analysis_mode == 'agent':
             self.enable_claude = True
-            self.logger.info("🤖 [AGENT MODE] Claude enabled — agent APPROVE/REJECT gates execution")
+            self.logger.info("🤖 [AGENT MODE] Claude enabled — REJECT blocks execution; APPROVE + NEUTRAL execute")
         self.claude_analysis_level = (
             claude_analysis_level
             if claude_analysis_level is not None

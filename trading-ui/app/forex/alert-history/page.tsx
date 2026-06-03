@@ -37,6 +37,7 @@ type AlertHistoryPayload = {
   stats: {
     total_alerts: number;
     approved: number;
+    neutral: number;
     rejected: number;
     avg_score: number;
     approval_rate: number;
@@ -48,7 +49,7 @@ type AlertHistoryPayload = {
 };
 
 const DAYS = [1, 3, 7, 14, 30];
-const STATUSES = ["All", "Approved", "Rejected"];
+const STATUSES = ["All", "Approved", "Neutral", "Rejected"];
 
 const formatDateTime = (value: string) => {
   const parsed = new Date(value);
@@ -221,6 +222,10 @@ export default function ForexAlertHistoryPage() {
                 <strong>{stats?.approved ?? 0}</strong>
               </div>
               <div className="summary-card">
+                Neutral
+                <strong>{stats?.neutral ?? 0}</strong>
+              </div>
+              <div className="summary-card">
                 Rejected
                 <strong>{stats?.rejected ?? 0}</strong>
               </div>
@@ -240,12 +245,23 @@ export default function ForexAlertHistoryPage() {
                 alerts.map((row) => {
                   const approved =
                     row.claude_approved === true || row.claude_decision === "APPROVE";
+                  // NEUTRAL has claude_approved=false but is NOT a rejection — in agent
+                  // mode it still executes. Show it distinctly, not as REJECTED.
+                  const neutral = !approved && row.claude_decision === "NEUTRAL";
                   const rejected =
-                    row.claude_approved === false ||
-                    row.claude_decision === "REJECT" ||
-                    row.alert_level === "REJECTED";
-                  const statusIcon = approved ? "✅" : rejected ? "❌" : "⚪";
-                  const statusText = approved ? "APPROVED" : rejected ? "REJECTED" : "PENDING";
+                    !approved &&
+                    !neutral &&
+                    (row.claude_approved === false ||
+                      row.claude_decision === "REJECT" ||
+                      row.alert_level === "REJECTED");
+                  const statusIcon = approved ? "✅" : neutral ? "🟡" : rejected ? "❌" : "⏳";
+                  const statusText = approved
+                    ? "APPROVED"
+                    : neutral
+                      ? "NEUTRAL"
+                      : rejected
+                        ? "REJECTED"
+                        : "PENDING";
                   const pairLabel = resolvePair(row);
                   const score = row.claude_score != null ? `${row.claude_score}/10` : "N/A";
                   const title = `${statusIcon} ${formatDateTime(row.alert_timestamp)} | ${pairLabel} | ${

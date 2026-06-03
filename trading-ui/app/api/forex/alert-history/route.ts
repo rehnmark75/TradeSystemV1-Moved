@@ -46,9 +46,13 @@ function buildFilters(filters: AlertFilters) {
   if (filters.status === "Approved") {
     clauses.push("(claude_approved = TRUE OR claude_decision = 'APPROVE')");
   } else if (filters.status === "Rejected") {
+    // NEUTRAL also has claude_approved=FALSE but is NOT a rejection (it executes),
+    // so exclude it from the Rejected bucket.
     clauses.push(
-      "(claude_approved = FALSE OR claude_decision = 'REJECT' OR alert_level = 'REJECTED')"
+      "(claude_decision = 'REJECT' OR alert_level = 'REJECTED' OR (claude_approved = FALSE AND COALESCE(claude_decision, '') <> 'NEUTRAL'))"
     );
+  } else if (filters.status === "Neutral") {
+    clauses.push("claude_decision = 'NEUTRAL'");
   }
 
   if (filters.strategy && filters.strategy !== "All") {
@@ -95,7 +99,8 @@ export async function GET(request: Request) {
         SELECT
           COUNT(*) as total_alerts,
           COUNT(CASE WHEN claude_approved = TRUE OR claude_decision = 'APPROVE' THEN 1 END) as approved,
-          COUNT(CASE WHEN claude_approved = FALSE OR claude_decision = 'REJECT' OR alert_level = 'REJECTED' THEN 1 END) as rejected,
+          COUNT(CASE WHEN claude_decision = 'NEUTRAL' THEN 1 END) as neutral,
+          COUNT(CASE WHEN claude_decision = 'REJECT' OR alert_level = 'REJECTED' OR (claude_approved = FALSE AND COALESCE(claude_decision, '') <> 'NEUTRAL') THEN 1 END) as rejected,
           ROUND(AVG(claude_score)::numeric, 2) as avg_score
         FROM alert_history
         ${whereSql}
@@ -147,6 +152,7 @@ export async function GET(request: Request) {
     const statsRow = statsResult.rows?.[0] ?? {};
     const totalAlerts = Number(countResult.rows?.[0]?.total ?? 0);
     const approved = Number(statsRow.approved ?? 0);
+    const neutral = Number(statsRow.neutral ?? 0);
     const rejected = Number(statsRow.rejected ?? 0);
     const avgScore = Number(statsRow.avg_score ?? 0);
 
@@ -162,6 +168,7 @@ export async function GET(request: Request) {
       stats: {
         total_alerts: totalAlerts,
         approved,
+        neutral,
         rejected,
         avg_score: avgScore,
         approval_rate: totalAlerts ? (approved / totalAlerts) * 100 : 0
