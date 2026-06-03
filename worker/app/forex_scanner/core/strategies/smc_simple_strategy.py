@@ -1501,6 +1501,17 @@ class SMCSimpleStrategy:
                 self._track_filter_rejection('min_adx')
                 return False, f"ADX {current_adx:.1f} < {min_adx:.1f}"
 
+        # Filter 8b: Maximum ADX ceiling (regime selection — forward-test Jun 2 2026)
+        # EURUSD demo + OOS data: late "pullback" entries get stopped on the
+        # pull-against in strong trends. ADX>27 cohort = PF 0.62; ADX<=27 = PF 1.09.
+        # Set via parameter_overrides JSONB key 'scalp_max_adx' per pair; inert (None) otherwise.
+        max_adx = self._db_config.get_for_pair(epic, 'scalp_max_adx')
+        if max_adx is not None:
+            current_adx = signal.get('adx_value', 0.0)
+            if current_adx is not None and current_adx > float(max_adx):
+                self._track_filter_rejection('max_adx')
+                return False, f"ADX {current_adx:.1f} > {float(max_adx):.1f}"
+
         # =========================================================================
         # v2.37.0: Global Market Intelligence Regime Filter
         # Based on Jan 2026 regime analysis:
