@@ -34,9 +34,11 @@ Usage:
     docker exec stock-scanner python -m stock_scanner.scheduler premarket
     docker exec stock-scanner python -m stock_scanner.scheduler intraday
     docker exec stock-scanner python -m stock_scanner.scheduler postmarket
+    docker exec stock-scanner python -m stock_scanner.scheduler breakeven
 
     # Run continuous scheduler
     docker exec stock-scanner python -m stock_scanner.scheduler run
+    docker exec stock-scanner python -m stock_scanner.scheduler breakeven-monitor
 """
 
 import asyncio
@@ -112,6 +114,22 @@ try:
 except ImportError:
     STALE_ORDER_GUARDIAN_AVAILABLE = False
     StaleOrderGuardian = None
+
+# Import breakeven monitor
+try:
+    from stock_scanner.services.breakeven_monitor import BreakevenMonitor
+    BREAKEVEN_MONITOR_AVAILABLE = True
+except ImportError:
+    BREAKEVEN_MONITOR_AVAILABLE = False
+    BreakevenMonitor = None
+
+# Import auto open trader
+try:
+    from stock_scanner.services.auto_open_trader import AutoOpenTrader
+    AUTO_OPEN_TRADER_AVAILABLE = True
+except ImportError:
+    AUTO_OPEN_TRADER_AVAILABLE = False
+    AutoOpenTrader = None
 
 # Import watchlist backtest service
 try:
@@ -1282,6 +1300,120 @@ class StockScheduler:
         await self._log_pipeline_run('stale_order_guardian', results, elapsed)
         return results
 
+    async def run_breakeven_monitor(self):
+        """
+        Check active breakeven monitors and move SL to entry when profit threshold is reached.
+
+        Dry-run is enabled by default. Set BREAKEVEN_MONITOR_DRY_RUN=false to allow
+        RoboMarkets PUT /deals/{id} stop-loss modifications.
+        """
+        logger.info("=" * 60)
+        logger.info("BREAKEVEN MONITOR - Checking SL-to-entry rules")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        if not BREAKEVEN_MONITOR_AVAILABLE:
+            logger.warning("[SKIP] Breakeven monitor not available - missing dependencies")
+            return {'skipped': True, 'reason': 'dependencies not available'}
+
+        if not BROKER_SYNC_AVAILABLE:
+            logger.warning("[SKIP] Breakeven monitor - broker client not available")
+            return {'skipped': True, 'reason': 'broker client not available'}
+
+        try:
+            api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
+            account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
+            dry_run = os.getenv('BREAKEVEN_MONITOR_DRY_RUN', 'true').lower() not in ('0', 'false', 'no')
+
+            if not api_key or not account_id:
+                logger.warning("[SKIP] Breakeven monitor - missing API credentials")
+                return {'skipped': True, 'reason': 'missing API credentials'}
+
+            client = RoboMarketsClient(api_key=api_key, account_id=account_id)
+            monitor = BreakevenMonitor(db_manager=self.db, dry_run=dry_run)
+
+            async with client:
+                results = await monitor.check_once(client)
+
+            logger.info(
+                f"[OK] Breakeven monitor complete: checked={results.get('checked', 0)}, "
+                f"matched={results.get('matched', 0)}, moved={results.get('moved', 0)}, "
+                f"dry_run={results.get('dry_run', True)}, errors={results.get('errors', 0)}"
+            )
+
+        except Exception as e:
+            logger.error(f"Breakeven monitor error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nBreakeven monitor complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('breakeven_monitor', results, elapsed)
+        return results
+
+    async def run_breakeven_monitor_loop(self):
+        """Run breakeven monitor every BREAKEVEN_MONITOR_INTERVAL_SECONDS seconds."""
+        await self.setup()
+        self.running = True
+        interval = int(os.getenv('BREAKEVEN_MONITOR_INTERVAL_SECONDS', '300'))
+        logger.info("Breakeven monitor loop started (interval=%ss)", interval)
+
+        try:
+            while self.running:
+                await self.run_breakeven_monitor()
+                await asyncio.sleep(max(30, interval))
+        except asyncio.CancelledError:
+            logger.info("Breakeven monitor loop cancelled")
+        finally:
+            await self.cleanup()
+
+    async def run_auto_open_trader(self):
+        """Run one auto-open trading decision pass."""
+        logger.info("=" * 60)
+        logger.info("AUTO OPEN TRADER - Checking day-trade automation rules")
+        logger.info("=" * 60)
+
+        start_time = datetime.now()
+        results = {}
+
+        if not AUTO_OPEN_TRADER_AVAILABLE:
+            logger.warning("[SKIP] Auto open trader not available - missing dependencies")
+            return {'skipped': True, 'reason': 'dependencies not available'}
+
+        try:
+            trader = AutoOpenTrader(db_manager=self.db)
+            results = await trader.run_once()
+            logger.info(f"[OK] Auto trader complete: {results}")
+        except Exception as e:
+            logger.error(f"Auto trader error: {e}")
+            results['error'] = str(e)
+
+        elapsed = (datetime.now() - start_time).total_seconds()
+        logger.info(f"\nAuto trader complete in {elapsed:.1f}s")
+
+        await self._log_pipeline_run('auto_open_trader', results, elapsed)
+        return results
+
+    async def run_auto_open_trader_loop(self):
+        """Run auto-open trader every AUTO_TRADER_INTERVAL_SECONDS seconds."""
+        await self.setup()
+        self.running = True
+        interval = int(os.getenv('AUTO_TRADER_INTERVAL_SECONDS', '60'))
+        logger.info("Auto open trader loop started (interval=%ss)", interval)
+
+        try:
+            trader = AutoOpenTrader(db_manager=self.db)
+            while self.running:
+                result = await trader.run_once()
+                logger.info("[AutoTrader] %s", result)
+                await asyncio.sleep(max(15, interval))
+        except asyncio.CancelledError:
+            logger.info("Auto open trader loop cancelled")
+        finally:
+            await self.cleanup()
+
     async def weekly_sync(self):
         """Run weekly instrument sync from RoboMarkets + fundamentals update"""
         logger.info("=" * 60)
@@ -1683,6 +1815,10 @@ async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[i
             await scheduler.run_broker_sync()
         elif task == "guardian":
             await scheduler.run_stale_order_guardian()
+        elif task == "breakeven":
+            await scheduler.run_breakeven_monitor()
+        elif task == "autotrader":
+            await scheduler.run_auto_open_trader()
         elif task == "techwldaq":
             if scheduler.deep_analysis_orchestrator:
                 results = await scheduler.deep_analysis_orchestrator.auto_analyze_technical_watchlist(
@@ -1704,7 +1840,7 @@ async def run_once(task: str, scan_date: Optional[str] = None, limit: Optional[i
                 print("Watchlist Backtest Service not available")
         else:
             print(f"Unknown task: {task}")
-            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, guardian, techwldaq, watchlist_backtest")
+            print("Available: pipeline, sync, synthesize, metrics, rs, sector_rs, market_regime, smc, watchlist, signals, scanners, premarket, premarketpricing, recommendations, intraday, postmarket, weekly, fundamentals, brokersync, guardian, breakeven, autotrader, techwldaq, watchlist_backtest")
     finally:
         await scheduler.cleanup()
 
@@ -1714,10 +1850,10 @@ def main():
 
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
-                       choices=['run', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
+                       choices=['run', 'breakeven-monitor', 'autotrader-monitor', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
-                               'guardian', 'techwldaq', 'watchlist_backtest', 'status'],
+                               'guardian', 'breakeven', 'autotrader', 'techwldaq', 'watchlist_backtest', 'status'],
                        help='Command to execute')
     parser.add_argument('--date', help='Watchlist scan date (YYYY-MM-DD) for recommendations')
     parser.add_argument('--limit', type=int, help='Max tickers to refresh (default config)')
@@ -1736,9 +1872,33 @@ def main():
             print("\nShutdown requested...")
             scheduler.stop()
 
+    elif args.command == 'breakeven-monitor':
+        print("Starting Breakeven Monitor...")
+        print("Press Ctrl+C to stop")
+
+        scheduler = StockScheduler()
+
+        try:
+            asyncio.run(scheduler.run_breakeven_monitor_loop())
+        except KeyboardInterrupt:
+            print("\nShutdown requested...")
+            scheduler.stop()
+
+    elif args.command == 'autotrader-monitor':
+        print("Starting Auto Open Trader...")
+        print("Press Ctrl+C to stop")
+
+        scheduler = StockScheduler()
+
+        try:
+            asyncio.run(scheduler.run_auto_open_trader_loop())
+        except KeyboardInterrupt:
+            print("\nShutdown requested...")
+            scheduler.stop()
+
     elif args.command in ['pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'smc', 'watchlist',
                           'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations', 'intraday',
-                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'guardian', 'techwldaq',
+                          'postmarket', 'weekly', 'fundamentals', 'brokersync', 'guardian', 'breakeven', 'autotrader', 'techwldaq',
                           'watchlist_backtest']:
         print(f"Running {args.command}...")
         asyncio.run(run_once(args.command, scan_date=args.date, limit=args.limit, force=args.force))
@@ -1789,6 +1949,10 @@ def main():
         print("  smc              - Run SMC analysis only")
         print("  watchlist        - Build watchlist only")
         print("  brokersync       - Sync broker trades to database")
+        print("  breakeven        - Run SL-to-breakeven monitor once")
+        print("  breakeven-monitor - Run SL-to-breakeven monitor every 5 minutes")
+        print("  autotrader       - Run auto-open trader once")
+        print("  autotrader-monitor - Run auto-open trader every minute")
         print("  techwldaq        - Run DAQ analysis for technical watchlists")
         print("  watchlist_backtest - Backtest EMA50 crossover watchlist (90d legacy + 180d full-setup with RS+DAQ filters)")
 

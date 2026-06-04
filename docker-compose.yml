@@ -407,6 +407,58 @@ services:
     depends_on:
       - postgres
 
+  stock-breakeven-monitor:
+    build:
+      context: ./stock-scanner
+      dockerfile: Dockerfile
+    container_name: stock-breakeven-monitor
+    restart: unless-stopped
+    volumes:
+      - ./stock-scanner/app:/app
+      - ./logs/stock-scanner:/app/stock_scanner/logs
+    environment:
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
+      - BREAKEVEN_MONITOR_DRY_RUN=${BREAKEVEN_MONITOR_DRY_RUN:-false}
+      - BREAKEVEN_MONITOR_INTERVAL_SECONDS=${BREAKEVEN_MONITOR_INTERVAL_SECONDS:-300}
+    command: ["python", "-m", "stock_scanner.scheduler", "breakeven-monitor"]
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+
+  stock-auto-trader:
+    build:
+      context: ./stock-scanner
+      dockerfile: Dockerfile
+    container_name: stock-auto-trader
+    restart: unless-stopped
+    volumes:
+      - ./stock-scanner/app:/app
+      - ./logs/stock-scanner:/app/stock_scanner/logs
+    environment:
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - TRADING_UI_URL=http://trading-ui:3000/trading
+      - AUTO_TRADING_ENABLED=true
+      - AUTO_TRADING_DRY_RUN=false
+      - AUTO_TRADER_INTERVAL_SECONDS=60
+      - AUTO_TRADE_VALIDATE_DELAY_MINUTES=5
+      - AUTO_TRADE_START_DELAY_MINUTES=15
+      - AUTO_TRADE_STOP_AFTER_MINUTES=45
+      - MAX_ORDER_NOTIONAL_USD=500
+      - MAX_ACTIVE_STOCK_ORDERS=5
+      - MAX_ORDERS_PER_RUN=5
+      - AUTO_TRADE_MAX_SPREAD_PCT=0.4
+      - AUTO_TRADE_MIN_SCORE=65
+      - AUTO_TRADE_MIN_RELATIVE_VOLUME=1.0
+    command: ["python", "-m", "stock_scanner.scheduler", "autotrader-monitor"]
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+      - trading-ui
+
   economic-calendar:
     build:
       context: ./economic-calendar

@@ -14,6 +14,9 @@ export const dynamic = "force-dynamic";
 const EDGE_WINDOW_DAYS = 60; // trailing window for scanner edge (larger = more stable)
 const EDGE_PF_FLOOR = 1.0; // drop a scanner below this PF...
 const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
+const ROBOMARKETS_API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com/api/v1";
+const ROBOMARKETS_API_KEY = process.env.ROBOMARKETS_API_KEY || "";
+const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 
 // Candidate score (validated against the live candidate pool):
 //   0.55 * rs_percentile
@@ -21,12 +24,76 @@ const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
 // + rs_trend: improving +5 / stable 0 / deteriorating -15   (user prefers RISING RS)
 // - risk penalties: earnings<=7d (-15), high short interest (-10), RSI>80 overbought (-10)
 //
+// Day-trade score:
+//   emphasizes tradability today: relative volume, catalyst/news/DAQ context,
+//   sector/regime alignment, setup quality, scanner edge, and extension risk.
+//
 // The row projection MIRRORS /api/signals/results so the signals-page detail
 // panel can render an expanded Top-10 row with full field parity.
+
+type QuoteSnapshot = {
+  broker_bid: number | null;
+  broker_ask: number | null;
+  broker_last: number | null;
+  broker_spread: number | null;
+  broker_spread_pct: number | null;
+  broker_quote_time: string | null;
+};
+
+const fetchBrokerQuotes = async (tickers: string[]): Promise<Record<string, QuoteSnapshot>> => {
+  if (!ROBOMARKETS_API_KEY || !ROBOMARKETS_ACCOUNT_ID || tickers.length === 0) return {};
+
+  const entries = await Promise.all(
+    tickers.map(async (ticker) => {
+      try {
+        const res = await fetch(
+          `${ROBOMARKETS_API_URL}/accounts/${ROBOMARKETS_ACCOUNT_ID}/instruments/${encodeURIComponent(ticker)}/quote`,
+          {
+            headers: {
+              Authorization: `Bearer ${ROBOMARKETS_API_KEY}`,
+              Accept: "application/json",
+            },
+            cache: "no-store",
+          }
+        );
+        if (!res.ok) return [ticker, null] as const;
+        const payload = await res.json();
+        const data = payload?.data ?? {};
+        const bid = data.bid_price == null ? null : Number(data.bid_price);
+        const ask = data.ask_price == null ? null : Number(data.ask_price);
+        const last = data.last_price == null ? null : Number(data.last_price);
+        const spread = bid != null && ask != null ? ask - bid : null;
+        const mid = bid != null && ask != null ? (bid + ask) / 2 : last;
+        const quoteTime =
+          data.ask_bid_price_time != null
+            ? new Date(Number(data.ask_bid_price_time) * 1000).toISOString()
+            : data.last_price_time != null
+              ? new Date(Number(data.last_price_time) * 1000).toISOString()
+              : null;
+        return [
+          ticker,
+          {
+            broker_bid: bid,
+            broker_ask: ask,
+            broker_last: last,
+            broker_spread: spread,
+            broker_spread_pct: spread != null && mid ? Number(((spread / mid) * 100).toFixed(3)) : null,
+            broker_quote_time: quoteTime,
+          },
+        ] as const;
+      } catch {
+        return [ticker, null] as const;
+      }
+    })
+  );
+
+  return Object.fromEntries(entries.filter((entry): entry is readonly [string, QuoteSnapshot] => entry[1] !== null));
+};
 
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Math.min(Math.max(1, Number(searchParams.get("limit") || 10)), 50);
+  const mode = searchParams.get("mode") === "daytrades" ? "daytrades" : "candidates";
   const maxPerScanner = Math.min(
     limit,
     Math.max(1, Number(searchParams.get("maxPerScanner") || limit))
@@ -34,6 +101,64 @@ export async function GET(request: Request) {
 
   const client = await pool.connect();
   try {
+    const scoreExpression =
+      mode === "daytrades"
+        ? `
+              0.20 * COALESCE(rs_percentile, 0)
+            + 0.20 * LEAST(COALESCE(relative_volume, 0) * 25, 100)
+            + 0.20 * (
+                0.55 * COALESCE(daq_catalyst_score, 0)
+              + 0.45 * COALESCE(daq_news_score, 0)
+              )
+            + 0.10 * (
+                CASE
+                  WHEN pm_generated_at IS NULL THEN 0
+                  WHEN pm_is_current_session THEN COALESCE(pm_confidence, 0) * 100
+                  ELSE 0
+                END
+              )
+            + 0.15 * (
+                0.50 * COALESCE(daq_sector_score, 50)
+              + 0.50 * COALESCE(daq_regime_score, 50)
+              )
+            + 0.10 * (
+                0.45 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
+              + 0.35 * COALESCE(daq_quality_score, 50)
+              + 0.20 * COALESCE(mtf_score, 50)
+              )
+            + 0.10 * CASE
+                WHEN scanner_pf IS NULL THEN 50
+                ELSE LEAST(GREATEST(scanner_pf, 0) * 50, 100)
+              END
+            + 0.05 * COALESCE(daq_volume_score, 50)
+            + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -12 ELSE 0 END)
+            + (CASE
+                WHEN pm_is_current_session AND pm_direction = 'BUY' AND pm_gap_percent BETWEEN 1 AND 8 THEN 6
+                WHEN pm_is_current_session AND pm_direction = 'BUY' AND pm_gap_percent > 8 THEN 2
+                WHEN pm_is_current_session AND pm_direction = 'SELL' THEN -10
+                ELSE 0
+              END)
+            - (CASE WHEN COALESCE(relative_volume, 0) < 1 THEN 10 ELSE 0 END)
+            - (CASE WHEN rsi_14 > 80 THEN 12 WHEN rsi_14 > 75 THEN 6 ELSE 0 END)
+            - (CASE WHEN high_short_interest THEN 8 ELSE 0 END)
+            - (CASE WHEN sector_underperforming THEN 8 ELSE 0 END)
+            - (CASE
+                WHEN earnings_within_7d
+                  AND COALESCE(daq_catalyst_score, 0) < 50
+                  AND COALESCE(daq_news_score, 0) < 50
+                THEN 12
+                ELSE 0
+              END)
+        `
+        : `
+              0.55 * COALESCE(rs_percentile, 0)
+            + 0.45 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
+            + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -15 ELSE 0 END)
+            - (CASE WHEN earnings_within_7d THEN 15 ELSE 0 END)
+            - (CASE WHEN high_short_interest THEN 10 ELSE 0 END)
+            - (CASE WHEN rsi_14 > 80 THEN 10 ELSE 0 END)
+        `;
+
     const query = `
       WITH scanner_edge AS (
         SELECT
@@ -175,7 +300,28 @@ export async function GET(request: Request) {
           bt_closed.last_closed_profit_pct,
           bt_closed.last_closed_side,
           e.pf AS scanner_pf,
-          e.closed_n AS scanner_closed_n
+          e.closed_n AS scanner_closed_n,
+          pm.signal_type AS pm_signal_type,
+          pm.direction AS pm_direction,
+          pm.strength AS pm_strength,
+          pm.confidence AS pm_confidence,
+          pm.gap_percent AS pm_gap_percent,
+          pm.gap_type AS pm_gap_type,
+          pm.current_price AS pm_current_price,
+          pm.previous_close AS pm_previous_close,
+          pm.news_count AS pm_news_count,
+          pm.news_sentiment_score AS pm_news_sentiment_score,
+          pm.news_sentiment_level AS pm_news_sentiment_level,
+          pm.suggested_entry AS pm_suggested_entry,
+          pm.suggested_stop AS pm_suggested_stop,
+          pm.suggested_target AS pm_suggested_target,
+          pm.risk_reward AS pm_risk_reward,
+          pm.generated_at AS pm_generated_at,
+          EXTRACT(EPOCH FROM (NOW() - pm.generated_at)) / 3600.0 AS pm_age_hours,
+          (
+            (pm.generated_at AT TIME ZONE 'America/New_York')::date =
+            (NOW() AT TIME ZONE 'America/New_York')::date
+          ) AS pm_is_current_session
         FROM latest_batch s
         LEFT JOIN stock_instruments i ON s.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
@@ -217,17 +363,52 @@ export async function GET(request: Request) {
           ORDER BY bt.close_time DESC NULLS LAST
           LIMIT 1
         ) bt_closed ON TRUE
+        LEFT JOIN LATERAL (
+          SELECT
+            p.signal_type,
+            p.direction,
+            p.strength,
+            p.confidence,
+            p.gap_percent,
+            p.gap_type,
+            p.current_price,
+            p.previous_close,
+            p.news_count,
+            p.news_sentiment_score,
+            p.news_sentiment_level,
+            p.suggested_entry,
+            p.suggested_stop,
+            p.suggested_target,
+            p.risk_reward,
+            p.generated_at
+          FROM stock_premarket_signals p
+          WHERE p.symbol = s.ticker
+          ORDER BY p.generated_at DESC
+          LIMIT 1
+        ) pm ON TRUE
       ),
       scored AS (
         SELECT *,
-          round(
-              0.55 * COALESCE(rs_percentile, 0)
-            + 0.45 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
-            + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -15 ELSE 0 END)
-            - (CASE WHEN earnings_within_7d THEN 15 ELSE 0 END)
-            - (CASE WHEN high_short_interest THEN 10 ELSE 0 END)
-            - (CASE WHEN rsi_14 > 80 THEN 10 ELSE 0 END)
-          , 1) AS candidate_score
+          round(${scoreExpression}, 1) AS candidate_score,
+          CASE
+            WHEN pm_generated_at IS NULL THEN 'No PM data'
+            WHEN NOT pm_is_current_session THEN 'Stale PM'
+            WHEN pm_direction <> 'BUY' THEN 'PM against'
+            WHEN pm_gap_percent >= 1 AND COALESCE(pm_confidence, 0) >= 0.65 THEN 'PM confirmed'
+            WHEN pm_gap_percent > 0 THEN 'PM watch'
+            WHEN pm_gap_percent < -1 THEN 'PM fading'
+            ELSE 'PM neutral'
+          END AS pm_status,
+          CASE
+            WHEN pm_generated_at IS NULL THEN 'Wait'
+            WHEN NOT pm_is_current_session THEN 'Refresh'
+            WHEN pm_direction <> 'BUY' THEN 'Avoid'
+            WHEN high_short_interest OR sector_underperforming THEN 'Small only'
+            WHEN pm_suggested_entry IS NOT NULL AND COALESCE(pm_confidence, 0) >= 0.65 THEN 'Use PM levels'
+            WHEN pm_gap_percent BETWEEN 1 AND 8 AND COALESCE(relative_volume, 0) >= 1.2 THEN 'Pullback'
+            WHEN pm_gap_percent > 8 OR rsi_14 > 80 THEN 'Wait pullback'
+            ELSE 'Watch'
+          END AS order_bias
         FROM enriched
       ),
       eligible AS (
@@ -257,9 +438,37 @@ export async function GET(request: Request) {
       maxPerScanner,
       limit,
     ]);
+    const rows =
+      mode === "daytrades"
+        ? await (async () => {
+            const quotes = await fetchBrokerQuotes(result.rows.map((row) => row.ticker));
+            return result.rows.map((row) => {
+              const quote = quotes[row.ticker] ?? {};
+              const spreadPct = quote.broker_spread_pct ?? null;
+              const quoteTime = quote.broker_quote_time ? new Date(quote.broker_quote_time) : null;
+              const quoteAgeMinutes =
+                quoteTime && !Number.isNaN(quoteTime.getTime())
+                  ? Math.round((Date.now() - quoteTime.getTime()) / 60000)
+                  : null;
+              return {
+                ...row,
+                ...quote,
+                broker_quote_age_minutes: quoteAgeMinutes,
+                order_bias:
+                  spreadPct != null && spreadPct > 1
+                    ? "Avoid spread"
+                    : spreadPct != null && spreadPct > 0.4 && row.order_bias !== "Avoid"
+                      ? "Small only"
+                      : row.order_bias,
+              };
+            });
+          })()
+        : result.rows;
+
     return NextResponse.json({
-      rows: result.rows,
+      rows,
       meta: {
+        scoring_mode: mode,
         batch_date: result.rows[0]?.signal_timestamp ?? null,
         edge_window_days: EDGE_WINDOW_DAYS,
         edge_pf_floor: EDGE_PF_FLOOR,

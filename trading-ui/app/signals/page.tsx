@@ -146,9 +146,30 @@ type TopCandidate = SignalRow & {
   candidate_score: number | string;
   scanner_pf: number | string | null;
   scanner_closed_n: number | null;
+  pm_signal_type?: string | null;
+  pm_direction?: string | null;
+  pm_strength?: string | null;
+  pm_confidence?: number | string | null;
+  pm_gap_percent?: number | string | null;
+  pm_news_count?: number | null;
+  pm_suggested_entry?: number | string | null;
+  pm_suggested_stop?: number | string | null;
+  pm_suggested_target?: number | string | null;
+  pm_generated_at?: string | null;
+  pm_age_hours?: number | string | null;
+  pm_is_current_session?: boolean | null;
+  pm_status?: string | null;
+  order_bias?: string | null;
+  broker_bid?: number | null;
+  broker_ask?: number | null;
+  broker_last?: number | null;
+  broker_spread_pct?: number | null;
+  broker_quote_time?: string | null;
+  broker_quote_age_minutes?: number | null;
 };
 
 type TopMeta = {
+  scoring_mode?: "candidates" | "daytrades";
   batch_date: string | null;
   edge_window_days: number;
   edge_pf_floor: number;
@@ -166,6 +187,16 @@ const numberOrNull = (value: unknown) => {
 const formatValue = (value: unknown, digits = 2) => {
   const num = numberOrNull(value);
   return num === null ? "N/A" : num.toFixed(digits);
+};
+
+const formatPercent = (value: unknown, digits = 1) => {
+  const num = numberOrNull(value);
+  return num === null ? "-" : `${num.toFixed(digits)}%`;
+};
+
+const formatConfidence = (value: unknown) => {
+  const num = numberOrNull(value);
+  return num === null ? "-" : `${Math.round(num * 100)}%`;
 };
 
 const formatTradeDate = (value?: string | null) => {
@@ -370,7 +401,7 @@ export default function SignalsPage() {
   const [rsTrendFilter, setRsTrendFilter] = useState("All Trends");
   const [orderBy, setOrderBy] = useState("date_desc");
 
-  const [viewMode, setViewMode] = useState<"all" | "top10">("all");
+  const [viewMode, setViewMode] = useState<"all" | "top10" | "daytrades">("all");
   const [topCandidates, setTopCandidates] = useState<TopCandidate[]>([]);
   const [topLoading, setTopLoading] = useState(false);
   const [topMeta, setTopMeta] = useState<TopMeta | null>(null);
@@ -431,11 +462,13 @@ export default function SignalsPage() {
   }, [scannerFilter, tierFilter, statusFilter, claudeFilter, dateFrom, dateTo, rsFilter, rsTrendFilter, orderBy]);
 
   useEffect(() => {
-    if (viewMode !== "top10") return;
+    if (viewMode !== "top10" && viewMode !== "daytrades") return;
     const loadTop = async () => {
       setTopLoading(true);
       try {
-        const res = await fetch(`${apiPath("signals/top")}?limit=10`);
+        const params = new URLSearchParams({ limit: viewMode === "daytrades" ? "20" : "10" });
+        if (viewMode === "daytrades") params.set("mode", "daytrades");
+        const res = await fetch(`${apiPath("signals/top")}?${params.toString()}`);
         const data = await res.json();
         setTopCandidates(data.rows || []);
         setTopMeta(data.meta || null);
@@ -465,24 +498,35 @@ export default function SignalsPage() {
   const runClaudeAnalysis = async (signal: SignalRow) => {
     setClaudeLoading((prev) => ({ ...prev, [signal.id]: true }));
     setClaudeMessage((prev) => ({ ...prev, [signal.id]: "" }));
-    const res = await fetch(`${apiPath("claude/analyze")}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ signal_id: signal.id, ticker: signal.ticker })
-    });
-    const data = await res.json();
-    if (!res.ok) {
-      const message = data?.detail || data?.error || "Claude analysis failed.";
-      setClaudeMessage((prev) => ({ ...prev, [signal.id]: message }));
-    } else {
-      setClaudeMessage((prev) => ({ ...prev, [signal.id]: "Claude analysis updated." }));
-      if (data?.analysis) {
+    try {
+      const res = await fetch(`${apiPath("claude/analyze")}`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ signal_id: signal.id, ticker: signal.ticker })
+      });
+      const data = await res.json();
+      if (!res.ok) {
+        const message = data?.detail || data?.error || "Claude analysis failed.";
+        setClaudeMessage((prev) => ({ ...prev, [signal.id]: message }));
+      } else if (data?.analysis && Object.keys(data.analysis).length > 0) {
         setSignals((prev) =>
           prev.map((row) => (row.id === signal.id ? { ...row, ...data.analysis } : row))
         );
+        setTopCandidates((prev) =>
+          prev.map((row) => (row.id === signal.id ? { ...row, ...data.analysis } : row))
+        );
+        setClaudeMessage((prev) => ({ ...prev, [signal.id]: "Claude analysis updated." }));
+      } else {
+        setClaudeMessage((prev) => ({
+          ...prev,
+          [signal.id]: "Claude service returned no analysis."
+        }));
       }
+    } catch (error) {
+      setClaudeMessage((prev) => ({ ...prev, [signal.id]: "Claude analysis failed." }));
+    } finally {
+      setClaudeLoading((prev) => ({ ...prev, [signal.id]: false }));
     }
-    setClaudeLoading((prev) => ({ ...prev, [signal.id]: false }));
   };
 
   const loadNotes = async (ticker: string, force = false) => {
@@ -614,6 +658,8 @@ export default function SignalsPage() {
           take_profit: os.takeProfit > 0 ? os.takeProfit : undefined,
           trade_ready_override: os.override,
           signal_id: signal.id,
+          breakeven_enabled: true,
+          breakeven_trigger_usd: 10,
         }),
       });
       const data = await res.json();
@@ -623,11 +669,14 @@ export default function SignalsPage() {
           [signal.id]: { type: "error", text: data?.error || "Order failed" },
         }));
       } else {
+        const adjustedText = data.level_adjusted && data.broker_levels
+          ? `, adjusted SL ${Number(data.broker_levels.stop_loss).toFixed(2)}${data.broker_levels.take_profit ? ` / TP ${Number(data.broker_levels.take_profit).toFixed(2)}` : ""}`
+          : "";
         setOrderMessage((prev) => ({
           ...prev,
           [signal.id]: {
             type: "success",
-            text: `Order ${data.status}! Broker ID: ${data.robomarkets_order_id || "pending"}, DB #${data.db_order_id}`,
+            text: `Order ${data.status}! Broker ID: ${data.robomarkets_order_id || "pending"}, DB #${data.db_order_id}${data.breakeven_monitor_id ? `, BE monitor #${data.breakeven_monitor_id}` : ""}${adjustedText}`,
           },
         }));
         setOrderConfirming((prev) => ({ ...prev, [signal.id]: false }));
@@ -1216,19 +1265,22 @@ export default function SignalsPage() {
         <div className="view-toggle" style={{ display: "flex", gap: 8, margin: "4px 0 14px" }}>
           <button className="claude-btn" style={{ opacity: viewMode === "all" ? 1 : 0.5 }} onClick={() => setViewMode("all")}>All Signals</button>
           <button className="claude-btn" style={{ opacity: viewMode === "top10" ? 1 : 0.5 }} onClick={() => setViewMode("top10")}>Top 10 Candidates</button>
+          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => setViewMode("daytrades")}>Top 20 Day Trades</button>
         </div>
 
-        {viewMode === "top10" ? (
+        {viewMode === "top10" || viewMode === "daytrades" ? (
           <div className="top10-view">
             <div className="footer-note" style={{ marginBottom: 10 }}>
-              Top candidates from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
-              {" "}Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties.
+              {viewMode === "daytrades" ? "Top 20 day trades" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
+              {viewMode === "daytrades"
+                ? " Score weights relative volume, catalyst/news, premarket confirmation, sector/regime alignment, setup quality, scanner edge, spread, and extension risk."
+                : " Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties."}
               {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; scanner PF is shown so marginal scanners stay visible.
             </div>
             {topLoading ? (
-              <div className="footer-note">Loading top candidates…</div>
+              <div className="footer-note">Loading {viewMode === "daytrades" ? "top 20 day trades" : "top candidates"}…</div>
             ) : topCandidates.length === 0 ? (
-              <div className="footer-note">No candidates in the latest batch.</div>
+              <div className="footer-note">No {viewMode === "daytrades" ? "day-trade candidates" : "candidates"} in the latest batch.</div>
             ) : (
               <table style={{ width: "100%", borderCollapse: "collapse" }}>
                 <thead>
@@ -1239,8 +1291,11 @@ export default function SignalsPage() {
                     <th style={top10CellHead}>Scanner</th>
                     <th style={top10CellHead}>Score</th>
                     <th style={top10CellHead}>RS</th>
-                    <th style={top10CellHead}>Trend</th>
-                    <th style={top10CellHead}>TV</th>
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>RVOL</th> : <th style={top10CellHead}>Trend</th>}
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>PM</th> : <th style={top10CellHead}>TV</th>}
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>Gap</th> : null}
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>Spread</th> : null}
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>Bias</th> : null}
                     <th style={top10CellHead}>Scanner PF</th>
                     <th style={top10CellHead}>Flags</th>
                   </tr>
@@ -1261,12 +1316,45 @@ export default function SignalsPage() {
                         <td style={top10Cell}>{c.scanner_name?.replace(/_/g, " ")}</td>
                         <td style={top10Cell}><strong>{c.candidate_score}</strong></td>
                         <td style={top10Cell}>{c.rs_percentile ?? "-"}</td>
-                        <td style={top10Cell}>
-                          <span className={`pill ${c.rs_trend === "improving" ? "good" : c.rs_trend === "deteriorating" ? "bad" : "warn"}`}>
-                            {c.rs_trend === "improving" ? "↑ rising" : c.rs_trend === "deteriorating" ? "↓ falling" : "→ flat"}
-                          </span>
-                        </td>
-                        <td style={top10Cell}>{c.tv_overall_score != null ? Number(c.tv_overall_score).toFixed(0) : "-"}</td>
+                        {viewMode === "daytrades" ? (
+                          <>
+                            <td style={top10Cell}>{c.relative_volume != null ? `${Number(c.relative_volume).toFixed(1)}x` : "-"}</td>
+                            <td style={top10Cell}>
+                              <span className={`pill ${
+                                c.pm_status === "PM confirmed" ? "good" :
+                                c.pm_status === "PM against" || c.pm_status === "PM fading" || c.pm_status === "Stale PM" ? "bad" :
+                                "warn"
+                              }`}>
+                                {c.pm_status ?? "No PM data"}
+                              </span>
+                              {c.pm_confidence != null ? <div style={{ fontSize: 11, opacity: 0.55 }}>{formatConfidence(c.pm_confidence)} conf</div> : null}
+                            </td>
+                            <td style={top10Cell}>{formatPercent(c.pm_gap_percent)}</td>
+                            <td style={top10Cell}>
+                              {c.broker_spread_pct != null ? `${Number(c.broker_spread_pct).toFixed(2)}%` : "-"}
+                              {c.broker_quote_age_minutes != null ? <div style={{ fontSize: 11, opacity: 0.55 }}>{c.broker_quote_age_minutes}m old</div> : null}
+                            </td>
+                            <td style={top10Cell}>
+                              <span className={`pill ${
+                                c.order_bias === "Use PM levels" || c.order_bias === "Pullback" ? "good" :
+                                c.order_bias === "Avoid" || c.order_bias === "Avoid spread" || c.order_bias === "Refresh" ? "bad" :
+                                "warn"
+                              }`}>
+                                {c.order_bias ?? "Watch"}
+                              </span>
+                              {c.pm_suggested_entry != null ? <div style={{ fontSize: 11, opacity: 0.55 }}>Lmt {formatValue(c.pm_suggested_entry)}</div> : null}
+                            </td>
+                          </>
+                        ) : (
+                          <>
+                            <td style={top10Cell}>
+                              <span className={`pill ${c.rs_trend === "improving" ? "good" : c.rs_trend === "deteriorating" ? "bad" : "warn"}`}>
+                                {c.rs_trend === "improving" ? "↑ rising" : c.rs_trend === "deteriorating" ? "↓ falling" : "→ flat"}
+                              </span>
+                            </td>
+                            <td style={top10Cell}>{c.tv_overall_score != null ? Number(c.tv_overall_score).toFixed(0) : "-"}</td>
+                          </>
+                        )}
                         <td style={top10Cell}>
                           {c.scanner_pf != null ? Number(c.scanner_pf).toFixed(2) : "n/a"}
                           <span style={{ fontSize: 11, opacity: 0.55 }}> (n={c.scanner_closed_n ?? 0})</span>
@@ -1274,12 +1362,16 @@ export default function SignalsPage() {
                         <td style={top10Cell}>
                           {c.earnings_within_7d ? <span className="pill bad">ER</span> : null}
                           {c.high_short_interest ? <span className="pill warn">SI</span> : null}
+                          {c.sector_underperforming ? <span className="pill warn">Sector</span> : null}
                           {(Number(c.rsi_14) || 0) > 80 ? <span className="pill warn">OB</span> : null}
+                          {viewMode === "daytrades" && (Number(c.relative_volume) || 0) < 1 ? <span className="pill warn">Low RVOL</span> : null}
+                          {viewMode === "daytrades" && c.pm_is_current_session === false ? <span className="pill bad">Stale PM</span> : null}
+                          {viewMode === "daytrades" && c.broker_spread_pct != null && Number(c.broker_spread_pct) > 1 ? <span className="pill bad">Wide</span> : null}
                         </td>
                       </tr>
                       {expanded[c.id] ? (
                         <tr>
-                          <td colSpan={10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
+                          <td colSpan={viewMode === "daytrades" ? 12 : 10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
                         </tr>
                       ) : null}
                     </Fragment>

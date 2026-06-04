@@ -245,6 +245,89 @@ CREATE TABLE IF NOT EXISTS stock_positions (
 );
 
 -- =============================================================================
+-- STOCK BREAKEVEN MONITORS (automated SL-to-entry protection)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS stock_breakeven_monitors (
+    id BIGSERIAL PRIMARY KEY,
+    stock_order_id BIGINT REFERENCES stock_orders(id),
+    robomarkets_order_id VARCHAR(100),
+    robomarkets_deal_id VARCHAR(100),
+
+    ticker VARCHAR(20) NOT NULL,
+    broker_ticker VARCHAR(50),
+    side VARCHAR(10) NOT NULL,
+    quantity DECIMAL(12,4),
+
+    entry_price DECIMAL(12,4),
+    initial_stop_loss DECIMAL(12,4),
+    breakeven_stop_price DECIMAL(12,4),
+    take_profit DECIMAL(12,4),
+    trigger_profit_usd DECIMAL(12,4) DEFAULT 10.00,
+    poll_interval_seconds INTEGER DEFAULT 300,
+
+    status VARCHAR(30) DEFAULT 'pending_fill',
+    last_profit_usd DECIMAL(12,4),
+    last_checked_at TIMESTAMP,
+    moved_at TIMESTAMP,
+    error_message TEXT,
+
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+
+    CONSTRAINT valid_breakeven_status CHECK (status IN ('pending_fill', 'monitoring', 'moved', 'closed', 'cancelled', 'failed'))
+);
+
+-- =============================================================================
+-- STOCK AUTO TRADE RUNS/CANDIDATES (automated open-window execution)
+-- =============================================================================
+
+CREATE TABLE IF NOT EXISTS stock_auto_trade_runs (
+    id BIGSERIAL PRIMARY KEY,
+    trade_date DATE NOT NULL UNIQUE,
+    status VARCHAR(30) DEFAULT 'active',
+    enabled BOOLEAN DEFAULT TRUE,
+    dry_run BOOLEAN DEFAULT FALSE,
+    started_at TIMESTAMP DEFAULT NOW(),
+    validated_at TIMESTAMP,
+    traded_at TIMESTAMP,
+    completed_at TIMESTAMP,
+    config JSONB,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS stock_auto_trade_candidates (
+    id BIGSERIAL PRIMARY KEY,
+    run_id BIGINT REFERENCES stock_auto_trade_runs(id),
+    trade_date DATE NOT NULL,
+    rank INTEGER,
+    ticker VARCHAR(20) NOT NULL,
+    status VARCHAR(30) DEFAULT 'queued',
+    candidate_score DECIMAL(10,4),
+    scanner_name VARCHAR(100),
+    order_bias VARCHAR(50),
+    pm_status VARCHAR(50),
+    pm_direction VARCHAR(10),
+    broker_bid DECIMAL(12,4),
+    broker_ask DECIMAL(12,4),
+    broker_last DECIMAL(12,4),
+    broker_spread_pct DECIMAL(10,4),
+    relative_volume DECIMAL(12,4),
+    planned_entry DECIMAL(12,4),
+    planned_stop_loss DECIMAL(12,4),
+    planned_take_profit DECIMAL(12,4),
+    planned_quantity INTEGER,
+    order_response JSONB,
+    robomarkets_order_id VARCHAR(100),
+    stock_order_id BIGINT,
+    reason TEXT,
+    created_at TIMESTAMP DEFAULT NOW(),
+    updated_at TIMESTAMP DEFAULT NOW(),
+    UNIQUE(run_id, ticker)
+);
+
+-- =============================================================================
 -- DATA SYNC LOG (tracking yfinance fetches)
 -- =============================================================================
 
@@ -310,6 +393,22 @@ CREATE INDEX IF NOT EXISTS idx_stock_orders_status
 CREATE INDEX IF NOT EXISTS idx_stock_positions_open
     ON stock_positions(status, ticker) WHERE status = 'open';
 
+CREATE INDEX IF NOT EXISTS idx_stock_breakeven_monitors_active
+    ON stock_breakeven_monitors(status, last_checked_at)
+    WHERE status IN ('pending_fill', 'monitoring');
+
+CREATE INDEX IF NOT EXISTS idx_stock_auto_trade_candidates_run_status
+    ON stock_auto_trade_candidates(run_id, status, rank);
+
+CREATE TABLE IF NOT EXISTS stock_auto_trade_settings (
+    key TEXT PRIMARY KEY,
+    value TEXT NOT NULL,
+    value_type VARCHAR(20) NOT NULL DEFAULT 'string',
+    label TEXT,
+    description TEXT,
+    updated_at TIMESTAMP DEFAULT NOW()
+);
+
 -- Alerts
 CREATE INDEX IF NOT EXISTS idx_stock_alerts_pending
     ON stock_alerts(sent, created_at DESC) WHERE sent = FALSE;
@@ -340,6 +439,21 @@ CREATE TRIGGER trigger_stock_orders_updated_at
 
 CREATE TRIGGER trigger_stock_positions_updated_at
     BEFORE UPDATE ON stock_positions
+    FOR EACH ROW EXECUTE FUNCTION update_stock_updated_at();
+
+DROP TRIGGER IF EXISTS trigger_stock_breakeven_monitors_updated_at ON stock_breakeven_monitors;
+CREATE TRIGGER trigger_stock_breakeven_monitors_updated_at
+    BEFORE UPDATE ON stock_breakeven_monitors
+    FOR EACH ROW EXECUTE FUNCTION update_stock_updated_at();
+
+DROP TRIGGER IF EXISTS trigger_stock_auto_trade_runs_updated_at ON stock_auto_trade_runs;
+CREATE TRIGGER trigger_stock_auto_trade_runs_updated_at
+    BEFORE UPDATE ON stock_auto_trade_runs
+    FOR EACH ROW EXECUTE FUNCTION update_stock_updated_at();
+
+DROP TRIGGER IF EXISTS trigger_stock_auto_trade_candidates_updated_at ON stock_auto_trade_candidates;
+CREATE TRIGGER trigger_stock_auto_trade_candidates_updated_at
+    BEFORE UPDATE ON stock_auto_trade_candidates
     FOR EACH ROW EXECUTE FUNCTION update_stock_updated_at();
 
 -- =============================================================================
@@ -489,3 +603,6 @@ COMMENT ON TABLE stock_candles_synthesized IS 'Higher timeframe candles synthesi
 COMMENT ON TABLE stock_signals IS 'Trading signals generated by strategies';
 COMMENT ON TABLE stock_orders IS 'Orders sent to RoboMarkets';
 COMMENT ON TABLE stock_positions IS 'Open and closed positions';
+COMMENT ON TABLE stock_breakeven_monitors IS 'Automated stop-loss-to-breakeven monitor state for RoboMarkets stock trades';
+COMMENT ON TABLE stock_auto_trade_runs IS 'Daily automated stock day-trade execution runs';
+COMMENT ON TABLE stock_auto_trade_candidates IS 'Candidate decisions and order responses for automated stock day-trade execution';

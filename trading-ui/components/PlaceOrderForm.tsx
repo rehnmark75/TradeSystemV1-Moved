@@ -64,15 +64,20 @@ export default function PlaceOrderForm({ ticker, entryPrice, signalId }: Props) 
           take_profit: takeProfit > 0 ? takeProfit : undefined,
           trade_ready_override: override,
           signal_id: signalId,
+          breakeven_enabled: true,
+          breakeven_trigger_usd: 10,
         }),
       });
       const data = await res.json();
       if (!res.ok) {
         setMessage({ type: "error", text: data?.error || "Order failed" });
       } else {
+        const adjustedText = data.level_adjusted && data.broker_levels
+          ? `, adjusted SL ${Number(data.broker_levels.stop_loss).toFixed(2)}${data.broker_levels.take_profit ? ` / TP ${Number(data.broker_levels.take_profit).toFixed(2)}` : ""}`
+          : "";
         setMessage({
           type: "success",
-          text: `Order ${data.status}! Broker ID: ${data.robomarkets_order_id || "pending"}, DB #${data.db_order_id}`,
+          text: `Order ${data.status}! Broker ID: ${data.robomarkets_order_id || "pending"}, DB #${data.db_order_id}${data.breakeven_monitor_id ? `, BE monitor #${data.breakeven_monitor_id}` : ""}${adjustedText}`,
         });
         setConfirming(false);
       }

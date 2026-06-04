@@ -104,6 +104,15 @@ export default function SettingsDashboard() {
             <Link href="/settings/trailing-ratios" className="settings-card-link">Trailing Ratios</Link>
           </div>
         </div>
+
+        <div className="settings-card settings-card-feature">
+          <div className="settings-card-kicker">Execution Automation</div>
+          <h3>Stock Auto Trader</h3>
+          <p>
+            Control the live open-window stock automation, review candidate decisions, and inspect service logs.
+          </p>
+          <Link href="/settings/auto-trader" className="settings-card-link">Open Auto Trader</Link>
+        </div>
       </div>
 
       <div className="settings-dashboard-grid">

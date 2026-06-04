@@ -303,14 +303,16 @@ class RoboMarketsClient:
             data = await self._request("GET", endpoint)
             instruments = []
 
-            for item in data.get("instruments", []):
+            raw_instruments = data if isinstance(data, list) else data.get("instruments", [])
+
+            for item in raw_instruments:
                 instrument = Instrument(
                     ticker=item.get("ticker", ""),
                     name=item.get("description", item.get("ticker", "")),
-                    contract_size=float(item.get("contractSize", 1)),
-                    min_quantity=float(item.get("minOrderQuantity", 1)),
-                    max_quantity=float(item.get("maxOrderQuantity", 10000)),
-                    quantity_step=float(item.get("quantityStep", 1)),
+                    contract_size=float(item.get("contractSize", item.get("contract_size", 1))),
+                    min_quantity=float(item.get("minOrderQuantity", item.get("min_order_quantity", 1))),
+                    max_quantity=float(item.get("maxOrderQuantity", item.get("max_order_quantity", 10000))),
+                    quantity_step=float(item.get("quantityStep", item.get("quantity_step", 1))),
                     currency=item.get("currency", "USD"),
                     exchange=item.get("exchange"),
                     is_tradeable=item.get("tradeable", True),
@@ -363,9 +365,9 @@ class RoboMarketsClient:
         try:
             data = await self._request("GET", endpoint)
 
-            ask = float(data.get("ask", 0))
-            bid = float(data.get("bid", 0))
-            last = float(data.get("last", 0))
+            ask = float(data.get("ask", data.get("ask_price", 0)) or 0)
+            bid = float(data.get("bid", data.get("bid_price", 0)) or 0)
+            last = float(data.get("last", data.get("last_price", 0)) or 0)
 
             return Quote(
                 ticker=ticker,
