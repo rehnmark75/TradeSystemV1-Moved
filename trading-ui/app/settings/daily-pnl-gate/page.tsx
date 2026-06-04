@@ -5,7 +5,9 @@ import { useEnvironment } from "../../../lib/environment";
 import { useDailyPnlGate, type DailyPnlGateConfig } from "../../../hooks/settings/useDailyPnlGate";
 
 function formatSek(v: number) {
-  return (v >= 0 ? "+" : "") + v.toFixed(2) + " SEK";
+  const n = typeof v === "number" ? v : Number(v);
+  if (!Number.isFinite(n)) return "—";
+  return (n >= 0 ? "+" : "") + n.toFixed(2) + " SEK";
 }
 
 function formatDate(iso: string) {

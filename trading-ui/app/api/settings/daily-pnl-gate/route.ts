@@ -9,7 +9,10 @@ export async function GET(request: Request) {
 
   try {
     const result = await strategyConfigPool.query(
-      `SELECT environment, is_enabled, profit_limit_sek, loss_limit_sek, updated_at
+      `SELECT environment, is_enabled,
+              profit_limit_sek::float8 AS profit_limit_sek,
+              loss_limit_sek::float8 AS loss_limit_sek,
+              updated_at
        FROM daily_pnl_gate_config WHERE environment = $1`,
       [environment]
     );
@@ -54,7 +57,10 @@ export async function PUT(request: Request) {
       `UPDATE daily_pnl_gate_config
        SET is_enabled = $1, profit_limit_sek = $2, loss_limit_sek = $3, updated_at = NOW()
        WHERE environment = $4
-       RETURNING *`,
+       RETURNING environment, is_enabled,
+                 profit_limit_sek::float8 AS profit_limit_sek,
+                 loss_limit_sek::float8 AS loss_limit_sek,
+                 updated_at`,
       [is_enabled, profit_limit_sek, loss_limit_sek, environment]
     );
     return NextResponse.json(result.rows[0]);

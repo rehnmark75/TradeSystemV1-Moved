@@ -10,8 +10,11 @@ export async function GET(request: Request) {
 
   try {
     const result = await strategyConfigPool.query(
-      `SELECT id, blocked_at, environment, limit_hit, daily_pnl_sek,
-              profit_limit_sek, loss_limit_sek, epic, direction, alert_id, trigger_source
+      `SELECT id, blocked_at, environment, limit_hit,
+              daily_pnl_sek::float8 AS daily_pnl_sek,
+              profit_limit_sek::float8 AS profit_limit_sek,
+              loss_limit_sek::float8 AS loss_limit_sek,
+              epic, direction, alert_id, trigger_source
        FROM daily_pnl_gate_blocks
        WHERE environment = $1
          AND blocked_at >= NOW() - ($2 || ' days')::interval
