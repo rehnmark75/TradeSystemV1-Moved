@@ -416,6 +416,26 @@ export async function POST(request: Request) {
         return { ok: false, attempt: last, error: "Broker rejected all SL/TP level attempts" };
       };
 
+      const findLatestOpenDeal = async (): Promise<string | null> => {
+        const dealsRes = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/deals`, {
+          headers: { Authorization: `Bearer ${API_KEY}`, Accept: "application/json" },
+        });
+
+        if (!dealsRes.ok) {
+          const { data, text } = await readBrokerResponse(dealsRes);
+          slTpErrorMessage = brokerErrorMessage(data, text, dealsRes.status);
+          return null;
+        }
+
+        const dealsJson = await dealsRes.json() as Record<string, unknown>;
+        const rawDeals = Array.isArray(dealsJson) ? dealsJson : ((dealsJson?.data || []) as Array<Record<string, unknown>>);
+        const matchingDeals = rawDeals
+          .filter((d) => d.ticker === brokerTicker && (!d.status || d.status === "open"))
+          .sort((a, b) => String(b.id).localeCompare(String(a.id)));
+
+        return matchingDeals.length > 0 ? String(matchingDeals[0].id) : null;
+      };
+
       try {
         if (order_type === "limit") {
           // Set SL/TP on the pending order — they'll carry over when it fills
@@ -426,40 +446,37 @@ export async function POST(request: Request) {
           if (!applied.ok) {
             console.error(`Failed to set SL/TP on order ${brokerOrderId}: ${applied.error}`);
           }
+
+          // A marketable limit can fill before order-level SL/TP is attached.
+          // If a deal already exists, apply the same protection directly to it.
+          await new Promise((r) => setTimeout(r, 1200));
+          const dealId = await findLatestOpenDeal();
+          if (dealId) {
+            brokerDealId = dealId;
+            const dealApplied = await applySlTp("deal", dealId);
+            slTpApplied = dealApplied.ok;
+            acceptedAttempt = dealApplied.attempt;
+            slTpErrorMessage = dealApplied.error;
+            if (!dealApplied.ok) {
+              console.error(`Failed to set SL/TP on immediate-fill deal ${dealId}: ${dealApplied.error}`);
+            }
+          }
         } else {
           // Market order: wait for fill, then set SL/TP on the deal
           await new Promise((r) => setTimeout(r, 1500));
-
-          const dealsRes = await fetch(`${API_URL}/accounts/${ACCOUNT_ID}/deals`, {
-            headers: { Authorization: `Bearer ${API_KEY}`, Accept: "application/json" },
-          });
-
-          if (dealsRes.ok) {
-            const dealsJson = await dealsRes.json() as Record<string, unknown>;
-            const deals = ((dealsJson?.data || []) as Array<Record<string, unknown>>);
-
-            // Find the most recent deal for our ticker (highest id)
-            const matchingDeals = deals
-              .filter((d) => d.ticker === brokerTicker)
-              .sort((a, b) => String(b.id).localeCompare(String(a.id)));
-
-            if (matchingDeals.length > 0) {
-              const dealId = String(matchingDeals[0].id);
-              brokerDealId = dealId;
-              const applied = await applySlTp("deal", dealId);
-              slTpApplied = applied.ok;
-              acceptedAttempt = applied.attempt;
-              slTpErrorMessage = applied.error;
-              if (!applied.ok) {
-                console.error(`Failed to set SL/TP on deal ${dealId}: ${applied.error}`);
-              }
-            } else {
-              slTpErrorMessage = `No matching deal found for ${brokerTicker} to set SL/TP`;
-              console.warn(slTpErrorMessage);
+          const dealId = await findLatestOpenDeal();
+          if (dealId) {
+            brokerDealId = dealId;
+            const applied = await applySlTp("deal", dealId);
+            slTpApplied = applied.ok;
+            acceptedAttempt = applied.attempt;
+            slTpErrorMessage = applied.error;
+            if (!applied.ok) {
+              console.error(`Failed to set SL/TP on deal ${dealId}: ${applied.error}`);
             }
           } else {
-            const { data, text } = await readBrokerResponse(dealsRes);
-            slTpErrorMessage = brokerErrorMessage(data, text, dealsRes.status);
+            slTpErrorMessage = slTpErrorMessage || `No matching deal found for ${brokerTicker} to set SL/TP`;
+            console.warn(slTpErrorMessage);
           }
         }
       } catch (slTpErr) {

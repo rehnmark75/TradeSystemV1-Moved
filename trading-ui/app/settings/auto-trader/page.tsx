@@ -44,7 +44,9 @@ interface AutoTradeCandidate {
   pm_direction?: string;
   broker_ask?: number;
   broker_spread_pct?: number;
+  broker_quote_age_minutes?: number;
   relative_volume?: number;
+  intraday_relative_volume?: number;
   planned_entry?: number;
   planned_stop_loss?: number;
   planned_take_profit?: number;
@@ -318,7 +320,9 @@ export default function AutoTraderSettingsPage() {
                     <th>PM</th>
                     <th>Bias</th>
                     <th>Spread</th>
-                    <th>RVOL</th>
+                    <th>Quote Age</th>
+                    <th>Live RVOL</th>
+                    <th>Prior RVOL</th>
                     <th>Entry</th>
                     <th>SL</th>
                     <th>TP</th>
@@ -336,6 +340,8 @@ export default function AutoTraderSettingsPage() {
                       <td>{row.pm_status ?? row.pm_direction ?? "-"}</td>
                       <td>{row.order_bias ?? "-"}</td>
                       <td>{fmtNumber(row.broker_spread_pct, 3)}%</td>
+                      <td>{row.broker_quote_age_minutes != null ? `${row.broker_quote_age_minutes}m` : "-"}</td>
+                      <td>{fmtNumber(row.intraday_relative_volume, 2)}</td>
                       <td>{fmtNumber(row.relative_volume, 2)}</td>
                       <td>{fmtNumber(row.planned_entry, 2)}</td>
                       <td>{fmtNumber(row.planned_stop_loss, 2)}</td>
@@ -346,7 +352,7 @@ export default function AutoTraderSettingsPage() {
                   ))}
                   {candidates.length === 0 && (
                     <tr>
-                      <td colSpan={13} style={{ color: "var(--muted)", padding: 18 }}>No auto-trader candidates have been recorded yet.</td>
+                      <td colSpan={15} style={{ color: "var(--muted)", padding: 18 }}>No auto-trader candidates have been recorded yet.</td>
                     </tr>
                   )}
                 </tbody>

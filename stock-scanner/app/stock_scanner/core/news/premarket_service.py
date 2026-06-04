@@ -17,6 +17,7 @@ Usage:
 
 import asyncio
 import logging
+import os
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -205,6 +206,8 @@ class PreMarketService:
         self.sentiment_analyzer = NewsSentimentAnalyzer()
         self.news_lookback_hours = news_lookback_hours
         self.min_news_articles = min_news_articles
+        self.watchlist_limit = max(1, int(os.getenv("PREMARKET_PRICING_TICKER_LIMIT", "100")))
+        self.news_limit = max(0, int(os.getenv("PREMARKET_PRICING_NEWS_LIMIT", "25")))
 
     async def run_premarket_scan(
         self,
@@ -271,9 +274,8 @@ class PreMarketService:
             logger.info(f"Found {len(gapping_quotes)} stocks with significant gaps")
 
             # Step 5: Fetch news for gapping stocks
-            news_by_ticker = await self._fetch_overnight_news(
-                [q.symbol for q in gapping_quotes]
-            )
+            gapping_symbols = list(dict.fromkeys(q.symbol for q in gapping_quotes))
+            news_by_ticker = await self._fetch_overnight_news(gapping_symbols)
 
             # Step 6: Generate signals
             signals = self._generate_signals(gapping_quotes, news_by_ticker)
@@ -311,10 +313,10 @@ class PreMarketService:
             SELECT ticker FROM stock_watchlist
             WHERE tier IN (1, 2)
             ORDER BY rank_overall
-            LIMIT 200
+            LIMIT $1
         """
         try:
-            rows = await self.db.fetch(query)
+            rows = await self.db.fetch(query, self.watchlist_limit)
             return [r['ticker'] for r in rows]
         except Exception as e:
             logger.warning(f"Could not fetch watchlist: {e}")
@@ -416,7 +418,7 @@ class PreMarketService:
         to_date = datetime.now()
         from_date = to_date - timedelta(hours=self.news_lookback_hours)
 
-        for ticker in tickers[:50]:  # Limit to top 50 to respect rate limits
+        for ticker in tickers[:self.news_limit]:  # Limit to respect provider rate limits
             try:
                 articles = await self.finnhub.get_company_news(
                     symbol=ticker,

@@ -166,6 +166,13 @@ type TopCandidate = SignalRow & {
   broker_spread_pct?: number | null;
   broker_quote_time?: string | null;
   broker_quote_age_minutes?: number | null;
+  execution_quality_score?: number | null;
+  execution_quality_parts?: {
+    spread?: number;
+    quote_age?: number;
+    entry?: number;
+    size?: number;
+  } | null;
 };
 
 type TopMeta = {
@@ -1296,6 +1303,7 @@ export default function SignalsPage() {
                     {viewMode === "daytrades" ? <th style={top10CellHead}>Gap</th> : null}
                     {viewMode === "daytrades" ? <th style={top10CellHead}>Spread</th> : null}
                     {viewMode === "daytrades" ? <th style={top10CellHead}>Bias</th> : null}
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>Exec</th> : null}
                     <th style={top10CellHead}>Scanner PF</th>
                     <th style={top10CellHead}>Flags</th>
                   </tr>
@@ -1321,7 +1329,7 @@ export default function SignalsPage() {
                             <td style={top10Cell}>{c.relative_volume != null ? `${Number(c.relative_volume).toFixed(1)}x` : "-"}</td>
                             <td style={top10Cell}>
                               <span className={`pill ${
-                                c.pm_status === "PM confirmed" ? "good" :
+                                c.pm_status === "PM confirmed" || c.pm_status === "Open confirmed" ? "good" :
                                 c.pm_status === "PM against" || c.pm_status === "PM fading" || c.pm_status === "Stale PM" ? "bad" :
                                 "warn"
                               }`}>
@@ -1344,6 +1352,14 @@ export default function SignalsPage() {
                               </span>
                               {c.pm_suggested_entry != null ? <div style={{ fontSize: 11, opacity: 0.55 }}>Lmt {formatValue(c.pm_suggested_entry)}</div> : null}
                             </td>
+                            <td style={top10Cell}>
+                              {c.execution_quality_score != null ? `${Number(c.execution_quality_score).toFixed(0)}/10` : "-"}
+                              {c.execution_quality_parts ? (
+                                <div style={{ fontSize: 11, opacity: 0.55 }}>
+                                  S{c.execution_quality_parts.spread ?? 0} Q{c.execution_quality_parts.quote_age ?? 0} E{c.execution_quality_parts.entry ?? 0} Z{c.execution_quality_parts.size ?? 0}
+                                </div>
+                              ) : null}
+                            </td>
                           </>
                         ) : (
                           <>
@@ -1364,14 +1380,14 @@ export default function SignalsPage() {
                           {c.high_short_interest ? <span className="pill warn">SI</span> : null}
                           {c.sector_underperforming ? <span className="pill warn">Sector</span> : null}
                           {(Number(c.rsi_14) || 0) > 80 ? <span className="pill warn">OB</span> : null}
-                          {viewMode === "daytrades" && (Number(c.relative_volume) || 0) < 1 ? <span className="pill warn">Low RVOL</span> : null}
+                          {viewMode === "daytrades" && (Number(c.relative_volume) || 0) < 1 ? <span className="pill warn">Low prior RVOL</span> : null}
                           {viewMode === "daytrades" && c.pm_is_current_session === false ? <span className="pill bad">Stale PM</span> : null}
                           {viewMode === "daytrades" && c.broker_spread_pct != null && Number(c.broker_spread_pct) > 1 ? <span className="pill bad">Wide</span> : null}
                         </td>
                       </tr>
                       {expanded[c.id] ? (
                         <tr>
-                          <td colSpan={viewMode === "daytrades" ? 12 : 10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
+                          <td colSpan={viewMode === "daytrades" ? 13 : 10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
                         </tr>
                       ) : null}
                     </Fragment>

@@ -12,7 +12,7 @@ Orchestrates all signal scanners and provides unified interface for:
 
 import logging
 import asyncio
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, time
 from typing import List, Dict, Any, Optional, Type, Tuple
 from collections import defaultdict
 
@@ -220,47 +220,60 @@ class ScannerManager:
             all_signals.extend(signals)
             logger.info(f"  {scanner_name}: {len(signals)} signals")
 
-        # Deduplicate (same ticker from multiple scanners)
-        deduplicated = self._deduplicate_signals(all_signals)
+        scan_timestamp = datetime.combine(calculation_date, time(hour=12))
+        normalized_count = 0
+        for signal in all_signals:
+            if signal.signal_timestamp.date() != calculation_date:
+                signal.signal_timestamp = scan_timestamp
+                normalized_count += 1
+        if normalized_count:
+            logger.info(
+                "Normalized %s signal timestamps to scan date %s",
+                normalized_count,
+                calculation_date,
+            )
 
-        # Sort by composite score
-        deduplicated.sort(key=lambda x: x.composite_score, reverse=True)
+        # Preserve scanner diversity. The database has a unique key on
+        # (ticker, scanner_name, signal_date), so saving all scanner outputs is
+        # safe and lets downstream ranking compare setup types.
+        ranked_signals = list(all_signals)
+        ranked_signals.sort(key=lambda x: x.composite_score, reverse=True)
 
         # Store latest results
-        self._latest_signals = deduplicated
+        self._latest_signals = ranked_signals
 
         # Calculate stats
         elapsed = (datetime.now() - start_time).total_seconds()
         self._scan_stats = {
             'scan_date': str(calculation_date),
             'scan_duration_seconds': round(elapsed, 2),
-            'total_signals': len(deduplicated),
+            'total_signals': len(ranked_signals),
             'signals_by_scanner': {k: len(v) for k, v in scanner_results.items()},
-            'signals_by_tier': self._count_by_tier(deduplicated),
-            'high_quality_count': sum(1 for s in deduplicated if s.is_high_quality),
+            'signals_by_tier': self._count_by_tier(ranked_signals),
+            'high_quality_count': sum(1 for s in ranked_signals if s.is_high_quality),
         }
 
         # Save to database
-        if save_to_db and deduplicated:
-            saved = await self._save_all_signals(deduplicated)
+        if save_to_db and ranked_signals:
+            saved = await self._save_all_signals(ranked_signals)
             self._scan_stats['signals_saved'] = saved
 
         # Log summary
-        self._log_scan_summary(deduplicated)
+        self._log_scan_summary(ranked_signals)
 
         # Auto-enrich high-quality signals with news sentiment
-        if save_to_db and deduplicated:
-            await self._auto_enrich_signals_with_news(deduplicated)
+        if save_to_db and ranked_signals:
+            await self._auto_enrich_signals_with_news(ranked_signals)
 
         # Auto-enrich new signals with analyst recommendations (Finnhub)
-        if save_to_db and deduplicated:
-            await self._auto_enrich_signals_with_recommendations(deduplicated)
+        if save_to_db and ranked_signals:
+            await self._auto_enrich_signals_with_recommendations(ranked_signals)
 
         # Auto-run deep analysis on high-quality signals
-        if save_to_db and deduplicated:
-            await self._auto_deep_analysis(deduplicated)
+        if save_to_db and ranked_signals:
+            await self._auto_deep_analysis(ranked_signals)
 
-        return deduplicated
+        return ranked_signals
 
     async def _auto_enrich_signals_with_news(
         self,

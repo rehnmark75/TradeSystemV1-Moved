@@ -4,16 +4,15 @@ import { pool } from "../../../../lib/db";
 export const dynamic = "force-dynamic";
 
 // --- Scanner edge floor -------------------------------------------------
-// scanner_pf here is intentionally the UPWARD-biased profit factor: open
-// positions showing paper profit count as "wins", while losses require a
-// fully-closed trade. We use it ONE-SIDED: if a scanner scores below the
-// floor even under this optimistic accounting, over a real closed sample,
-// it has no demonstrated edge and is dropped. Window/threshold are
-// strictness knobs — surfaced in the UI so marginal scanners stay visible
-// rather than silently excluded.
+// scanner_pf is a closed-trade profit factor. Winners and losers must use
+// the same status='closed' population, otherwise open/expired/partial rows can
+// inflate the edge metric. A scanner with closed wins and zero closed losses is
+// treated as capped-positive PF; a scanner with no closed outcome history stays
+// null and is not floor-filtered until it reaches EDGE_MIN_CLOSED.
 const EDGE_WINDOW_DAYS = 60; // trailing window for scanner edge (larger = more stable)
 const EDGE_PF_FLOOR = 1.0; // drop a scanner below this PF...
 const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
+const EDGE_NO_LOSS_PF_CAP = 3.0; // score cap for closed wins with zero closed losses
 const ROBOMARKETS_API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com/api/v1";
 const ROBOMARKETS_API_KEY = process.env.ROBOMARKETS_API_KEY || "";
 const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
@@ -26,7 +25,7 @@ const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 //
 // Day-trade score:
 //   emphasizes tradability today: relative volume, catalyst/news/DAQ context,
-//   sector/regime alignment, setup quality, scanner edge, and extension risk.
+//   sector/regime alignment, setup quality, execution quality, and extension risk.
 //
 // The row projection MIRRORS /api/signals/results so the signals-page detail
 // panel can render an expanded Top-10 row with full field parity.
@@ -35,9 +34,19 @@ type QuoteSnapshot = {
   broker_bid: number | null;
   broker_ask: number | null;
   broker_last: number | null;
+  broker_volume: number | null;
   broker_spread: number | null;
   broker_spread_pct: number | null;
   broker_quote_time: string | null;
+};
+
+const firstFiniteNumber = (...values: unknown[]) => {
+  for (const value of values) {
+    if (value == null) continue;
+    const parsed = Number(value);
+    if (Number.isFinite(parsed)) return parsed;
+  }
+  return null;
 };
 
 const fetchBrokerQuotes = async (tickers: string[]): Promise<Record<string, QuoteSnapshot>> => {
@@ -62,6 +71,13 @@ const fetchBrokerQuotes = async (tickers: string[]): Promise<Record<string, Quot
         const bid = data.bid_price == null ? null : Number(data.bid_price);
         const ask = data.ask_price == null ? null : Number(data.ask_price);
         const last = data.last_price == null ? null : Number(data.last_price);
+        const volume = firstFiniteNumber(
+          data.volume,
+          data.day_volume,
+          data.daily_volume,
+          data.traded_volume,
+          data.turnover_volume
+        );
         const spread = bid != null && ask != null ? ask - bid : null;
         const mid = bid != null && ask != null ? (bid + ask) / 2 : last;
         const quoteTime =
@@ -76,6 +92,7 @@ const fetchBrokerQuotes = async (tickers: string[]): Promise<Record<string, Quot
             broker_bid: bid,
             broker_ask: ask,
             broker_last: last,
+            broker_volume: volume,
             broker_spread: spread,
             broker_spread_pct: spread != null && mid ? Number(((spread / mid) * 100).toFixed(3)) : null,
             broker_quote_time: quoteTime,
@@ -98,6 +115,7 @@ export async function GET(request: Request) {
     limit,
     Math.max(1, Number(searchParams.get("maxPerScanner") || limit))
   );
+  const queryLimit = mode === "daytrades" ? Math.min(50, Math.max(limit, limit * 3)) : limit;
 
   const client = await pool.connect();
   try {
@@ -126,10 +144,6 @@ export async function GET(request: Request) {
               + 0.35 * COALESCE(daq_quality_score, 50)
               + 0.20 * COALESCE(mtf_score, 50)
               )
-            + 0.10 * CASE
-                WHEN scanner_pf IS NULL THEN 50
-                ELSE LEAST(GREATEST(scanner_pf, 0) * 50, 100)
-              END
             + 0.05 * COALESCE(daq_volume_score, 50)
             + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -12 ELSE 0 END)
             + (CASE
@@ -163,18 +177,24 @@ export async function GET(request: Request) {
       WITH scanner_edge AS (
         SELECT
           scanner_name,
-          count(*) FILTER (WHERE status = 'closed') AS closed_n,
-          (
-            (count(*) FILTER (WHERE realized_pnl_pct > 0)::numeric
-              * NULLIF(avg(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0), 0))
-            / NULLIF(
-                count(*) FILTER (WHERE realized_pnl_pct <= 0 AND status = 'closed')
-                * abs(avg(realized_pnl_pct) FILTER (WHERE realized_pnl_pct <= 0 AND status = 'closed')),
-                0)
-          ) AS pf
-        FROM stock_scanner_signals
-        WHERE signal_timestamp >= NOW() - ($1 * INTERVAL '1 day')
-        GROUP BY scanner_name
+          closed_n,
+          CASE
+            WHEN gross_loss > 0 THEN gross_profit / gross_loss
+            WHEN gross_profit > 0 THEN $6::numeric
+            ELSE NULL
+          END AS pf
+        FROM (
+          SELECT
+            scanner_name,
+            count(*) AS closed_n,
+            COALESCE(sum(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0), 0)::numeric AS gross_profit,
+            ABS(COALESCE(sum(realized_pnl_pct) FILTER (WHERE realized_pnl_pct <= 0), 0))::numeric AS gross_loss
+          FROM stock_scanner_signals
+          WHERE signal_timestamp >= NOW() - ($1 * INTERVAL '1 day')
+            AND status = 'closed'
+            AND realized_pnl_pct IS NOT NULL
+          GROUP BY scanner_name
+        ) closed_edge
       ),
       latest_batch AS (
         SELECT DISTINCT ON (ticker, scanner_name) *
@@ -227,6 +247,7 @@ export async function GET(request: Request) {
           m.swing_low,
           m.swing_high_date,
           m.swing_low_date,
+          m.avg_volume_20,
           m.relative_volume,
           m.tv_osc_buy,
           m.tv_osc_sell,
@@ -390,6 +411,10 @@ export async function GET(request: Request) {
       scored AS (
         SELECT *,
           round(${scoreExpression}, 1) AS candidate_score,
+          (
+            COALESCE(scanner_pf, 999) < $2
+            AND COALESCE(scanner_closed_n, 0) >= $3
+          ) AS edge_floor_blocked,
           CASE
             WHEN pm_generated_at IS NULL THEN 'No PM data'
             WHEN NOT pm_is_current_session THEN 'Stale PM'
@@ -412,9 +437,11 @@ export async function GET(request: Request) {
         FROM enriched
       ),
       eligible AS (
-        -- one-sided floor: keep unless the OPTIMISTIC PF is below floor over a real sample
+        -- Closed-only edge floor: enforce when possible, but never blank the
+        -- whole current list if today's batch only contains below-floor scanners.
         SELECT * FROM scored
-        WHERE NOT (COALESCE(scanner_pf, 999) < $2 AND COALESCE(scanner_closed_n, 0) >= $3)
+        WHERE NOT edge_floor_blocked
+          OR NOT EXISTS (SELECT 1 FROM scored WHERE NOT edge_floor_blocked)
       ),
       capped AS (
         SELECT *,
@@ -436,13 +463,14 @@ export async function GET(request: Request) {
       EDGE_PF_FLOOR,
       EDGE_MIN_CLOSED,
       maxPerScanner,
-      limit,
+      queryLimit,
+      EDGE_NO_LOSS_PF_CAP,
     ]);
     const rows =
       mode === "daytrades"
         ? await (async () => {
             const quotes = await fetchBrokerQuotes(result.rows.map((row) => row.ticker));
-            return result.rows.map((row) => {
+            const enrichedRows = result.rows.map((row) => {
               const quote = quotes[row.ticker] ?? {};
               const spreadPct = quote.broker_spread_pct ?? null;
               const quoteTime = quote.broker_quote_time ? new Date(quote.broker_quote_time) : null;
@@ -450,18 +478,95 @@ export async function GET(request: Request) {
                 quoteTime && !Number.isNaN(quoteTime.getTime())
                   ? Math.round((Date.now() - quoteTime.getTime()) / 60000)
                   : null;
+              const avgVolume20 = Number(row.avg_volume_20 ?? 0);
+              const intradayRelativeVolume =
+                quote.broker_volume != null && avgVolume20 > 0
+                  ? Number((quote.broker_volume / avgVolume20).toFixed(2))
+                  : null;
+              const quotePrice = Number(quote.broker_last ?? quote.broker_ask ?? 0);
+              const setupEntry = Number(row.entry_price ?? 0);
+              const openConfirmed =
+                row.pm_status === "No PM data" &&
+                quoteAgeMinutes != null &&
+                quoteAgeMinutes <= 3 &&
+                quotePrice > 0 &&
+                setupEntry > 0 &&
+                quotePrice >= setupEntry * 0.995;
+              const priorRvol = Number(row.relative_volume ?? 0);
+              const oldRvolTerm =
+                0.20 * Math.min(priorRvol * 25, 100) - (priorRvol < 1 ? 10 : 0);
+              const liveRvolTerm =
+                intradayRelativeVolume == null
+                  ? oldRvolTerm
+                  : 0.20 * Math.min(intradayRelativeVolume * 25, 100) - (intradayRelativeVolume < 1 ? 10 : 0);
+              const spreadScore =
+                spreadPct == null ? 0 :
+                spreadPct <= 0.25 ? 4 :
+                spreadPct <= 0.4 ? 2 :
+                0;
+              const quoteFreshnessScore =
+                quoteAgeMinutes == null ? 0 :
+                quoteAgeMinutes <= 1 ? 2 :
+                quoteAgeMinutes <= 3 ? 1 :
+                0;
+              const pmSuggestedEntry = Number(row.pm_suggested_entry ?? 0);
+              const ask = Number(quote.broker_ask ?? 0);
+              const entryDisciplineScore =
+                pmSuggestedEntry > 0 && ask > 0 && ask <= pmSuggestedEntry ? 2 :
+                pmSuggestedEntry > 0 && ask > 0 && ask <= pmSuggestedEntry * 1.01 ? 1 :
+                0;
+              const quantityUnderCap = ask > 0 ? Math.floor(500 / ask) : 0;
+              const sizeFitScore = quantityUnderCap >= 2 ? 2 : quantityUnderCap >= 1 ? 1 : 0;
+              const executionQualityScore =
+                spreadScore + quoteFreshnessScore + entryDisciplineScore + sizeFitScore;
+              let orderBias =
+                spreadPct != null && spreadPct > 1
+                  ? "Avoid spread"
+                  : spreadPct != null && spreadPct > 0.4 && row.order_bias !== "Avoid"
+                    ? "Small only"
+                    : row.order_bias;
+              if (openConfirmed && orderBias === "Wait") {
+                orderBias = row.high_short_interest || row.sector_underperforming ? "Small only" : "Watch";
+              }
+              if (orderBias === "Pullback" && intradayRelativeVolume != null && intradayRelativeVolume < 1.2) {
+                orderBias = "Watch";
+              }
               return {
                 ...row,
                 ...quote,
+                pm_status: openConfirmed ? "Open confirmed" : row.pm_status,
                 broker_quote_age_minutes: quoteAgeMinutes,
-                order_bias:
-                  spreadPct != null && spreadPct > 1
-                    ? "Avoid spread"
-                    : spreadPct != null && spreadPct > 0.4 && row.order_bias !== "Avoid"
-                      ? "Small only"
-                      : row.order_bias,
+                intraday_relative_volume: intradayRelativeVolume,
+                relative_volume_source: "prior_session_daily",
+                intraday_relative_volume_source: intradayRelativeVolume == null ? null : "broker_quote_volume_vs_avg_20d",
+                execution_quality_score: executionQualityScore,
+                execution_quality_parts: {
+                  spread: spreadScore,
+                  quote_age: quoteFreshnessScore,
+                  entry: entryDisciplineScore,
+                  size: sizeFitScore,
+                },
+                candidate_score: Number((Number(row.candidate_score ?? 0) - oldRvolTerm + liveRvolTerm + executionQualityScore).toFixed(1)),
+                order_bias: orderBias,
               };
             });
+            return enrichedRows
+              .sort((a, b) => {
+                const tradableStatus = (row: typeof enrichedRows[number]) => {
+                  const pmStatus = String(row.pm_status ?? "");
+                  const orderBias = String(row.order_bias ?? "");
+                  const hardPmReject = ["Stale PM", "No PM data", "PM against", "PM fading"].includes(pmStatus);
+                  const hardBiasReject = ["Avoid", "Avoid spread", "Refresh", "Wait", "Wait pullback"].includes(orderBias);
+                  return hardPmReject || hardBiasReject ? 0 : 1;
+                };
+                const tradableDelta = tradableStatus(b) - tradableStatus(a);
+                if (tradableDelta !== 0) return tradableDelta;
+                const scoreDelta = Number(b.candidate_score ?? 0) - Number(a.candidate_score ?? 0);
+                if (scoreDelta !== 0) return scoreDelta;
+                return Number(b.rs_percentile ?? 0) - Number(a.rs_percentile ?? 0);
+              })
+              .slice(0, limit)
+              .map((row, index) => ({ ...row, rank: index + 1 }));
           })()
         : result.rows;
 
@@ -473,7 +578,10 @@ export async function GET(request: Request) {
         edge_window_days: EDGE_WINDOW_DAYS,
         edge_pf_floor: EDGE_PF_FLOOR,
         edge_min_closed: EDGE_MIN_CLOSED,
+        edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
         max_per_scanner: maxPerScanner,
+        daytrade_rvol_source: mode === "daytrades" ? "broker_quote_volume_vs_avg_20d_when_available" : null,
+        daytrade_execution_quality: mode === "daytrades" ? "0-10 live score: spread 4, quote age 2, entry discipline 2, size fit 2" : null,
       },
     });
   } catch (error) {

@@ -594,13 +594,15 @@ class RoboMarketsClient:
             data = await self._request("GET", endpoint)
             positions = []
 
-            # Handle both list response and dict with "deals" key
+            # Handle list response and common wrapped response shapes.
             if isinstance(data, list):
                 deals = data
             else:
-                deals = data.get("deals", [])
+                deals = data.get("deals") or data.get("data") or []
 
             for deal in deals:
+                if str(deal.get("status", "open")).lower() != "open":
+                    continue
                 # API uses snake_case: id, volume, open_price, open_time, close_price
                 position = Position(
                     deal_id=str(deal.get("id", deal.get("dealId", ""))),

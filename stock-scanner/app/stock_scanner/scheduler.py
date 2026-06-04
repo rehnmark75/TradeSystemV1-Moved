@@ -47,6 +47,7 @@ import sys
 import os
 from datetime import datetime, time, timedelta, date
 from typing import Optional, Tuple
+import aiohttp
 import pytz
 
 sys.path.insert(0, '/app')
@@ -201,9 +202,14 @@ class StockScheduler:
             'description': 'Pre-market gap and earnings scan'
         },
         'premarket_pricing': {
-            'time': time(9, 0),       # 9:00 AM ET (30 min before market open)
+            'time': time(7, 30),      # 7:30 AM ET (2h before market open)
             'type': 'premarket_finnhub',
             'description': 'Pre-market pricing & news enrichment (Finnhub)'
+        },
+        'premarket_pricing_late': {
+            'time': time(9, 0),       # 9:00 AM ET (30 min before market open)
+            'type': 'premarket_finnhub_late',
+            'description': 'Late focused pre-market pricing refresh (Finnhub)'
         },
         'broker_sync_am': {
             'time': time(9, 30),      # 9:30 AM ET (market open)
@@ -259,6 +265,7 @@ class StockScheduler:
         self.premarket_service: PreMarketService = None
         self.deep_analysis_orchestrator: DeepAnalysisOrchestrator = None
         self.watchlist_backtest_service: WatchlistBacktestService = None
+        self.trading_ui_url = os.getenv("TRADING_UI_URL", "http://trading-ui:3000/trading").rstrip("/")
         self.running = False
 
     async def setup(self):
@@ -983,7 +990,7 @@ class StockScheduler:
         await self._log_pipeline_run('pre_market_scan', results, elapsed)
         return results
 
-    async def run_premarket_pricing_scan(self):
+    async def run_premarket_pricing_scan(self, late_run: bool = False):
         """
         Pre-market pricing scan (9:00 AM ET) - 30 min before market open.
 
@@ -1001,7 +1008,8 @@ class StockScheduler:
         3. Plan entries for market open
         """
         logger.info("=" * 60)
-        logger.info("PRE-MARKET PRICING SCAN - Finnhub quotes & news (9:00 AM ET)")
+        scan_label = "LATE PRE-MARKET PRICING REFRESH" if late_run else "PRE-MARKET PRICING SCAN"
+        logger.info(f"{scan_label} - Finnhub quotes & news")
         logger.info("=" * 60)
 
         start_time = datetime.now()
@@ -1012,10 +1020,36 @@ class StockScheduler:
             return {'skipped': True, 'reason': 'premarket_service not initialized'}
 
         try:
-            # Run the pre-market scan via PreMarketService
-            scan_result = await self.premarket_service.run_premarket_scan(
-                force_run=False  # Only run if actually in pre-market session
-            )
+            tickers = None
+            original_watchlist_limit = self.premarket_service.watchlist_limit
+            original_news_limit = self.premarket_service.news_limit
+
+            if late_run:
+                tickers = await self._fetch_late_premarket_tickers()
+                self.premarket_service.watchlist_limit = max(
+                    1,
+                    int(os.getenv("PREMARKET_PRICING_LATE_TICKER_LIMIT", "50"))
+                )
+                self.premarket_service.news_limit = max(
+                    0,
+                    int(os.getenv("PREMARKET_PRICING_LATE_NEWS_LIMIT", "10"))
+                )
+                logger.info(
+                    "Late PM refresh limits: tickers=%s, news=%s",
+                    len(tickers) if tickers else self.premarket_service.watchlist_limit,
+                    self.premarket_service.news_limit,
+                )
+
+            try:
+                # Run the pre-market scan via PreMarketService
+                scan_result = await self.premarket_service.run_premarket_scan(
+                    tickers=tickers,
+                    force_run=False  # Only run if actually in pre-market session
+                )
+            finally:
+                if late_run:
+                    self.premarket_service.watchlist_limit = original_watchlist_limit
+                    self.premarket_service.news_limit = original_news_limit
 
             results = {
                 'is_premarket': scan_result.is_pre_market,
@@ -1062,8 +1096,42 @@ class StockScheduler:
         elapsed = (datetime.now() - start_time).total_seconds()
         logger.info(f"\nPre-market pricing scan complete in {elapsed:.1f}s")
 
-        await self._log_pipeline_run('premarket_pricing_scan', results, elapsed)
+        await self._log_pipeline_run(
+            'premarket_pricing_late_scan' if late_run else 'premarket_pricing_scan',
+            results,
+            elapsed
+        )
         return results
+
+    async def _fetch_late_premarket_tickers(self) -> Optional[list[str]]:
+        """Fetch the exact Top 20 Day Trades tickers for the late PM refresh."""
+        url = f"{self.trading_ui_url}/api/signals/top?limit=20&mode=daytrades"
+        timeout = aiohttp.ClientTimeout(total=30)
+
+        try:
+            async with aiohttp.ClientSession(timeout=timeout) as session:
+                async with session.get(url) as response:
+                    payload = await response.json()
+                    if response.status >= 400:
+                        raise RuntimeError(f"Top day trades API returned {response.status}: {payload}")
+        except Exception as e:
+            logger.warning("Could not fetch Top 20 Day Trades for late PM refresh: %s", e)
+            return None
+
+        tickers: list[str] = []
+        seen = set()
+        for row in payload.get("rows") or []:
+            ticker = str(row.get("ticker") or "").strip().upper()
+            if ticker and ticker not in seen:
+                seen.add(ticker)
+                tickers.append(ticker)
+
+        if not tickers:
+            logger.warning("Top 20 Day Trades returned no tickers for late PM refresh")
+            return None
+
+        logger.info("Late PM refresh targeting Top 20 Day Trades tickers: %s", ", ".join(tickers))
+        return tickers
 
     async def run_intraday_scan(self):
         """
@@ -1729,6 +1797,8 @@ class StockScheduler:
                     await self.run_pre_market_scan()
                 elif next_task == "premarket_pricing":
                     await self.run_premarket_pricing_scan()
+                elif next_task == "premarket_pricing_late":
+                    await self.run_premarket_pricing_scan(late_run=True)
                 elif next_task == "intraday":
                     await self.run_intraday_scan()
                 elif next_task == "post_market":

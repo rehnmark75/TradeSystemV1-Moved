@@ -4,6 +4,9 @@ import { pool } from "../../../../lib/db";
 export const dynamic = "force-dynamic";
 
 const SYSTEM_MONITOR_URL = process.env.SYSTEM_MONITOR_URL ?? "http://system-monitor:8095";
+const ROBOMARKETS_API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com/api/v1";
+const ROBOMARKETS_API_KEY = process.env.ROBOMARKETS_API_KEY || "";
+const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 
 type SettingType = "bool" | "int" | "float";
 
@@ -79,12 +82,34 @@ const SETTING_DEFS: Record<string, {
     max: 100,
   },
   AUTO_TRADE_MIN_RELATIVE_VOLUME: {
-    label: "Min Relative Volume",
-    description: "Minimum relative volume required after validation.",
+    label: "Min Intraday RVOL",
+    description: "Optional live intraday relative volume gate. Leave at 0 because RoboMarkets quotes do not provide volume.",
     type: "float",
-    defaultValue: "1.0",
+    defaultValue: "0",
     min: 0,
     max: 20,
+  },
+  AUTO_TRADE_REQUIRE_INTRADAY_RVOL: {
+    label: "Require Intraday RVOL",
+    description: "Keep disabled unless the quote feed provides usable live volume.",
+    type: "bool",
+    defaultValue: "false",
+  },
+  AUTO_TRADE_MAX_QUOTE_AGE_MINUTES: {
+    label: "Max Quote Age",
+    description: "Reject candidates whose broker quote is older than this many minutes.",
+    type: "int",
+    defaultValue: "3",
+    min: 0,
+    max: 30,
+  },
+  AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT: {
+    label: "Pullback Limit Offset %",
+    description: "For Pullback bias, place the buy limit this percentage below the current ask.",
+    type: "float",
+    defaultValue: "0.3",
+    min: 0,
+    max: 5,
   },
   AUTO_TRADE_VALIDATE_DELAY_MINUTES: {
     label: "Validate After Open",
@@ -110,6 +135,46 @@ const SETTING_DEFS: Record<string, {
     min: 1,
     max: 180,
   },
+  AUTO_TRADE_STOP_LOSS_PCT: {
+    label: "Stop Loss Distance %",
+    description: "Final stop distance recomputed from the actual broker entry price.",
+    type: "float",
+    defaultValue: "3.0",
+    min: 0.1,
+    max: 10,
+  },
+  AUTO_TRADE_TAKE_PROFIT_PCT: {
+    label: "Take Profit Distance %",
+    description: "Final target distance recomputed from the actual broker entry price.",
+    type: "float",
+    defaultValue: "5.0",
+    min: 0.1,
+    max: 25,
+  },
+  AUTO_TRADE_MAX_STOP_DISTANCE_PCT: {
+    label: "Max Stop Distance %",
+    description: "Reject the order if the final stop is farther than this from actual entry.",
+    type: "float",
+    defaultValue: "3.0",
+    min: 0.1,
+    max: 10,
+  },
+  AUTO_TRADE_MAX_RISK_PCT: {
+    label: "Max Risk %",
+    description: "Reject the order if dollars at risk exceed this percentage of actual notional.",
+    type: "float",
+    defaultValue: "3.0",
+    min: 0.1,
+    max: 10,
+  },
+  AUTO_TRADE_MAX_RISK_USD: {
+    label: "Max Risk USD",
+    description: "Reject the order if the final stop would risk more than this dollar amount.",
+    type: "float",
+    defaultValue: "15.0",
+    min: 0.5,
+    max: 500,
+  },
 };
 
 async function ensureSettingsTable() {
@@ -123,6 +188,14 @@ async function ensureSettingsTable() {
       updated_at TIMESTAMP DEFAULT NOW()
     )
   `);
+  await pool.query(`
+    ALTER TABLE stock_auto_trade_candidates
+    ADD COLUMN IF NOT EXISTS broker_quote_age_minutes INTEGER
+  `).catch(() => null);
+  await pool.query(`
+    ALTER TABLE stock_auto_trade_candidates
+    ADD COLUMN IF NOT EXISTS intraday_relative_volume DECIMAL(12,4)
+  `).catch(() => null);
 
   for (const [key, def] of Object.entries(SETTING_DEFS)) {
     await pool.query(
@@ -196,11 +269,44 @@ async function getContainers() {
   }
 }
 
+async function fetchLiveBrokerPositionTickers(): Promise<string[]> {
+  if (!ROBOMARKETS_API_KEY || !ROBOMARKETS_ACCOUNT_ID) return [];
+
+  try {
+    const res = await fetch(`${ROBOMARKETS_API_URL}/accounts/${ROBOMARKETS_ACCOUNT_ID}/deals`, {
+      cache: "no-store",
+      signal: AbortSignal.timeout(8000),
+      headers: {
+        Authorization: `Bearer ${ROBOMARKETS_API_KEY}`,
+        Accept: "application/json",
+      },
+    });
+    if (!res.ok) {
+      console.warn("Live broker positions fetch failed", res.status);
+      return [];
+    }
+
+    const data = await res.json();
+    const deals = Array.isArray(data) ? data : (data.deals || data.data);
+    if (!Array.isArray(deals)) return [];
+
+    return Array.from(new Set(
+      deals
+        .filter((deal: Record<string, unknown>) => String(deal.status ?? "open").toLowerCase() === "open")
+        .map((deal: Record<string, unknown>) => String(deal.ticker ?? "").split(".")[0].trim().toUpperCase())
+        .filter(Boolean)
+    ));
+  } catch (error) {
+    console.warn("Live broker positions fetch failed", error);
+    return [];
+  }
+}
+
 export async function GET() {
   try {
     await ensureSettingsTable();
 
-    const [settingsResult, runResult, candidatesResult, activeResult, containers] = await Promise.all([
+    const [settingsResult, runResult, candidatesResult, activeResult, liveBrokerTickers, containers] = await Promise.all([
       pool.query(`
         SELECT key, value, value_type, label, description, updated_at
         FROM stock_auto_trade_settings
@@ -222,7 +328,9 @@ export async function GET() {
                broker_ask::float8 AS broker_ask,
                broker_last::float8 AS broker_last,
                broker_spread_pct::float8 AS broker_spread_pct,
+               broker_quote_age_minutes,
                relative_volume::float8 AS relative_volume,
+               intraday_relative_volume::float8 AS intraday_relative_volume,
                planned_entry::float8 AS planned_entry,
                planned_stop_loss::float8 AS planned_stop_loss,
                planned_take_profit::float8 AS planned_take_profit,
@@ -233,20 +341,16 @@ export async function GET() {
         LIMIT 40
       `),
       pool.query(`
-        SELECT
-          (
-            SELECT COUNT(*)
-            FROM stock_orders
-            WHERE status = 'submitted'
-              AND created_at::date = CURRENT_DATE
-          )
-          +
-          (
-            SELECT COUNT(*)
-            FROM broker_trades
-            WHERE status = 'open'
-          ) AS active_count
+        WITH active_tickers AS (
+          SELECT UPPER(split_part(ticker, '.', 1)) AS normalized_ticker
+          FROM stock_orders
+          WHERE status IN ('pending', 'submitted', 'partially_filled')
+        )
+        SELECT DISTINCT normalized_ticker
+        FROM active_tickers
+        WHERE normalized_ticker <> ''
       `),
+      fetchLiveBrokerPositionTickers(),
       getContainers(),
     ]);
 
@@ -272,7 +376,10 @@ export async function GET() {
       settings,
       latest_run: runResult.rows[0] ?? null,
       candidates: candidatesResult.rows,
-      active_count: Number(activeResult.rows[0]?.active_count ?? 0),
+      active_count: new Set([
+        ...activeResult.rows.map((row) => String(row.normalized_ticker ?? "")),
+        ...liveBrokerTickers,
+      ].filter(Boolean)).size,
       containers: containerStatus,
     });
   } catch (error) {

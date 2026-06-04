@@ -401,6 +401,11 @@ services:
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
+      - PREMARKET_PRICING_TICKER_LIMIT=100
+      - PREMARKET_PRICING_NEWS_LIMIT=25
+      - PREMARKET_PRICING_LATE_TICKER_LIMIT=50
+      - PREMARKET_PRICING_LATE_NEWS_LIMIT=10
+      - TRADING_UI_URL=http://trading-ui:3000/trading
     command: ["python", "-m", "stock_scanner.scheduler", "run"]
     networks:
       - lab-net
@@ -440,6 +445,8 @@ services:
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - TRADING_UI_URL=http://trading-ui:3000/trading
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - AUTO_TRADING_ENABLED=true
       - AUTO_TRADING_DRY_RUN=false
       - AUTO_TRADER_INTERVAL_SECONDS=60
@@ -451,7 +458,15 @@ services:
       - MAX_ORDERS_PER_RUN=5
       - AUTO_TRADE_MAX_SPREAD_PCT=0.4
       - AUTO_TRADE_MIN_SCORE=65
-      - AUTO_TRADE_MIN_RELATIVE_VOLUME=1.0
+      - AUTO_TRADE_MIN_RELATIVE_VOLUME=0
+      - AUTO_TRADE_REQUIRE_INTRADAY_RVOL=false
+      - AUTO_TRADE_MAX_QUOTE_AGE_MINUTES=3
+      - AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT=0.3
+      - AUTO_TRADE_STOP_LOSS_PCT=3.0
+      - AUTO_TRADE_TAKE_PROFIT_PCT=5.0
+      - AUTO_TRADE_MAX_STOP_DISTANCE_PCT=3.0
+      - AUTO_TRADE_MAX_RISK_PCT=3.0
+      - AUTO_TRADE_MAX_RISK_USD=15.0
     command: ["python", "-m", "stock_scanner.scheduler", "autotrader-monitor"]
     networks:
       - lab-net

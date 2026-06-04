@@ -15,6 +15,8 @@ from typing import Any, Dict, List, Optional
 
 import aiohttp
 import pytz
+from stock_scanner.core.detection.market_hours import is_trading_day
+from stock_scanner.core.trading.robomarkets_client import RoboMarketsClient
 
 logger = logging.getLogger("auto_open_trader")
 
@@ -29,15 +31,25 @@ class AutoOpenTrader:
         "MAX_ORDERS_PER_RUN": ("max_orders_per_run", "int", "5"),
         "AUTO_TRADE_MAX_SPREAD_PCT": ("max_spread_pct", "float", "0.4"),
         "AUTO_TRADE_MIN_SCORE": ("min_score", "float", "65"),
-        "AUTO_TRADE_MIN_RELATIVE_VOLUME": ("min_relative_volume", "float", "1.0"),
+        "AUTO_TRADE_MIN_RELATIVE_VOLUME": ("min_relative_volume", "float", "0"),
+        "AUTO_TRADE_REQUIRE_INTRADAY_RVOL": ("require_intraday_rvol", "bool", "false"),
+        "AUTO_TRADE_MAX_QUOTE_AGE_MINUTES": ("max_quote_age_minutes", "int", "3"),
+        "AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT": ("pullback_limit_offset_pct", "float", "0.3"),
         "AUTO_TRADE_START_DELAY_MINUTES": ("start_delay_minutes", "int", "15"),
         "AUTO_TRADE_VALIDATE_DELAY_MINUTES": ("validate_delay_minutes", "int", "5"),
         "AUTO_TRADE_STOP_AFTER_MINUTES": ("stop_after_minutes", "int", "45"),
+        "AUTO_TRADE_STOP_LOSS_PCT": ("stop_loss_pct", "float", "3.0"),
+        "AUTO_TRADE_TAKE_PROFIT_PCT": ("take_profit_pct", "float", "5.0"),
+        "AUTO_TRADE_MAX_STOP_DISTANCE_PCT": ("max_stop_distance_pct", "float", "3.0"),
+        "AUTO_TRADE_MAX_RISK_PCT": ("max_risk_pct", "float", "3.0"),
+        "AUTO_TRADE_MAX_RISK_USD": ("max_risk_usd", "float", "15.0"),
     }
 
     def __init__(self, db_manager):
         self.db = db_manager
         self.trading_ui_url = os.getenv("TRADING_UI_URL", "http://trading-ui:3000/trading").rstrip("/")
+        self.robomarkets_api_key = os.getenv("ROBOMARKETS_API_KEY", "")
+        self.robomarkets_account_id = os.getenv("ROBOMARKETS_ACCOUNT_ID", "")
         self._apply_env_settings()
 
     def _apply_env_settings(self):
@@ -79,7 +91,9 @@ class AutoOpenTrader:
                 broker_ask DECIMAL(12,4),
                 broker_last DECIMAL(12,4),
                 broker_spread_pct DECIMAL(10,4),
+                broker_quote_age_minutes INTEGER,
                 relative_volume DECIMAL(12,4),
+                intraday_relative_volume DECIMAL(12,4),
                 planned_entry DECIMAL(12,4),
                 planned_stop_loss DECIMAL(12,4),
                 planned_take_profit DECIMAL(12,4),
@@ -92,6 +106,14 @@ class AutoOpenTrader:
                 updated_at TIMESTAMP DEFAULT NOW(),
                 UNIQUE(run_id, ticker)
             )
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS broker_quote_age_minutes INTEGER
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS intraday_relative_volume DECIMAL(12,4)
         """)
         await self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_stock_auto_trade_candidates_run_status
@@ -135,6 +157,10 @@ class AutoOpenTrader:
         if not self.enabled:
             result["stage"] = "disabled"
             await self._mark_run_status(run_id, "disabled")
+            return result
+
+        if not is_trading_day(now_et):
+            result["stage"] = "market_closed_holiday"
             return result
 
         minutes_after_open = self._minutes_after_open(now_et)
@@ -224,9 +250,17 @@ class AutoOpenTrader:
             "max_spread_pct": self.max_spread_pct,
             "min_score": self.min_score,
             "min_relative_volume": self.min_relative_volume,
+            "require_intraday_rvol": self.require_intraday_rvol,
+            "max_quote_age_minutes": self.max_quote_age_minutes,
+            "pullback_limit_offset_pct": self.pullback_limit_offset_pct,
             "start_delay_minutes": self.start_delay_minutes,
             "validate_delay_minutes": self.validate_delay_minutes,
             "stop_after_minutes": self.stop_after_minutes,
+            "stop_loss_pct": self.stop_loss_pct,
+            "take_profit_pct": self.take_profit_pct,
+            "max_stop_distance_pct": self.max_stop_distance_pct,
+            "max_risk_pct": self.max_risk_pct,
+            "max_risk_usd": self.max_risk_usd,
         }
         row = await self.db.fetchrow("""
             INSERT INTO stock_auto_trade_runs (trade_date, enabled, dry_run, config)
@@ -257,9 +291,10 @@ class AutoOpenTrader:
                 INSERT INTO stock_auto_trade_candidates (
                     run_id, trade_date, rank, ticker, candidate_score, scanner_name,
                     order_bias, pm_status, pm_direction, broker_bid, broker_ask,
-                    broker_last, broker_spread_pct, relative_volume,
+                    broker_last, broker_spread_pct, broker_quote_age_minutes,
+                    relative_volume, intraday_relative_volume,
                     planned_entry, planned_stop_loss, planned_take_profit
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
                 ON CONFLICT (run_id, ticker) DO UPDATE SET
                     rank = EXCLUDED.rank,
                     candidate_score = EXCLUDED.candidate_score,
@@ -271,17 +306,34 @@ class AutoOpenTrader:
                     broker_ask = EXCLUDED.broker_ask,
                     broker_last = EXCLUDED.broker_last,
                     broker_spread_pct = EXCLUDED.broker_spread_pct,
+                    broker_quote_age_minutes = EXCLUDED.broker_quote_age_minutes,
                     relative_volume = EXCLUDED.relative_volume,
-                    planned_entry = EXCLUDED.planned_entry,
-                    planned_stop_loss = EXCLUDED.planned_stop_loss,
-                    planned_take_profit = EXCLUDED.planned_take_profit,
+                    intraday_relative_volume = EXCLUDED.intraday_relative_volume,
+                    planned_entry = CASE
+                        WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
+                        THEN stock_auto_trade_candidates.planned_entry
+                        ELSE EXCLUDED.planned_entry
+                    END,
+                    planned_stop_loss = CASE
+                        WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
+                        THEN stock_auto_trade_candidates.planned_stop_loss
+                        ELSE EXCLUDED.planned_stop_loss
+                    END,
+                    planned_take_profit = CASE
+                        WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
+                        THEN stock_auto_trade_candidates.planned_take_profit
+                        ELSE EXCLUDED.planned_take_profit
+                    END,
                     updated_at = NOW()
             """,
                 run_id, trade_date, rank, row.get("ticker"), self._num(row.get("candidate_score")),
                 row.get("scanner_name"), row.get("order_bias"), row.get("pm_status"), row.get("pm_direction"),
                 self._num(row.get("broker_bid")), self._num(row.get("broker_ask")),
                 self._num(row.get("broker_last")), self._num(row.get("broker_spread_pct")),
-                self._num(row.get("relative_volume")), self._num(row.get("pm_suggested_entry")),
+                self._int(row.get("broker_quote_age_minutes")),
+                self._num(row.get("relative_volume")),
+                self._num(row.get("intraday_relative_volume")),
+                self._num(row.get("pm_suggested_entry")),
                 self._num(row.get("pm_suggested_stop")), self._num(row.get("pm_suggested_target")),
             )
             count += 1
@@ -318,20 +370,37 @@ class AutoOpenTrader:
             ORDER BY rank
         """, run_id)
 
+        active_stock_order_tickers = await self._active_stock_order_tickers()
+        live_broker_tickers = await self._live_broker_position_tickers()
+
         for row in rows:
             if result["placed"] >= self.max_orders_per_run:
                 result["skipped"] += 1
                 continue
 
-            active_count = await self._active_order_count()
-            if active_count >= self.max_active_orders:
-                await self._update_candidate_status(row["id"], "skipped", f"Active order cap reached: {active_count}/{self.max_active_orders}")
+            existing_exposure = self._active_ticker_exposure(
+                row["ticker"],
+                active_stock_order_tickers,
+                live_broker_tickers,
+            )
+            if existing_exposure:
+                await self._update_candidate_status(
+                    row["id"],
+                    "skipped",
+                    f"Existing active exposure for {row['ticker']}: {existing_exposure}",
+                )
                 result["skipped"] += 1
                 continue
 
-            entry = self._num(row["broker_ask"]) or self._num(row["broker_last"]) or self._num(row["planned_entry"])
+            active_count = len(active_stock_order_tickers | live_broker_tickers)
+            if active_count >= self.max_active_orders:
+                await self._update_candidate_status(row["id"], "skipped", f"Active ticker cap reached: {active_count}/{self.max_active_orders}")
+                result["skipped"] += 1
+                continue
+
+            entry = self._entry_for_bias(row)
             if not entry or entry <= 0:
-                await self._update_candidate_status(row["id"], "failed", "No usable broker entry price")
+                await self._update_candidate_status(row["id"], "failed", f"No usable broker entry price for bias {row['order_bias'] or 'Watch'}")
                 result["errors"] += 1
                 continue
 
@@ -341,12 +410,17 @@ class AutoOpenTrader:
                 result["skipped"] += 1
                 continue
 
-            stop = self._num(row["planned_stop_loss"])
-            target = self._num(row["planned_take_profit"])
-            if not stop:
-                stop = round(entry * 0.97, 2)
-            if not target:
-                target = round(entry * 1.05, 2)
+            plan = self._build_order_plan(entry, quantity)
+            if plan.get("reject_reason"):
+                await self._update_candidate_status(row["id"], "rejected", plan["reject_reason"])
+                result["skipped"] += 1
+                continue
+
+            stop = plan["stop_loss"]
+            target = plan["take_profit"]
+            risk_amount = plan["risk_amount"]
+            risk_pct = plan["risk_pct"]
+            stop_distance_pct = plan["stop_distance_pct"]
 
             await self.db.execute("""
                 UPDATE stock_auto_trade_candidates
@@ -356,7 +430,7 @@ class AutoOpenTrader:
             """, row["id"], entry, stop, target, quantity)
 
             if self.dry_run:
-                await self._update_candidate_status(row["id"], "dry_run", f"Would place buy limit qty={quantity} entry={entry:.2f} SL={stop:.2f} TP={target:.2f}")
+                await self._update_candidate_status(row["id"], "dry_run", f"Would place buy limit qty={quantity} entry={entry:.2f} SL={stop:.2f} TP={target:.2f} risk=${risk_amount:.2f} ({risk_pct:.2f}%)")
                 result["placed"] += 1
                 continue
 
@@ -380,9 +454,11 @@ class AutoOpenTrader:
                     WHERE id = $1
                 """,
                     row["id"], status, json.dumps(response), response.get("robomarkets_order_id"),
-                    response.get("db_order_id"), "Order submitted by auto trader" if status == "order_submitted" else response.get("error"),
+                    self._int(response.get("db_order_id")),
+                    f"Order submitted by auto trader; risk=${risk_amount:.2f} ({risk_pct:.2f}%), stop distance={stop_distance_pct:.2f}%" if status == "order_submitted" else response.get("error"),
                 )
                 if status == "order_submitted":
+                    active_stock_order_tickers.add(str(row["ticker"]).split(".")[0].upper())
                     result["placed"] += 1
                 else:
                     result["errors"] += 1
@@ -391,6 +467,54 @@ class AutoOpenTrader:
                 result["errors"] += 1
 
         return result
+
+    def _build_order_plan(self, entry: float, quantity: int) -> Dict[str, Any]:
+        epsilon = 1e-9
+        stop_loss_pct = max(0.01, float(self.stop_loss_pct))
+        take_profit_pct = max(0.01, float(self.take_profit_pct))
+        stop = round(entry * (1 - stop_loss_pct / 100), 2)
+        target = round(entry * (1 + take_profit_pct / 100), 2)
+
+        if stop >= entry:
+            return {"reject_reason": f"Computed stop {stop:.2f} is not below entry {entry:.2f}"}
+        if target <= entry:
+            return {"reject_reason": f"Computed target {target:.2f} is not above entry {entry:.2f}"}
+
+        notional = entry * quantity
+        risk_amount = (entry - stop) * quantity
+        risk_pct = (risk_amount / notional) * 100 if notional > 0 else 0
+        stop_distance_pct = ((entry - stop) / entry) * 100
+
+        if stop_distance_pct > self.max_stop_distance_pct + epsilon:
+            return {
+                "reject_reason": (
+                    f"Stop distance {stop_distance_pct:.2f}% > max {self.max_stop_distance_pct:.2f}% "
+                    f"at entry {entry:.2f}"
+                )
+            }
+        if risk_pct > self.max_risk_pct + epsilon:
+            return {
+                "reject_reason": (
+                    f"Risk {risk_pct:.2f}% > max {self.max_risk_pct:.2f}% "
+                    f"(${risk_amount:.2f} on ${notional:.2f})"
+                )
+            }
+        if risk_amount > self.max_risk_usd + epsilon:
+            return {
+                "reject_reason": (
+                    f"Risk ${risk_amount:.2f} > max ${self.max_risk_usd:.2f} "
+                    f"({risk_pct:.2f}% on ${notional:.2f})"
+                )
+            }
+
+        return {
+            "stop_loss": stop,
+            "take_profit": target,
+            "notional": notional,
+            "risk_amount": risk_amount,
+            "risk_pct": risk_pct,
+            "stop_distance_pct": stop_distance_pct,
+        }
 
     async def _place_order_api(self, ticker: str, quantity: int, price: float, stop_loss: float, take_profit: float) -> Dict[str, Any]:
         url = f"{self.trading_ui_url}/api/orders/place"
@@ -414,23 +538,53 @@ class AutoOpenTrader:
                     data.setdefault("error", f"Order API returned {response.status}")
                 return data
 
-    async def _active_order_count(self) -> int:
-        value = await self.db.fetchval("""
-            SELECT
-              (
-                SELECT COUNT(*)
-                FROM stock_orders
-                WHERE status = 'submitted'
-                  AND created_at::date = CURRENT_DATE
-              )
-              +
-              (
-                SELECT COUNT(*)
-                FROM broker_trades
-                WHERE status = 'open'
-              )
+    async def _active_stock_order_tickers(self) -> set[str]:
+        rows = await self.db.fetch("""
+            SELECT UPPER(split_part(ticker, '.', 1)) AS normalized_ticker
+            FROM stock_orders
+            WHERE status IN ('pending', 'submitted', 'partially_filled')
         """)
-        return int(value or 0)
+        return {
+            str(row["normalized_ticker"]).strip().upper()
+            for row in rows
+            if row.get("normalized_ticker")
+        }
+
+    async def _live_broker_position_tickers(self) -> set[str]:
+        if not self.robomarkets_api_key or not self.robomarkets_account_id:
+            logger.warning("RoboMarkets credentials missing; live broker exposure check returned no positions")
+            return set()
+
+        try:
+            async with RoboMarketsClient(
+                api_key=self.robomarkets_api_key,
+                account_id=self.robomarkets_account_id,
+            ) as client:
+                positions = await client.get_positions()
+        except Exception as e:
+            logger.error("Failed to fetch live RoboMarkets positions for active cap: %s", e)
+            raise
+
+        return {
+            str(position.ticker).split(".")[0].strip().upper()
+            for position in positions
+            if getattr(position, "ticker", None)
+        }
+
+    def _active_ticker_exposure(
+        self,
+        ticker: str,
+        active_stock_order_tickers: set[str],
+        live_broker_tickers: set[str],
+    ) -> Optional[str]:
+        normalized = str(ticker or "").split(".")[0].upper()
+        if not normalized:
+            return "missing ticker"
+        if normalized in active_stock_order_tickers:
+            return "stock_order:active"
+        if normalized in live_broker_tickers:
+            return "broker_live_position:open"
+        return None
 
     def _reject_reason(self, row: Optional[Dict[str, Any]]) -> Optional[str]:
         if not row:
@@ -441,8 +595,13 @@ class AutoOpenTrader:
             return f"Premarket direction is not BUY: {row.get('pm_direction')}"
         if row.get("pm_status") in ("Stale PM", "No PM data", "PM against", "PM fading"):
             return f"Bad PM status: {row.get('pm_status')}"
-        if row.get("order_bias") in ("Avoid", "Avoid spread", "Refresh", "Wait"):
+        if row.get("order_bias") in ("Avoid", "Avoid spread", "Refresh", "Wait", "Wait pullback"):
             return f"Bad order bias: {row.get('order_bias')}"
+        quote_age = self._num(row.get("broker_quote_age_minutes"))
+        if quote_age is None:
+            return "Missing broker quote age"
+        if quote_age > self.max_quote_age_minutes:
+            return f"Broker quote age {quote_age:.0f}m > max {self.max_quote_age_minutes}m"
         spread = self._num(row.get("broker_spread_pct"))
         if spread is None:
             return "Missing broker spread"
@@ -451,13 +610,28 @@ class AutoOpenTrader:
         score = self._num(row.get("candidate_score")) or 0
         if score < self.min_score:
             return f"Score {score:.1f} < min {self.min_score:.1f}"
-        rvol = self._num(row.get("relative_volume")) or 0
-        if rvol < self.min_relative_volume:
-            return f"RVOL {rvol:.2f} < min {self.min_relative_volume:.2f}"
+        intraday_rvol = self._num(row.get("intraday_relative_volume"))
+        if intraday_rvol is None:
+            if self.require_intraday_rvol and self.min_relative_volume > 0:
+                return "Missing live intraday RVOL"
+        elif intraday_rvol < self.min_relative_volume:
+            return f"Intraday RVOL {intraday_rvol:.2f} < min {self.min_relative_volume:.2f}"
         ask = self._num(row.get("broker_ask"))
         if ask is None or ask <= 0:
             return "Missing broker ask"
         return None
+
+    def _entry_for_bias(self, row) -> Optional[float]:
+        ask = self._num(row["broker_ask"])
+        last = self._num(row["broker_last"])
+        planned = self._num(row["planned_entry"])
+        bias = row["order_bias"] or "Watch"
+
+        if bias == "Pullback" and ask:
+            return round(ask * (1 - max(0.0, self.pullback_limit_offset_pct) / 100), 2)
+        if bias == "Use PM levels" and planned and ask:
+            return round(min(planned, ask), 2)
+        return ask or last or planned
 
     async def _update_candidate_status(self, candidate_id: int, status: str, reason: str):
         await self.db.execute("""
@@ -469,14 +643,14 @@ class AutoOpenTrader:
     async def _mark_run_status(self, run_id: int, status: str):
         await self.db.execute("""
             UPDATE stock_auto_trade_runs
-            SET status = $2,
-                completed_at = CASE WHEN $2 IN ('completed', 'disabled') THEN NOW() ELSE completed_at END,
+            SET status = $2::varchar,
+                completed_at = CASE WHEN $2::varchar IN ('completed', 'disabled') THEN NOW() ELSE completed_at END,
                 updated_at = NOW()
             WHERE id = $1
         """, run_id, status)
 
     def _minutes_after_open(self, now_et: datetime) -> Optional[int]:
-        if now_et.weekday() >= 5:
+        if not is_trading_day(now_et):
             return None
         market_open = self.ET.localize(datetime.combine(now_et.date(), time(9, 30)))
         delta = now_et - market_open
@@ -487,5 +661,13 @@ class AutoOpenTrader:
             return None
         try:
             return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    def _int(self, value) -> Optional[int]:
+        if value is None:
+            return None
+        try:
+            return int(float(value))
         except (TypeError, ValueError):
             return None
