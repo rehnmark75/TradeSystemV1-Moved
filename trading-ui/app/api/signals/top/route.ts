@@ -23,9 +23,16 @@ const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 // + rs_trend: improving +5 / stable 0 / deteriorating -15   (user prefers RISING RS)
 // - risk penalties: earnings<=7d (-15), high short interest (-10), RSI>80 overbought (-10)
 //
-// Day-trade score:
-//   emphasizes tradability today: relative volume, catalyst/news/DAQ context,
-//   sector/regime alignment, setup quality, execution quality, and extension risk.
+// Day-trade score (0-100 core, bounded sub-scores so each weight == its max
+// influence): 0.28 RS + 0.24 RVOL (live intraday when a broker quote is
+// available) + 0.14 TV consensus + 0.12 live news + 0.12 premarket conviction
+// + 0.10 entry-not-extended (price vs EMA20 measured in ATR units). Plus
+// rising-RS, premarket-gap, overbought and days-to-earnings adjustments.
+// Dead/missing DAQ terms removed: sector & regime scores are stuck on their
+// no-SPY/no-ETF-candle fallbacks (50/60), catalyst is pinned ~100, and
+// financial quality is a swing factor irrelevant to a one-day move.
+// A binary tradability gate (current-session premarket BUY + acceptable spread
+// vs expected range) ranks ABOVE score; non-tradable rows sink and are dimmed.
 //
 // The row projection MIRRORS /api/signals/results so the signals-page detail
 // panel can render an expanded Top-10 row with full field parity.
@@ -122,29 +129,33 @@ export async function GET(request: Request) {
     const scoreExpression =
       mode === "daytrades"
         ? `
-              0.20 * COALESCE(rs_percentile, 0)
-            + 0.20 * LEAST(COALESCE(relative_volume, 0) * 25, 100)
-            + 0.20 * (
-                0.55 * COALESCE(daq_catalyst_score, 0)
-              + 0.45 * COALESCE(daq_news_score, 0)
-              )
-            + 0.10 * (
+              -- Bounded 0-100 sub-scores; core weights sum to 1.0 so each weight
+              -- equals that factor's maximum influence. Absolute (not batch-
+              -- relative) scales on purpose: a day trade needs RVOL/leadership to
+              -- be high outright, not merely high relative to a weak batch.
+              0.28 * COALESCE(rs_percentile, 0)
+            + 0.24 * LEAST(COALESCE(relative_volume, 0) / 3.0 * 100, 100)
+            + 0.14 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
+            + 0.12 * COALESCE(daq_news_score, 50)
+            + 0.12 * (
                 CASE
-                  WHEN pm_generated_at IS NULL THEN 0
-                  WHEN pm_is_current_session THEN COALESCE(pm_confidence, 0) * 100
-                  ELSE 0
+                  WHEN pm_is_current_session AND pm_direction = 'BUY'
+                    THEN COALESCE(pm_confidence, 0) * 100
+                  ELSE 50
                 END
               )
-            + 0.15 * (
-                0.50 * COALESCE(daq_sector_score, 50)
-              + 0.50 * COALESCE(daq_regime_score, 50)
-              )
             + 0.10 * (
-                0.45 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
-              + 0.35 * COALESCE(daq_quality_score, 50)
-              + 0.20 * COALESCE(mtf_score, 50)
+                -- entry-not-extended: 100 at/below EMA20, decaying ~20pts per ATR
+                -- above it (a proxy for VWAP/extension; true intraday VWAP is not
+                -- stored). Neutral 60 when ATR/EMA unavailable.
+                CASE
+                  WHEN atr_14 IS NULL OR atr_14 <= 0 OR atr_14 = 'NaN'
+                    OR entry_price IS NULL OR entry_price = 'NaN'
+                    OR ema_20 IS NULL OR ema_20 = 'NaN'
+                  THEN 60
+                  ELSE GREATEST(0, 100 - 20 * GREATEST((entry_price - ema_20) / atr_14, 0))
+                END
               )
-            + 0.05 * COALESCE(daq_volume_score, 50)
             + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -12 ELSE 0 END)
             + (CASE
                 WHEN pm_is_current_session AND pm_direction = 'BUY' AND pm_gap_percent BETWEEN 1 AND 8 THEN 6
@@ -152,15 +163,14 @@ export async function GET(request: Request) {
                 WHEN pm_is_current_session AND pm_direction = 'SELL' THEN -10
                 ELSE 0
               END)
-            - (CASE WHEN COALESCE(relative_volume, 0) < 1 THEN 10 ELSE 0 END)
             - (CASE WHEN rsi_14 > 80 THEN 12 WHEN rsi_14 > 75 THEN 6 ELSE 0 END)
             - (CASE WHEN high_short_interest THEN 8 ELSE 0 END)
-            - (CASE WHEN sector_underperforming THEN 8 ELSE 0 END)
             - (CASE
-                WHEN earnings_within_7d
-                  AND COALESCE(daq_catalyst_score, 0) < 50
-                  AND COALESCE(daq_news_score, 0) < 50
-                THEN 12
+                -- Real earnings guard on the 98%-populated days_to_earnings, not
+                -- the unreachable catalyst<50 gate of the old formula.
+                WHEN days_to_earnings <= 1 THEN 18
+                WHEN days_to_earnings <= 3 THEN 12
+                WHEN days_to_earnings <= 7 THEN 6
                 ELSE 0
               END)
         `
@@ -168,7 +178,12 @@ export async function GET(request: Request) {
               0.55 * COALESCE(rs_percentile, 0)
             + 0.45 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
             + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -15 ELSE 0 END)
-            - (CASE WHEN earnings_within_7d THEN 15 ELSE 0 END)
+            - (CASE
+                WHEN days_to_earnings <= 1 THEN 18
+                WHEN days_to_earnings <= 3 THEN 15
+                WHEN days_to_earnings <= 7 THEN 8
+                ELSE 0
+              END)
             - (CASE WHEN high_short_interest THEN 10 ELSE 0 END)
             - (CASE WHEN rsi_14 > 80 THEN 10 ELSE 0 END)
         `;
@@ -466,6 +481,7 @@ export async function GET(request: Request) {
       queryLimit,
       EDGE_NO_LOSS_PF_CAP,
     ]);
+    let daytradeTradableCount: number | null = null;
     const rows =
       mode === "daytrades"
         ? await (async () => {
@@ -493,12 +509,13 @@ export async function GET(request: Request) {
                 setupEntry > 0 &&
                 quotePrice >= setupEntry * 0.995;
               const priorRvol = Number(row.relative_volume ?? 0);
-              const oldRvolTerm =
-                0.20 * Math.min(priorRvol * 25, 100) - (priorRvol < 1 ? 10 : 0);
+              // Mirror the SQL 0.24 * LEAST(rvol/3*100, 100) term so we can swap
+              // prior-session RVOL for live intraday RVOL without re-querying.
+              const oldRvolTerm = 0.24 * Math.min((priorRvol / 3) * 100, 100);
               const liveRvolTerm =
                 intradayRelativeVolume == null
                   ? oldRvolTerm
-                  : 0.20 * Math.min(intradayRelativeVolume * 25, 100) - (intradayRelativeVolume < 1 ? 10 : 0);
+                  : 0.24 * Math.min((intradayRelativeVolume / 3) * 100, 100);
               const spreadScore =
                 spreadPct == null ? 0 :
                 spreadPct <= 0.25 ? 4 :
@@ -517,24 +534,58 @@ export async function GET(request: Request) {
                 0;
               const quantityUnderCap = ask > 0 ? Math.floor(500 / ask) : 0;
               const sizeFitScore = quantityUnderCap >= 2 ? 2 : quantityUnderCap >= 1 ? 1 : 0;
+              // #6 room-to-target vs spread: a wide spread relative to the
+              // expected move makes a name un-day-tradable regardless of setup.
+              // Room = premarket target distance when available, else daily ATR%.
+              const pmTarget = Number(row.pm_suggested_target ?? 0);
+              const refEntry = pmSuggestedEntry > 0 ? pmSuggestedEntry : ask > 0 ? ask : setupEntry;
+              const atrPct = Number(row.atr_percent ?? 0);
+              const roomPct =
+                pmTarget > 0 && refEntry > 0 && pmTarget > refEntry
+                  ? ((pmTarget - refEntry) / refEntry) * 100
+                  : atrPct > 0
+                    ? atrPct
+                    : null;
+              const spreadToRoom =
+                spreadPct != null && roomPct != null && roomPct > 0 ? spreadPct / roomPct : null;
+              const roomScore =
+                spreadToRoom == null ? 0 : spreadToRoom <= 0.05 ? 2 : spreadToRoom <= 0.1 ? 1 : 0;
               const executionQualityScore =
-                spreadScore + quoteFreshnessScore + entryDisciplineScore + sizeFitScore;
+                spreadScore + quoteFreshnessScore + entryDisciplineScore + sizeFitScore + roomScore;
               let orderBias =
-                spreadPct != null && spreadPct > 1
-                  ? "Avoid spread"
-                  : spreadPct != null && spreadPct > 0.4 && row.order_bias !== "Avoid"
-                    ? "Small only"
-                    : row.order_bias;
+                spreadToRoom != null && spreadToRoom > 0.25
+                  ? "Spread eats range"
+                  : spreadPct != null && spreadPct > 1
+                    ? "Avoid spread"
+                    : spreadPct != null && spreadPct > 0.4 && row.order_bias !== "Avoid"
+                      ? "Small only"
+                      : row.order_bias;
               if (openConfirmed && orderBias === "Wait") {
                 orderBias = row.high_short_interest || row.sector_underperforming ? "Small only" : "Watch";
               }
               if (orderBias === "Pullback" && intradayRelativeVolume != null && intradayRelativeVolume < 1.2) {
                 orderBias = "Watch";
               }
+              // Tradability gate (the de-facto top-of-list ordering): a row is
+              // tradable only if premarket confirms a current-session BUY and the
+              // order bias is actionable. Surfaced per-row so the UI can show why.
+              const finalPmStatus = openConfirmed ? "Open confirmed" : row.pm_status;
+              const hardPmReject = ["Stale PM", "No PM data", "PM against", "PM fading"].includes(
+                String(finalPmStatus ?? "")
+              );
+              const hardBiasReject = [
+                "Avoid",
+                "Avoid spread",
+                "Spread eats range",
+                "Refresh",
+                "Wait",
+                "Wait pullback",
+              ].includes(orderBias);
+              const tradable = !(hardPmReject || hardBiasReject);
               return {
                 ...row,
                 ...quote,
-                pm_status: openConfirmed ? "Open confirmed" : row.pm_status,
+                pm_status: finalPmStatus,
                 broker_quote_age_minutes: quoteAgeMinutes,
                 intraday_relative_volume: intradayRelativeVolume,
                 relative_volume_source: "prior_session_daily",
@@ -545,21 +596,19 @@ export async function GET(request: Request) {
                   quote_age: quoteFreshnessScore,
                   entry: entryDisciplineScore,
                   size: sizeFitScore,
+                  room: roomScore,
                 },
+                spread_to_room: spreadToRoom == null ? null : Number(spreadToRoom.toFixed(3)),
                 candidate_score: Number((Number(row.candidate_score ?? 0) - oldRvolTerm + liveRvolTerm + executionQualityScore).toFixed(1)),
                 order_bias: orderBias,
+                tradable,
+                gate_reason: tradable ? "Tradable" : hardPmReject ? String(finalPmStatus) : orderBias,
               };
             });
+            daytradeTradableCount = enrichedRows.filter((row) => row.tradable).length;
             return enrichedRows
               .sort((a, b) => {
-                const tradableStatus = (row: typeof enrichedRows[number]) => {
-                  const pmStatus = String(row.pm_status ?? "");
-                  const orderBias = String(row.order_bias ?? "");
-                  const hardPmReject = ["Stale PM", "No PM data", "PM against", "PM fading"].includes(pmStatus);
-                  const hardBiasReject = ["Avoid", "Avoid spread", "Refresh", "Wait", "Wait pullback"].includes(orderBias);
-                  return hardPmReject || hardBiasReject ? 0 : 1;
-                };
-                const tradableDelta = tradableStatus(b) - tradableStatus(a);
+                const tradableDelta = (b.tradable ? 1 : 0) - (a.tradable ? 1 : 0);
                 if (tradableDelta !== 0) return tradableDelta;
                 const scoreDelta = Number(b.candidate_score ?? 0) - Number(a.candidate_score ?? 0);
                 if (scoreDelta !== 0) return scoreDelta;
@@ -580,8 +629,13 @@ export async function GET(request: Request) {
         edge_min_closed: EDGE_MIN_CLOSED,
         edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
         max_per_scanner: maxPerScanner,
+        daytrade_pool_size: mode === "daytrades" ? result.rows.length : null,
+        daytrade_tradable_count: daytradeTradableCount,
         daytrade_rvol_source: mode === "daytrades" ? "broker_quote_volume_vs_avg_20d_when_available" : null,
-        daytrade_execution_quality: mode === "daytrades" ? "0-10 live score: spread 4, quote age 2, entry discipline 2, size fit 2" : null,
+        daytrade_execution_quality:
+          mode === "daytrades"
+            ? "0-12 live score: spread 4, quote age 2, entry discipline 2, size fit 2, room-vs-spread 2"
+            : null,
       },
     });
   } catch (error) {

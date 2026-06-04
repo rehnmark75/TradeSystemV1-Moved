@@ -172,7 +172,13 @@ type TopCandidate = SignalRow & {
     quote_age?: number;
     entry?: number;
     size?: number;
+    room?: number;
   } | null;
+  spread_to_room?: number | null;
+  intraday_relative_volume?: number | null;
+  days_to_earnings?: number | string | null;
+  tradable?: boolean;
+  gate_reason?: string | null;
 };
 
 type TopMeta = {
@@ -181,6 +187,8 @@ type TopMeta = {
   edge_window_days: number;
   edge_pf_floor: number;
   max_per_scanner: number;
+  daytrade_pool_size?: number | null;
+  daytrade_tradable_count?: number | null;
 };
 
 const numberOrNull = (value: unknown) => {
@@ -1280,8 +1288,11 @@ export default function SignalsPage() {
             <div className="footer-note" style={{ marginBottom: 10 }}>
               {viewMode === "daytrades" ? "Top 20 day trades" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
               {viewMode === "daytrades"
-                ? " Score weights relative volume, catalyst/news, premarket confirmation, sector/regime alignment, setup quality, scanner edge, spread, and extension risk."
+                ? " Score (0–100) = 0.28×RS + 0.24×RVOL (live intraday when quoted) + 0.14×TV + 0.12×live news + 0.12×premarket conviction + 0.10×entry-not-extended, ± rising-RS / gap / overbought / days-to-earnings. A binary tradability gate (current-session premarket BUY + acceptable spread vs expected range) ranks above score — non-tradable rows are dimmed."
                 : " Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties."}
+              {viewMode === "daytrades" && topMeta?.daytrade_tradable_count != null
+                ? ` ${topMeta.daytrade_tradable_count} of the top ${topMeta.daytrade_pool_size ?? "?"} candidates are tradable right now.`
+                : ""}
               {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; scanner PF is shown so marginal scanners stay visible.
             </div>
             {topLoading ? (
@@ -1311,7 +1322,7 @@ export default function SignalsPage() {
                 <tbody>
                   {topCandidates.map((c) => (
                     <Fragment key={c.id}>
-                      <tr onClick={() => toggleExpand(c)} style={{ cursor: "pointer", borderBottom: "1px solid #16223a" }}>
+                      <tr onClick={() => toggleExpand(c)} style={{ cursor: "pointer", borderBottom: "1px solid #16223a", opacity: viewMode === "daytrades" && c.tradable === false ? 0.5 : 1 }}>
                         <td style={top10Cell}>{expanded[c.id] ? "▾" : "▸"}</td>
                         <td style={top10Cell}><strong>{c.rank}</strong></td>
                         <td style={top10Cell}>
@@ -1326,7 +1337,14 @@ export default function SignalsPage() {
                         <td style={top10Cell}>{c.rs_percentile ?? "-"}</td>
                         {viewMode === "daytrades" ? (
                           <>
-                            <td style={top10Cell}>{c.relative_volume != null ? `${Number(c.relative_volume).toFixed(1)}x` : "-"}</td>
+                            <td style={top10Cell}>
+                              {c.intraday_relative_volume != null ? (
+                                <>
+                                  <strong>{Number(c.intraday_relative_volume).toFixed(1)}x</strong>
+                                  <div style={{ fontSize: 11, opacity: 0.55 }}>live</div>
+                                </>
+                              ) : c.relative_volume != null ? `${Number(c.relative_volume).toFixed(1)}x` : "-"}
+                            </td>
                             <td style={top10Cell}>
                               <span className={`pill ${
                                 c.pm_status === "PM confirmed" || c.pm_status === "Open confirmed" ? "good" :
@@ -1353,10 +1371,10 @@ export default function SignalsPage() {
                               {c.pm_suggested_entry != null ? <div style={{ fontSize: 11, opacity: 0.55 }}>Lmt {formatValue(c.pm_suggested_entry)}</div> : null}
                             </td>
                             <td style={top10Cell}>
-                              {c.execution_quality_score != null ? `${Number(c.execution_quality_score).toFixed(0)}/10` : "-"}
+                              {c.execution_quality_score != null ? `${Number(c.execution_quality_score).toFixed(0)}/12` : "-"}
                               {c.execution_quality_parts ? (
                                 <div style={{ fontSize: 11, opacity: 0.55 }}>
-                                  S{c.execution_quality_parts.spread ?? 0} Q{c.execution_quality_parts.quote_age ?? 0} E{c.execution_quality_parts.entry ?? 0} Z{c.execution_quality_parts.size ?? 0}
+                                  S{c.execution_quality_parts.spread ?? 0} Q{c.execution_quality_parts.quote_age ?? 0} E{c.execution_quality_parts.entry ?? 0} Z{c.execution_quality_parts.size ?? 0} R{c.execution_quality_parts.room ?? 0}
                                 </div>
                               ) : null}
                             </td>
@@ -1376,9 +1394,12 @@ export default function SignalsPage() {
                           <span style={{ fontSize: 11, opacity: 0.55 }}> (n={c.scanner_closed_n ?? 0})</span>
                         </td>
                         <td style={top10Cell}>
-                          {c.earnings_within_7d ? <span className="pill bad">ER</span> : null}
+                          {viewMode === "daytrades" && c.tradable === false ? <span className="pill bad" title="Filtered by the tradability gate">{c.gate_reason ?? "Not tradable"}</span> : null}
+                          {viewMode === "daytrades" && c.tradable === true ? <span className="pill good">Tradable</span> : null}
+                          {numberOrNull(c.days_to_earnings) != null && Number(c.days_to_earnings) <= 7
+                            ? <span className="pill bad">ER {Number(c.days_to_earnings)}d</span>
+                            : c.earnings_within_7d ? <span className="pill bad">ER</span> : null}
                           {c.high_short_interest ? <span className="pill warn">SI</span> : null}
-                          {c.sector_underperforming ? <span className="pill warn">Sector</span> : null}
                           {(Number(c.rsi_14) || 0) > 80 ? <span className="pill warn">OB</span> : null}
                           {viewMode === "daytrades" && (Number(c.relative_volume) || 0) < 1 ? <span className="pill warn">Low prior RVOL</span> : null}
                           {viewMode === "daytrades" && c.pm_is_current_session === false ? <span className="pill bad">Stale PM</span> : null}
@@ -1387,7 +1408,7 @@ export default function SignalsPage() {
                       </tr>
                       {expanded[c.id] ? (
                         <tr>
-                          <td colSpan={viewMode === "daytrades" ? 13 : 10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
+                          <td colSpan={viewMode === "daytrades" ? 14 : 10} style={{ padding: 0 }}>{renderSignalDetail(c)}</td>
                         </tr>
                       ) : null}
                     </Fragment>
