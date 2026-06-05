@@ -474,6 +474,30 @@ services:
       - postgres
       - trading-ui
 
+  stock-intraday-vwap:
+    build:
+      context: ./stock-scanner
+      dockerfile: Dockerfile
+    container_name: stock-intraday-vwap
+    restart: unless-stopped
+    volumes:
+      - ./stock-scanner/app:/app
+      - ./logs/stock-scanner:/app/stock_scanner/logs
+    environment:
+      - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
+      - TRADING_UI_URL=http://trading-ui:3000/trading
+      - INTRADAY_VWAP_ENABLED=true
+      - INTRADAY_VWAP_POOL_LIMIT=50
+      - INTRADAY_VWAP_START_BEFORE_OPEN_MIN=5
+      - INTRADAY_VWAP_STOP_AFTER_OPEN_MIN=60
+      - INTRADAY_VWAP_INTERVAL_SECONDS=150
+    command: ["python", "-m", "stock_scanner.scheduler", "intraday-vwap"]
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+      - trading-ui
+
   economic-calendar:
     build:
       context: ./economic-calendar

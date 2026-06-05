@@ -38,13 +38,15 @@ const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 // Dead/missing DAQ terms stay removed (sector/regime stuck on fallbacks,
 // catalyst pinned ~100, financial quality is a swing factor).
 //
-// Live enrichment (SPARSE, additive-only): ~48 tickers stream live 1h candles
-// intraday; for those we compute a time-of-day-matched intraday RVOL pace and a
-// session VWAP from 1h volume and fold them in as a bounded BONUS (never the
-// core term -- mixing live mid-session RVOL with others' prior-session RVOL
-// would be apples-to-oranges). VWAP position feeds that bonus (holding above
-// VWAP = full bonus, below = halved); the EMA20 extension term is unchanged.
-// The broker quote API carries no volume, so live RVOL comes from candles.
+// Live enrichment (additive-only): the stock-scanner intraday-vwap worker pulls
+// batched 5m bars from yfinance for this candidate pool during the open window
+// and writes derived scalars (session VWAP, cumulative volume, intraday RVOL
+// pace) to stock_intraday_state. For covered names we fold those in as a bounded
+// BONUS (never the core term -- mixing live mid-session RVOL with others'
+// prior-session RVOL would be apples-to-oranges). VWAP position feeds that bonus
+// (holding above VWAP = full bonus, below = halved); the EMA20 extension term is
+// unchanged. The broker quote API carries no volume, so live RVOL comes from the
+// 5m worker, not the quote.
 //
 // Tradability gate (ranks ABOVE score; non-tradable rows sink and are dimmed):
 // a current-session premarket BUY + acceptable spread/room. SECOND path: a name
@@ -142,12 +144,15 @@ type IntradayCandleStat = {
   candle_session: string | null;
 };
 
-// Live intraday enrichment for the (sparse, ~48-ticker) set that streams 1h
-// candles during the session. RVOL pace is time-of-day-matched (cumulative
-// session volume through hour N vs the 20-day average through the SAME hours)
-// so it reads ~1.0 at a normal pace instead of low-until-late. Only tickers
-// with bars in the freshest session are returned; everyone else falls back to
-// prior-session daily RVOL.
+// Live intraday enrichment, sourced from stock_intraday_state -- a small
+// derived-scalar table written by the stock-scanner intraday-vwap worker, which
+// pulls batched 5m bars from yfinance for the day-trade candidate pool only,
+// during the open window (~9:25-10:30 ET). session_vwap is a real sub-hourly
+// VWAP (not a single 1h bar) and intraday_rvol_pace is today's cumulative volume
+// vs a time-of-day-adjusted daily baseline. Scoped to TODAY's ET session: before
+// the worker runs (or off-session) there are no rows, so callers cleanly fall
+// back to prior-session daily RVOL with no live bonus. (yfinance intraday is
+// ~15 min delayed, so treat this as a surge/in-play read, not tick-precise.)
 const fetchIntradayCandleStats = async (
   client: { query: (text: string, params: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
   tickers: string[]
@@ -156,34 +161,21 @@ const fetchIntradayCandleStats = async (
   try {
     const { rows } = await client.query(
       `
-      WITH ref AS (SELECT max(timestamp::date) AS d FROM stock_candles WHERE timeframe = '1h'),
-      today AS (
-        SELECT c.ticker,
-               sum(c.volume) AS today_vol,
-               array_agg(DISTINCT extract(hour from c.timestamp)::int) AS hrs,
-               count(*)::int AS bars_today,
-               round(sum(((c.high + c.low + c.close) / 3.0) * c.volume) / NULLIF(sum(c.volume), 0), 4) AS session_vwap,
-               (array_agg(c.close ORDER BY c.timestamp DESC))[1] AS last_close
-        FROM stock_candles c, ref
-        WHERE c.timeframe = '1h' AND c.timestamp::date = ref.d AND c.ticker = ANY($1)
-        GROUP BY c.ticker
-      )
-      SELECT t.ticker, t.bars_today, t.session_vwap, t.last_close,
-             (SELECT d FROM ref)::text AS candle_session,
-             round(t.today_vol::numeric / NULLIF(b.base_vol, 0), 2) AS intraday_rvol_pace
-      FROM today t
-      JOIN LATERAL (
-        SELECT avg(sess_vol) AS base_vol FROM (
-          SELECT c2.timestamp::date AS d, sum(c2.volume) AS sess_vol
-          FROM stock_candles c2, ref
-          WHERE c2.ticker = t.ticker AND c2.timeframe = '1h'
-            AND c2.timestamp::date < ref.d
-            AND extract(hour from c2.timestamp)::int = ANY(t.hrs)
-          GROUP BY c2.timestamp::date
-          ORDER BY c2.timestamp::date DESC
-          LIMIT 20
-        ) s
-      ) b ON TRUE
+      SELECT ticker,
+             intraday_rvol_pace,
+             session_vwap,
+             last_price AS last_close,
+             bars_today,
+             trade_date::text AS candle_session
+      FROM stock_intraday_state
+      WHERE ticker = ANY($1)
+        AND trade_date = (NOW() AT TIME ZONE 'America/New_York')::date
+        -- Freshness guard: if the worker dies mid-session its rows freeze. The
+        -- worker refreshes every ~150s, so anything older than 20 min means the
+        -- live feed is down -> drop it and fall back to prior-session daily
+        -- rather than serve a stale VWAP as "live" (matters once this feeds a
+        -- hard gate, not just the bonus).
+        AND as_of > NOW() - INTERVAL '20 minutes'
       `,
       [tickers]
     );
@@ -768,7 +760,7 @@ export async function GET(request: Request) {
                 live_confirmation_bonus: liveConfirmationBonus,
                 relative_volume_source: "prior_session_daily",
                 intraday_relative_volume_source:
-                  intradayRelativeVolume == null ? null : "intraday_1h_candle_pace_vs_20d_same_hours",
+                  intradayRelativeVolume == null ? null : "intraday_5m_cum_vol_vs_tod_adjusted_daily_baseline",
                 execution_quality_score: executionQualityScore,
                 execution_quality_parts: {
                   spread: spreadScore,
@@ -825,7 +817,7 @@ export async function GET(request: Request) {
         daytrade_live_candle_count: daytradeLiveCandleCount,
         daytrade_rvol_source:
           mode === "daytrades"
-            ? "intraday_1h_candle_pace_when_streaming_else_prior_session_daily"
+            ? "intraday_5m_state_when_present_else_prior_session_daily"
             : null,
         daytrade_execution_quality:
           mode === "daytrades"

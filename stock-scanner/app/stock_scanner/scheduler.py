@@ -132,6 +132,14 @@ except ImportError:
     AUTO_OPEN_TRADER_AVAILABLE = False
     AutoOpenTrader = None
 
+# Import intraday VWAP/RVOL sync worker
+try:
+    from stock_scanner.services.intraday_vwap_sync import IntradayVwapSync
+    INTRADAY_VWAP_AVAILABLE = True
+except ImportError:
+    INTRADAY_VWAP_AVAILABLE = False
+    IntradayVwapSync = None
+
 # Import watchlist backtest service
 try:
     from stock_scanner.services.watchlist_backtest_service import WatchlistBacktestService
@@ -1482,6 +1490,24 @@ class StockScheduler:
         finally:
             await self.cleanup()
 
+    async def run_intraday_vwap_loop(self):
+        """Run the intraday VWAP/RVOL sync worker (open-window only)."""
+        if not INTRADAY_VWAP_AVAILABLE:
+            logger.warning("[SKIP] Intraday VWAP sync not available - missing dependencies")
+            return
+
+        await self.setup()
+        self.running = True
+        logger.info("Intraday VWAP sync loop starting")
+
+        try:
+            worker = IntradayVwapSync(db_manager=self.db)
+            await worker.run_loop()
+        except asyncio.CancelledError:
+            logger.info("Intraday VWAP sync loop cancelled")
+        finally:
+            await self.cleanup()
+
     async def weekly_sync(self):
         """Run weekly instrument sync from RoboMarkets + fundamentals update"""
         logger.info("=" * 60)
@@ -1920,7 +1946,7 @@ def main():
 
     parser = argparse.ArgumentParser(description='Enhanced Stock Scanner Scheduler')
     parser.add_argument('command', nargs='?', default='run',
-                       choices=['run', 'breakeven-monitor', 'autotrader-monitor', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
+                       choices=['run', 'breakeven-monitor', 'autotrader-monitor', 'intraday-vwap', 'pipeline', 'sync', 'synthesize', 'metrics', 'rs', 'sector_rs', 'market_regime', 'smc',
                                'watchlist', 'signals', 'scanners', 'premarket', 'premarketpricing', 'recommendations',
                                'intraday', 'postmarket', 'weekly', 'fundamentals', 'brokersync',
                                'guardian', 'breakeven', 'autotrader', 'techwldaq', 'watchlist_backtest', 'status'],
@@ -1962,6 +1988,18 @@ def main():
 
         try:
             asyncio.run(scheduler.run_auto_open_trader_loop())
+        except KeyboardInterrupt:
+            print("\nShutdown requested...")
+            scheduler.stop()
+
+    elif args.command == 'intraday-vwap':
+        print("Starting Intraday VWAP/RVOL Sync...")
+        print("Press Ctrl+C to stop")
+
+        scheduler = StockScheduler()
+
+        try:
+            asyncio.run(scheduler.run_intraday_vwap_loop())
         except KeyboardInterrupt:
             print("\nShutdown requested...")
             scheduler.stop()
