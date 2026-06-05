@@ -589,6 +589,14 @@ class AutoOpenTrader:
     def _reject_reason(self, row: Optional[Dict[str, Any]]) -> Optional[str]:
         if not row:
             return "Missing from refreshed Top 20 Day Trades"
+        # The route's daytrades tradability gate is authoritative for "not
+        # tradable" -- honor it as a veto so we never place an order the picker
+        # already rejected (e.g. "Spread eats range", or any future order_bias /
+        # gate the route adds without this list being updated). Our own STRICTER
+        # checks still run below, so a live-in-play rescue with no premarket read
+        # is still rejected on pm_status -- the auto trader stays conservative.
+        if row.get("tradable") is False:
+            return f"Route gate not tradable: {row.get('gate_reason') or 'rejected'}"
         if row.get("signal_type") and row.get("signal_type") != "BUY":
             return f"Signal is not BUY: {row.get('signal_type')}"
         if row.get("pm_direction") and row.get("pm_direction") != "BUY":
