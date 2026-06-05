@@ -50,6 +50,14 @@ type SignalRow = {
   swing_high_date: string | null;
   swing_low_date: string | null;
   relative_volume: number | null;
+  avg_dollar_volume?: number | null;
+  daily_range_percent?: number | null;
+  current_volume?: number | null;
+  percentile_volume?: number | null;
+  price_change_5d?: number | null;
+  pct_from_52w_high?: number | null;
+  shares_float?: number | null;
+  short_percent_float?: number | null;
   tv_osc_buy: number | null;
   tv_osc_sell: number | null;
   tv_osc_neutral: number | null;
@@ -176,6 +184,10 @@ type TopCandidate = SignalRow & {
   } | null;
   spread_to_room?: number | null;
   intraday_relative_volume?: number | null;
+  live_intraday_rvol?: number | null;
+  session_vwap?: number | null;
+  vwap_position?: "above" | "below" | null;
+  live_confirmation_bonus?: number | null;
   days_to_earnings?: number | string | null;
   tradable?: boolean;
   gate_reason?: string | null;
@@ -189,6 +201,7 @@ type TopMeta = {
   max_per_scanner: number;
   daytrade_pool_size?: number | null;
   daytrade_tradable_count?: number | null;
+  daytrade_live_candle_count?: number | null;
 };
 
 const numberOrNull = (value: unknown) => {
@@ -1288,10 +1301,12 @@ export default function SignalsPage() {
             <div className="footer-note" style={{ marginBottom: 10 }}>
               {viewMode === "daytrades" ? "Top 20 day trades" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
               {viewMode === "daytrades"
-                ? " Score (0–100) = 0.28×RS + 0.24×RVOL (live intraday when quoted) + 0.14×TV + 0.12×live news + 0.12×premarket conviction + 0.10×entry-not-extended, ± rising-RS / gap / overbought / days-to-earnings. A binary tradability gate (current-session premarket BUY + acceptable spread vs expected range) ranks above score — non-tradable rows are dimmed."
+                ? " Score (0–100) leads with activity: 0.30×RVOL + 0.14×range + 0.16×RS + 0.12×TV + 0.12×premarket conviction + 0.08×live news + 0.08×entry-not-extended, ± rising-RS / gap / overbought / liquidity / low-float / squeeze / earnings. Names streaming live 1h candles also earn a bonus for intraday RVOL pace + holding above session VWAP. A tradability gate (current-session premarket BUY, or live-volume confirmation, + acceptable spread) ranks above score — non-tradable rows are dimmed."
                 : " Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties."}
               {viewMode === "daytrades" && topMeta?.daytrade_tradable_count != null
-                ? ` ${topMeta.daytrade_tradable_count} of the top ${topMeta.daytrade_pool_size ?? "?"} candidates are tradable right now.`
+                ? ` ${topMeta.daytrade_tradable_count} of the top ${topMeta.daytrade_pool_size ?? "?"} candidates are tradable right now${
+                    topMeta?.daytrade_live_candle_count != null ? ` (${topMeta.daytrade_live_candle_count} streaming live 1h candles)` : ""
+                  }.`
                 : ""}
               {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; scanner PF is shown so marginal scanners stay visible.
             </div>
@@ -1341,9 +1356,16 @@ export default function SignalsPage() {
                               {c.intraday_relative_volume != null ? (
                                 <>
                                   <strong>{Number(c.intraday_relative_volume).toFixed(1)}x</strong>
-                                  <div style={{ fontSize: 11, opacity: 0.55 }}>live</div>
+                                  <div style={{ fontSize: 11, opacity: 0.55 }}>
+                                    live pace{c.vwap_position ? ` · ${c.vwap_position === "above" ? "↑VWAP" : "↓VWAP"}` : ""}
+                                  </div>
                                 </>
-                              ) : c.relative_volume != null ? `${Number(c.relative_volume).toFixed(1)}x` : "-"}
+                              ) : c.relative_volume != null ? (
+                                <>
+                                  {`${Number(c.relative_volume).toFixed(1)}x`}
+                                  <div style={{ fontSize: 11, opacity: 0.55 }}>prior</div>
+                                </>
+                              ) : "-"}
                             </td>
                             <td style={top10Cell}>
                               <span className={`pill ${
@@ -1395,12 +1417,14 @@ export default function SignalsPage() {
                         </td>
                         <td style={top10Cell}>
                           {viewMode === "daytrades" && c.tradable === false ? <span className="pill bad" title="Filtered by the tradability gate">{c.gate_reason ?? "Not tradable"}</span> : null}
-                          {viewMode === "daytrades" && c.tradable === true ? <span className="pill good">Tradable</span> : null}
+                          {viewMode === "daytrades" && c.tradable === true ? <span className="pill good" title={c.gate_reason === "In play (live)" ? "Rescued by live-volume confirmation (no premarket row)" : "Passed the tradability gate"}>{c.gate_reason === "In play (live)" ? "In play" : "Tradable"}</span> : null}
                           {numberOrNull(c.days_to_earnings) != null && Number(c.days_to_earnings) <= 7
                             ? <span className="pill bad">ER {Number(c.days_to_earnings)}d</span>
                             : c.earnings_within_7d ? <span className="pill bad">ER</span> : null}
                           {c.high_short_interest ? <span className="pill warn">SI</span> : null}
                           {(Number(c.rsi_14) || 0) > 80 ? <span className="pill warn">OB</span> : null}
+                          {viewMode === "daytrades" && numberOrNull(c.daily_range_percent) != null && Number(c.daily_range_percent) >= 5 ? <span className="pill good" title={`Daily range ~${Number(c.daily_range_percent).toFixed(0)}%`}>Mover</span> : null}
+                          {viewMode === "daytrades" && numberOrNull(c.avg_dollar_volume) != null && Number(c.avg_dollar_volume) < 8000000 ? <span className="pill warn" title={`Thin liquidity (~$${(Number(c.avg_dollar_volume) / 1e6).toFixed(1)}M/day) — size down`}>Thin</span> : null}
                           {viewMode === "daytrades" && (Number(c.relative_volume) || 0) < 1 ? <span className="pill warn">Low prior RVOL</span> : null}
                           {viewMode === "daytrades" && c.pm_is_current_session === false ? <span className="pill bad">Stale PM</span> : null}
                           {viewMode === "daytrades" && c.broker_spread_pct != null && Number(c.broker_spread_pct) > 1 ? <span className="pill bad">Wide</span> : null}

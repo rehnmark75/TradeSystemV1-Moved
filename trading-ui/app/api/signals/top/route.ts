@@ -24,15 +24,35 @@ const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 // - risk penalties: earnings<=7d (-15), high short interest (-10), RSI>80 overbought (-10)
 //
 // Day-trade score (0-100 core, bounded sub-scores so each weight == its max
-// influence): 0.28 RS + 0.24 RVOL (live intraday when a broker quote is
-// available) + 0.14 TV consensus + 0.12 live news + 0.12 premarket conviction
-// + 0.10 entry-not-extended (price vs EMA20 measured in ATR units). Plus
-// rising-RS, premarket-gap, overbought and days-to-earnings adjustments.
-// Dead/missing DAQ terms removed: sector & regime scores are stuck on their
-// no-SPY/no-ETF-candle fallbacks (50/60), catalyst is pinned ~100, and
-// financial quality is a swing factor irrelevant to a one-day move.
-// A binary tradability gate (current-session premarket BUY + acceptable spread
-// vs expected range) ranks ABOVE score; non-tradable rows sink and are dimmed.
+// influence). Leads with "in play" (volume + range), not swing leadership:
+//   0.30 RVOL (prior-session daily) + 0.14 daily range + 0.16 RS (demoted from
+//   0.28) + 0.12 TV consensus + 0.12 premarket conviction + 0.08 live news
+//   + 0.08 entry-not-extended (vs EMA20, ATR units).
+// Why RS was demoted: measured on the live tradable pool, RS-led ordering
+// floats quiet names to the top (7 of the top-10 had RVOL <= 1.1 while the
+// day's actual movers ranked #10-#17). A day trade needs activity, not a
+// multi-week leadership badge. ± rising-RS, premarket-gap, overbought,
+// days-to-earnings, plus day-trade adjustments: a SOFT (not hard) low-liquidity
+// penalty, a low-float-momentum bonus, a short-interest reframe (crowded+quiet
+// = risk, crowded+active = squeeze fuel), and a 52w-breakout / 5d-extension tilt.
+// Dead/missing DAQ terms stay removed (sector/regime stuck on fallbacks,
+// catalyst pinned ~100, financial quality is a swing factor).
+//
+// Live enrichment (SPARSE, additive-only): ~48 tickers stream live 1h candles
+// intraday; for those we compute a time-of-day-matched intraday RVOL pace and a
+// session VWAP from 1h volume and fold them in as a bounded BONUS (never the
+// core term -- mixing live mid-session RVOL with others' prior-session RVOL
+// would be apples-to-oranges). VWAP position feeds that bonus (holding above
+// VWAP = full bonus, below = halved); the EMA20 extension term is unchanged.
+// The broker quote API carries no volume, so live RVOL comes from candles.
+//
+// Tradability gate (ranks ABOVE score; non-tradable rows sink and are dimmed):
+// a current-session premarket BUY + acceptable spread/room. SECOND path: a name
+// confirmed in play by live volume (intraday RVOL pace >= 2, holding >= VWAP) is
+// tradable even WITHOUT a premarket row -- this breaks a feedback loop, because
+// the 9:00 AM ET premarket-pricing job enriches exactly the tickers THIS route
+// returns as the Top 20, so a mover buried for lack of PM data would never get
+// enriched. Surfacing it lets the next cycle enrich it.
 //
 // The row projection MIRRORS /api/signals/results so the signals-page detail
 // panel can render an expanded Top-10 row with full field parity.
@@ -114,6 +134,76 @@ const fetchBrokerQuotes = async (tickers: string[]): Promise<Record<string, Quot
   return Object.fromEntries(entries.filter((entry): entry is readonly [string, QuoteSnapshot] => entry[1] !== null));
 };
 
+type IntradayCandleStat = {
+  intraday_rvol_pace: number | null; // today's session vol / 20d avg over the SAME hours-of-day
+  session_vwap: number | null;
+  last_close: number | null;
+  bars_today: number | null;
+  candle_session: string | null;
+};
+
+// Live intraday enrichment for the (sparse, ~48-ticker) set that streams 1h
+// candles during the session. RVOL pace is time-of-day-matched (cumulative
+// session volume through hour N vs the 20-day average through the SAME hours)
+// so it reads ~1.0 at a normal pace instead of low-until-late. Only tickers
+// with bars in the freshest session are returned; everyone else falls back to
+// prior-session daily RVOL.
+const fetchIntradayCandleStats = async (
+  client: { query: (text: string, params: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  tickers: string[]
+): Promise<Record<string, IntradayCandleStat>> => {
+  if (tickers.length === 0) return {};
+  try {
+    const { rows } = await client.query(
+      `
+      WITH ref AS (SELECT max(timestamp::date) AS d FROM stock_candles WHERE timeframe = '1h'),
+      today AS (
+        SELECT c.ticker,
+               sum(c.volume) AS today_vol,
+               array_agg(DISTINCT extract(hour from c.timestamp)::int) AS hrs,
+               count(*)::int AS bars_today,
+               round(sum(((c.high + c.low + c.close) / 3.0) * c.volume) / NULLIF(sum(c.volume), 0), 4) AS session_vwap,
+               (array_agg(c.close ORDER BY c.timestamp DESC))[1] AS last_close
+        FROM stock_candles c, ref
+        WHERE c.timeframe = '1h' AND c.timestamp::date = ref.d AND c.ticker = ANY($1)
+        GROUP BY c.ticker
+      )
+      SELECT t.ticker, t.bars_today, t.session_vwap, t.last_close,
+             (SELECT d FROM ref)::text AS candle_session,
+             round(t.today_vol::numeric / NULLIF(b.base_vol, 0), 2) AS intraday_rvol_pace
+      FROM today t
+      JOIN LATERAL (
+        SELECT avg(sess_vol) AS base_vol FROM (
+          SELECT c2.timestamp::date AS d, sum(c2.volume) AS sess_vol
+          FROM stock_candles c2, ref
+          WHERE c2.ticker = t.ticker AND c2.timeframe = '1h'
+            AND c2.timestamp::date < ref.d
+            AND extract(hour from c2.timestamp)::int = ANY(t.hrs)
+          GROUP BY c2.timestamp::date
+          ORDER BY c2.timestamp::date DESC
+          LIMIT 20
+        ) s
+      ) b ON TRUE
+      `,
+      [tickers]
+    );
+    const out: Record<string, IntradayCandleStat> = {};
+    for (const r of rows) {
+      out[String(r.ticker)] = {
+        intraday_rvol_pace: r.intraday_rvol_pace == null ? null : Number(r.intraday_rvol_pace),
+        session_vwap: r.session_vwap == null ? null : Number(r.session_vwap),
+        last_close: r.last_close == null ? null : Number(r.last_close),
+        bars_today: r.bars_today == null ? null : Number(r.bars_today),
+        candle_session: r.candle_session == null ? null : String(r.candle_session),
+      };
+    }
+    return out;
+  } catch (err) {
+    console.error("intraday candle stats query failed", err);
+    return {};
+  }
+};
+
 export async function GET(request: Request) {
   const { searchParams } = new URL(request.url);
   const limit = Math.min(Math.max(1, Number(searchParams.get("limit") || 10)), 50);
@@ -131,12 +221,24 @@ export async function GET(request: Request) {
         ? `
               -- Bounded 0-100 sub-scores; core weights sum to 1.0 so each weight
               -- equals that factor's maximum influence. Absolute (not batch-
-              -- relative) scales on purpose: a day trade needs RVOL/leadership to
-              -- be high outright, not merely high relative to a weak batch.
-              0.28 * COALESCE(rs_percentile, 0)
-            + 0.24 * LEAST(COALESCE(relative_volume, 0) / 3.0 * 100, 100)
-            + 0.14 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
-            + 0.12 * COALESCE(daq_news_score, 50)
+              -- relative) scales on purpose: a day trade needs activity to be
+              -- high outright, not merely high relative to a weak batch. Leads
+              -- with volume + range; RS is demoted to a context term (see header).
+              -- All core terms use 100%-populated daily metrics so every name is
+              -- scored on the same basis (live intraday RVOL/VWAP is added in JS
+              -- as a bonus for the sparse streaming subset).
+              0.30 * LEAST(COALESCE(relative_volume, 0) / 3.0 * 100, 100)
+            -- Range earns credit only in PROPORTION to how active the name is:
+            -- a wide range on light volume is not a tradable mover, just a
+            -- volatile sleeper. Scaled by RVOL capped at 1.0 (at/above average
+            -- volume earns full range credit; below average is damped toward 0).
+            -- Both range and RVOL here are the prior completed session's
+            -- realized values (metrics batch is one day lagged); live intraday
+            -- pace, when streaming, is layered on as the JS bonus.
+            + 0.14 * LEAST(COALESCE(daily_range_percent, 0) / 5.0 * 100, 100)
+                   * LEAST(COALESCE(relative_volume, 0), 1.0)
+            + 0.16 * COALESCE(rs_percentile, 0)
+            + 0.12 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
             + 0.12 * (
                 CASE
                   WHEN pm_is_current_session AND pm_direction = 'BUY'
@@ -144,10 +246,13 @@ export async function GET(request: Request) {
                   ELSE 50
                 END
               )
-            + 0.10 * (
+            + 0.08 * COALESCE(daq_news_score, 50)
+            + 0.08 * (
                 -- entry-not-extended: 100 at/below EMA20, decaying ~20pts per ATR
-                -- above it (a proxy for VWAP/extension; true intraday VWAP is not
-                -- stored). Neutral 60 when ATR/EMA unavailable.
+                -- above it (a proxy for VWAP/extension; live session VWAP feeds
+                -- the JS confirmation bonus instead of overriding this). Neutral
+                -- 60 when ATR/EMA unavailable (atr_14 is 'NaN' during warmup,
+                -- which would otherwise sort to TOP).
                 CASE
                   WHEN atr_14 IS NULL OR atr_14 <= 0 OR atr_14 = 'NaN'
                     OR entry_price IS NULL OR entry_price = 'NaN'
@@ -164,7 +269,34 @@ export async function GET(request: Request) {
                 ELSE 0
               END)
             - (CASE WHEN rsi_14 > 80 THEN 12 WHEN rsi_14 > 75 THEN 6 ELSE 0 END)
-            - (CASE WHEN high_short_interest THEN 8 ELSE 0 END)
+            -- Liquidity: SOFT size-warning penalty, NOT a hard floor. Low-float
+            -- movers are often low-ADV; you trade them smaller, not never.
+            -- avg_dollar_volume is in dollars. (Thresholds unvalidated.)
+            - (CASE
+                WHEN avg_dollar_volume IS NULL THEN 0
+                WHEN avg_dollar_volume < 3000000 THEN 8
+                WHEN avg_dollar_volume < 8000000 THEN 4
+                ELSE 0
+              END)
+            -- Short interest reframed (was a flat -8): crowded + quiet = trapped
+            -- risk; crowded + active = squeeze fuel on a long.
+            + (CASE
+                WHEN high_short_interest AND COALESCE(relative_volume, 0) >= 2 THEN 5
+                WHEN high_short_interest AND COALESCE(relative_volume, 0) < 1 THEN -6
+                WHEN high_short_interest THEN -2
+                ELSE 0
+              END)
+            -- Low-float momentum: a tight float that is actually trading today is
+            -- the explosive intraday profile. shares_float is in shares.
+            + (CASE
+                WHEN shares_float IS NULL OR shares_float <= 0 THEN 0
+                WHEN shares_float < 20000000 AND COALESCE(relative_volume, 0) >= 1.5 THEN 6
+                WHEN shares_float < 50000000 AND COALESCE(relative_volume, 0) >= 1.5 THEN 3
+                ELSE 0
+              END)
+            -- Breakout fuel (near 52w high) vs over-extended multi-day chase.
+            + (CASE WHEN COALESCE(pct_from_52w_high, -100) >= -3 THEN 3 ELSE 0 END)
+            - (CASE WHEN COALESCE(price_change_5d, 0) > 25 THEN 4 ELSE 0 END)
             - (CASE
                 -- Real earnings guard on the 98%-populated days_to_earnings, not
                 -- the unreachable catalyst<50 gate of the old formula.
@@ -173,7 +305,7 @@ export async function GET(request: Request) {
                 WHEN days_to_earnings <= 7 THEN 6
                 ELSE 0
               END)
-        `
+`
         : `
               0.55 * COALESCE(rs_percentile, 0)
             + 0.45 * ((COALESCE(tv_overall_score, 0) + 100) / 2.0)
@@ -254,6 +386,8 @@ export async function GET(request: Request) {
           i.analyst_rating,
           i.target_price,
           i.number_of_analysts,
+          i.shares_float,
+          i.short_percent_float,
           m.rs_percentile,
           m.rs_trend,
           m.atr_14,
@@ -264,6 +398,12 @@ export async function GET(request: Request) {
           m.swing_low_date,
           m.avg_volume_20,
           m.relative_volume,
+          m.avg_dollar_volume,
+          m.daily_range_percent,
+          m.current_volume,
+          m.percentile_volume,
+          m.price_change_5d,
+          m.pct_from_52w_high,
           m.tv_osc_buy,
           m.tv_osc_sell,
           m.tv_osc_neutral,
@@ -482,10 +622,15 @@ export async function GET(request: Request) {
       EDGE_NO_LOSS_PF_CAP,
     ]);
     let daytradeTradableCount: number | null = null;
+    let daytradeLiveCandleCount: number | null = null;
     const rows =
       mode === "daytrades"
         ? await (async () => {
-            const quotes = await fetchBrokerQuotes(result.rows.map((row) => row.ticker));
+            const tickers = result.rows.map((row) => row.ticker);
+            const [quotes, candleStats] = await Promise.all([
+              fetchBrokerQuotes(tickers),
+              fetchIntradayCandleStats(client, tickers),
+            ]);
             const enrichedRows = result.rows.map((row) => {
               const quote = quotes[row.ticker] ?? {};
               const spreadPct = quote.broker_spread_pct ?? null;
@@ -494,11 +639,19 @@ export async function GET(request: Request) {
                 quoteTime && !Number.isNaN(quoteTime.getTime())
                   ? Math.round((Date.now() - quoteTime.getTime()) / 60000)
                   : null;
-              const avgVolume20 = Number(row.avg_volume_20 ?? 0);
-              const intradayRelativeVolume =
-                quote.broker_volume != null && avgVolume20 > 0
-                  ? Number((quote.broker_volume / avgVolume20).toFixed(2))
+              // Live intraday RVOL pace + session VWAP for the sparse subset that
+              // streams 1h candles today (the broker quote carries no volume).
+              const candle = candleStats[String(row.ticker)] ?? null;
+              const liveIntradayRvol = candle?.intraday_rvol_pace ?? null;
+              const sessionVwap = candle?.session_vwap ?? null;
+              const candleLastClose = candle?.last_close ?? null;
+              const vwapPosition =
+                sessionVwap != null && candleLastClose != null
+                  ? candleLastClose >= sessionVwap ? "above" : "below"
                   : null;
+              // intraday_relative_volume now carries the live candle pace (time-
+              // of-day-matched), not a broker-volume ratio.
+              const intradayRelativeVolume = liveIntradayRvol;
               const quotePrice = Number(quote.broker_last ?? quote.broker_ask ?? 0);
               const setupEntry = Number(row.entry_price ?? 0);
               const openConfirmed =
@@ -508,14 +661,23 @@ export async function GET(request: Request) {
                 quotePrice > 0 &&
                 setupEntry > 0 &&
                 quotePrice >= setupEntry * 0.995;
-              const priorRvol = Number(row.relative_volume ?? 0);
-              // Mirror the SQL 0.24 * LEAST(rvol/3*100, 100) term so we can swap
-              // prior-session RVOL for live intraday RVOL without re-querying.
-              const oldRvolTerm = 0.24 * Math.min((priorRvol / 3) * 100, 100);
-              const liveRvolTerm =
-                intradayRelativeVolume == null
-                  ? oldRvolTerm
-                  : 0.24 * Math.min((intradayRelativeVolume / 3) * 100, 100);
+              // Live-confirmation bonus (0..8, ADDITIVE only so it never becomes
+              // an apples-to-oranges core term): a name we can SEE moving on
+              // volume and holding >= VWAP earns a boost; a covered-but-quiet name
+              // earns 0 (no penalty -> symmetric with uncovered names). Thresholds
+              // unvalidated.
+              const liveConfirmationBonus =
+                liveIntradayRvol == null
+                  ? 0
+                  : (() => {
+                      const base =
+                        liveIntradayRvol >= 3 ? 8 :
+                        liveIntradayRvol >= 2 ? 6 :
+                        liveIntradayRvol >= 1.5 ? 4 :
+                        liveIntradayRvol >= 1 ? 2 :
+                        0;
+                      return vwapPosition === "below" ? Math.floor(base / 2) : base;
+                    })();
               const spreadScore =
                 spreadPct == null ? 0 :
                 spreadPct <= 0.25 ? 4 :
@@ -582,14 +744,31 @@ export async function GET(request: Request) {
                 "Wait pullback",
               ].includes(orderBias);
               const tradable = !(hardPmReject || hardBiasReject);
+              // #1 SECOND tradable path: a name confirmed in play by LIVE volume
+              // (intraday RVOL pace >= 2 and holding >= VWAP) is tradable even
+              // without a premarket row -- never overriding an explicit bearish PM
+              // read, and only when the spread is not a hard reject. This breaks
+              // the feedback loop where the 9:00 AM premarket-pricing job enriches
+              // only the tickers this route already ranks in the Top 20.
+              const pmExplicitlyBearish = ["PM against", "PM fading"].includes(String(finalPmStatus ?? ""));
+              const hardSpreadReject = orderBias === "Avoid spread" || orderBias === "Spread eats range";
+              const liveInPlay =
+                liveIntradayRvol != null && liveIntradayRvol >= 2 && vwapPosition !== "below" && !hardSpreadReject;
+              const rescued = !tradable && liveInPlay && !pmExplicitlyBearish;
+              const finalTradable = tradable || rescued;
               return {
                 ...row,
                 ...quote,
                 pm_status: finalPmStatus,
                 broker_quote_age_minutes: quoteAgeMinutes,
                 intraday_relative_volume: intradayRelativeVolume,
+                live_intraday_rvol: liveIntradayRvol,
+                session_vwap: sessionVwap,
+                vwap_position: vwapPosition,
+                live_confirmation_bonus: liveConfirmationBonus,
                 relative_volume_source: "prior_session_daily",
-                intraday_relative_volume_source: intradayRelativeVolume == null ? null : "broker_quote_volume_vs_avg_20d",
+                intraday_relative_volume_source:
+                  intradayRelativeVolume == null ? null : "intraday_1h_candle_pace_vs_20d_same_hours",
                 execution_quality_score: executionQualityScore,
                 execution_quality_parts: {
                   spread: spreadScore,
@@ -599,13 +778,25 @@ export async function GET(request: Request) {
                   room: roomScore,
                 },
                 spread_to_room: spreadToRoom == null ? null : Number(spreadToRoom.toFixed(3)),
-                candidate_score: Number((Number(row.candidate_score ?? 0) - oldRvolTerm + liveRvolTerm + executionQualityScore).toFixed(1)),
+                // candidate_score is MERIT only: the SQL core (in-play + leadership
+                // + setup) plus the live-volume confirmation bonus. Execution
+                // quality (spread/fill mechanics) is deliberately NOT added here --
+                // it answers "can I get a good fill right now," not "is this a good
+                // day trade," and folding a 0-12 mechanics bonus into the rank was
+                // re-lifting quiet-but-easy-to-fill names above the actual movers.
+                // It stays as a displayed metric and still feeds the gate.
+                candidate_score: Number(
+                  (Number(row.candidate_score ?? 0) + liveConfirmationBonus).toFixed(1)
+                ),
                 order_bias: orderBias,
-                tradable,
-                gate_reason: tradable ? "Tradable" : hardPmReject ? String(finalPmStatus) : orderBias,
+                tradable: finalTradable,
+                gate_reason: finalTradable
+                  ? rescued ? "In play (live)" : "Tradable"
+                  : hardPmReject ? String(finalPmStatus) : orderBias,
               };
             });
             daytradeTradableCount = enrichedRows.filter((row) => row.tradable).length;
+            daytradeLiveCandleCount = enrichedRows.filter((row) => row.live_intraday_rvol != null).length;
             return enrichedRows
               .sort((a, b) => {
                 const tradableDelta = (b.tradable ? 1 : 0) - (a.tradable ? 1 : 0);
@@ -631,10 +822,18 @@ export async function GET(request: Request) {
         max_per_scanner: maxPerScanner,
         daytrade_pool_size: mode === "daytrades" ? result.rows.length : null,
         daytrade_tradable_count: daytradeTradableCount,
-        daytrade_rvol_source: mode === "daytrades" ? "broker_quote_volume_vs_avg_20d_when_available" : null,
+        daytrade_live_candle_count: daytradeLiveCandleCount,
+        daytrade_rvol_source:
+          mode === "daytrades"
+            ? "intraday_1h_candle_pace_when_streaming_else_prior_session_daily"
+            : null,
         daytrade_execution_quality:
           mode === "daytrades"
             ? "0-12 live score: spread 4, quote age 2, entry discipline 2, size fit 2, room-vs-spread 2"
+            : null,
+        daytrade_live_confirmation_bonus:
+          mode === "daytrades"
+            ? "0-8 added: live RVOL pace + above/below session VWAP (covered subset only)"
             : null,
       },
     });
