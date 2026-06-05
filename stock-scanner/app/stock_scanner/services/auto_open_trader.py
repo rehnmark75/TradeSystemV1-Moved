@@ -43,6 +43,14 @@ class AutoOpenTrader:
         "AUTO_TRADE_MAX_STOP_DISTANCE_PCT": ("max_stop_distance_pct", "float", "3.0"),
         "AUTO_TRADE_MAX_RISK_PCT": ("max_risk_pct", "float", "3.0"),
         "AUTO_TRADE_MAX_RISK_USD": ("max_risk_usd", "float", "15.0"),
+        # Conditional ATR stop (validated Jun 5 2026): for high-ATR names the flat
+        # 3% stop sits inside the noise band and whipsaws winners. For ATR >=
+        # threshold, use an ATR-width stop + ATR-scaled size at the SAME max_risk_usd
+        # (downside-neutral). Below threshold, keep the fixed stop_loss/take_profit.
+        "AUTO_TRADE_ATR_STOP_ENABLED": ("atr_stop_enabled", "bool", "true"),
+        "AUTO_TRADE_ATR_THRESHOLD_PCT": ("atr_threshold_pct", "float", "7.0"),
+        "AUTO_TRADE_ATR_STOP_MULT": ("atr_stop_mult", "float", "1.0"),   # k: stop = k*ATR%
+        "AUTO_TRADE_ATR_RR": ("atr_rr", "float", "1.6667"),              # TP = rr*stop (keeps 5/3)
     }
 
     def __init__(self, db_manager):
@@ -114,6 +122,10 @@ class AutoOpenTrader:
         await self.db.execute("""
             ALTER TABLE stock_auto_trade_candidates
             ADD COLUMN IF NOT EXISTS intraday_relative_volume DECIMAL(12,4)
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS atr_percent DECIMAL(10,4)
         """)
         await self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_stock_auto_trade_candidates_run_status
@@ -292,9 +304,9 @@ class AutoOpenTrader:
                     run_id, trade_date, rank, ticker, candidate_score, scanner_name,
                     order_bias, pm_status, pm_direction, broker_bid, broker_ask,
                     broker_last, broker_spread_pct, broker_quote_age_minutes,
-                    relative_volume, intraday_relative_volume,
+                    relative_volume, intraday_relative_volume, atr_percent,
                     planned_entry, planned_stop_loss, planned_take_profit
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19)
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
                 ON CONFLICT (run_id, ticker) DO UPDATE SET
                     rank = EXCLUDED.rank,
                     candidate_score = EXCLUDED.candidate_score,
@@ -309,6 +321,7 @@ class AutoOpenTrader:
                     broker_quote_age_minutes = EXCLUDED.broker_quote_age_minutes,
                     relative_volume = EXCLUDED.relative_volume,
                     intraday_relative_volume = EXCLUDED.intraday_relative_volume,
+                    atr_percent = EXCLUDED.atr_percent,
                     planned_entry = CASE
                         WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
                         THEN stock_auto_trade_candidates.planned_entry
@@ -333,6 +346,7 @@ class AutoOpenTrader:
                 self._int(row.get("broker_quote_age_minutes")),
                 self._num(row.get("relative_volume")),
                 self._num(row.get("intraday_relative_volume")),
+                self._num(row.get("atr_percent")),
                 self._num(row.get("pm_suggested_entry")),
                 self._num(row.get("pm_suggested_stop")), self._num(row.get("pm_suggested_target")),
             )
@@ -404,23 +418,19 @@ class AutoOpenTrader:
                 result["errors"] += 1
                 continue
 
-            quantity = int(self.max_notional // entry)
-            if quantity <= 0:
-                await self._update_candidate_status(row["id"], "skipped", f"Price {entry:.2f} too high for max notional {self.max_notional:.2f}")
-                result["skipped"] += 1
-                continue
-
-            plan = self._build_order_plan(entry, quantity)
+            plan = self._build_order_plan(entry, self._num(row.get("atr_percent")))
             if plan.get("reject_reason"):
                 await self._update_candidate_status(row["id"], "rejected", plan["reject_reason"])
                 result["skipped"] += 1
                 continue
 
+            quantity = plan["quantity"]
             stop = plan["stop_loss"]
             target = plan["take_profit"]
             risk_amount = plan["risk_amount"]
             risk_pct = plan["risk_pct"]
             stop_distance_pct = plan["stop_distance_pct"]
+            mode = plan.get("mode", "fixed")
 
             await self.db.execute("""
                 UPDATE stock_auto_trade_candidates
@@ -430,7 +440,7 @@ class AutoOpenTrader:
             """, row["id"], entry, stop, target, quantity)
 
             if self.dry_run:
-                await self._update_candidate_status(row["id"], "dry_run", f"Would place buy limit qty={quantity} entry={entry:.2f} SL={stop:.2f} TP={target:.2f} risk=${risk_amount:.2f} ({risk_pct:.2f}%)")
+                await self._update_candidate_status(row["id"], "dry_run", f"[{mode}] Would place buy limit qty={quantity} entry={entry:.2f} SL={stop:.2f} TP={target:.2f} risk=${risk_amount:.2f} ({risk_pct:.2f}%)")
                 result["placed"] += 1
                 continue
 
@@ -455,7 +465,7 @@ class AutoOpenTrader:
                 """,
                     row["id"], status, json.dumps(response), response.get("robomarkets_order_id"),
                     self._int(response.get("db_order_id")),
-                    f"Order submitted by auto trader; risk=${risk_amount:.2f} ({risk_pct:.2f}%), stop distance={stop_distance_pct:.2f}%" if status == "order_submitted" else response.get("error"),
+                    f"Order submitted by auto trader [{mode}]; risk=${risk_amount:.2f} ({risk_pct:.2f}%), stop distance={stop_distance_pct:.2f}%" if status == "order_submitted" else response.get("error"),
                 )
                 if status == "order_submitted":
                     active_stock_order_tickers.add(str(row["ticker"]).split(".")[0].upper())
@@ -468,52 +478,68 @@ class AutoOpenTrader:
 
         return result
 
-    def _build_order_plan(self, entry: float, quantity: int) -> Dict[str, Any]:
+    def _build_order_plan(self, entry: float, atr_pct: Optional[float] = None) -> Dict[str, Any]:
         epsilon = 1e-9
-        stop_loss_pct = max(0.01, float(self.stop_loss_pct))
-        take_profit_pct = max(0.01, float(self.take_profit_pct))
+        # Conditional ATR stop: for high-ATR names a flat 3% sits inside the noise
+        # band (validated Jun 5 2026 — only the ATR>=threshold quartile showed an
+        # edge). Use an ATR-width stop + ATR-scaled size so DOLLAR risk stays
+        # max_risk_usd. Below threshold (or if ATR missing), keep the fixed stop.
+        use_atr = (
+            self.atr_stop_enabled
+            and atr_pct is not None
+            and atr_pct >= self.atr_threshold_pct
+            and self.atr_stop_mult > 0
+        )
+        if use_atr:
+            stop_loss_pct = max(0.01, self.atr_stop_mult * float(atr_pct))
+            take_profit_pct = max(stop_loss_pct + 0.01, self.atr_rr * stop_loss_pct)
+            mode = f"atr({float(atr_pct):.1f}%)"
+        else:
+            stop_loss_pct = max(0.01, float(self.stop_loss_pct))
+            take_profit_pct = max(0.01, float(self.take_profit_pct))
+            mode = "fixed"
+
         stop = round(entry * (1 - stop_loss_pct / 100), 2)
         target = round(entry * (1 + take_profit_pct / 100), 2)
-
         if stop >= entry:
             return {"reject_reason": f"Computed stop {stop:.2f} is not below entry {entry:.2f}"}
         if target <= entry:
             return {"reject_reason": f"Computed target {target:.2f} is not above entry {entry:.2f}"}
 
-        notional = entry * quantity
-        risk_amount = (entry - stop) * quantity
-        risk_pct = (risk_amount / notional) * 100 if notional > 0 else 0
-        stop_distance_pct = ((entry - stop) / entry) * 100
+        per_share_risk = entry - stop
+        # ATR branch: size to hold dollar risk at the cap regardless of stop width.
+        # Fixed branch: size to notional (legacy behaviour, then verified vs caps).
+        quantity = int(self.max_risk_usd // per_share_risk) if use_atr else int(self.max_notional // entry)
+        if quantity <= 0:
+            return {"reject_reason": (
+                f"Stop width {stop_loss_pct:.1f}% too wide for max risk ${self.max_risk_usd:.2f} at entry {entry:.2f}"
+                if use_atr else
+                f"Price {entry:.2f} too high for max notional {self.max_notional:.2f}")}
 
-        if stop_distance_pct > self.max_stop_distance_pct + epsilon:
-            return {
-                "reject_reason": (
-                    f"Stop distance {stop_distance_pct:.2f}% > max {self.max_stop_distance_pct:.2f}% "
-                    f"at entry {entry:.2f}"
-                )
-            }
-        if risk_pct > self.max_risk_pct + epsilon:
-            return {
-                "reject_reason": (
-                    f"Risk {risk_pct:.2f}% > max {self.max_risk_pct:.2f}% "
-                    f"(${risk_amount:.2f} on ${notional:.2f})"
-                )
-            }
+        notional = entry * quantity
+        risk_amount = per_share_risk * quantity
+        risk_pct = (risk_amount / notional) * 100 if notional > 0 else 0
+        stop_distance_pct = (per_share_risk / entry) * 100
+
+        if not use_atr:
+            # Fixed branch keeps the original %-based guard rails.
+            if stop_distance_pct > self.max_stop_distance_pct + epsilon:
+                return {"reject_reason": f"Stop distance {stop_distance_pct:.2f}% > max {self.max_stop_distance_pct:.2f}% at entry {entry:.2f}"}
+            if risk_pct > self.max_risk_pct + epsilon:
+                return {"reject_reason": f"Risk {risk_pct:.2f}% > max {self.max_risk_pct:.2f}% (${risk_amount:.2f} on ${notional:.2f})"}
+        # Both branches: hard DOLLAR-risk ceiling (ATR sizing satisfies it by construction).
         if risk_amount > self.max_risk_usd + epsilon:
-            return {
-                "reject_reason": (
-                    f"Risk ${risk_amount:.2f} > max ${self.max_risk_usd:.2f} "
-                    f"({risk_pct:.2f}% on ${notional:.2f})"
-                )
-            }
+            return {"reject_reason": f"Risk ${risk_amount:.2f} > max ${self.max_risk_usd:.2f} ({risk_pct:.2f}% on ${notional:.2f})"}
 
         return {
             "stop_loss": stop,
             "take_profit": target,
+            "quantity": quantity,
             "notional": notional,
             "risk_amount": risk_amount,
             "risk_pct": risk_pct,
             "stop_distance_pct": stop_distance_pct,
+            "mode": mode,
         }
 
     async def _place_order_api(self, ticker: str, quantity: int, price: float, stop_loss: float, take_profit: float) -> Dict[str, Any]:
