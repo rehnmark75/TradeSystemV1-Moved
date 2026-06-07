@@ -130,6 +130,31 @@ class IntradayVwapSync:
             CREATE INDEX IF NOT EXISTS idx_stock_intraday_state_trade_date
             ON stock_intraday_state(trade_date)
         """)
+        # Raw 5m bars the worker already downloads each cycle. We otherwise discard
+        # them after deriving the scalars above; persisting them is near-zero cost
+        # and the substrate for any future intraday-derived entry logic (intraday
+        # ATR, VWAP-reclaim, pullback-to-structure). The PK makes re-fetching the
+        # same bars every ~2.5 min idempotent -- the still-forming last bar is
+        # overwritten, not duplicated.
+        await self.db.execute("""
+            CREATE TABLE IF NOT EXISTS stock_intraday_candles (
+                ticker     VARCHAR(20)      NOT NULL,
+                timeframe  VARCHAR(10)      NOT NULL DEFAULT '5m',
+                bar_time   TIMESTAMPTZ      NOT NULL,
+                open       DOUBLE PRECISION,
+                high       DOUBLE PRECISION,
+                low        DOUBLE PRECISION,
+                close      DOUBLE PRECISION,
+                volume     BIGINT,
+                source     VARCHAR(20)      DEFAULT 'yfinance_5m',
+                as_of      TIMESTAMPTZ      NOT NULL DEFAULT NOW(),
+                PRIMARY KEY (ticker, timeframe, bar_time)
+            )
+        """)
+        await self.db.execute("""
+            CREATE INDEX IF NOT EXISTS idx_stock_intraday_candles_ticker_time
+            ON stock_intraday_candles(ticker, bar_time DESC)
+        """)
 
     # ------------------------------------------------------------------ window
     def _minutes_after_open(self, now_et: datetime) -> Optional[int]:
@@ -142,7 +167,7 @@ class IntradayVwapSync:
     async def run_once(self) -> Dict[str, Any]:
         await self.ensure_schema()
         now_et = datetime.now(self.ET)
-        result = {"enabled": self.enabled, "stage": "idle", "fetched": 0, "written": 0, "missing": 0}
+        result = {"enabled": self.enabled, "stage": "idle", "fetched": 0, "written": 0, "missing": 0, "bars_written": 0}
 
         if not self.enabled:
             result["stage"] = "disabled"
@@ -173,15 +198,29 @@ class IntradayVwapSync:
         trade_date = now_et.date()
         written = 0
         missing = 0
+        bars_written = 0
         for ticker in tickers:
-            state = self._compute_state(ticker, frame, now_et, avg_vol.get(ticker))
+            sess = self._session_frame(ticker, frame, now_et)
+            if sess is None:
+                missing += 1
+                continue
+            state = self._compute_state(sess, now_et, avg_vol.get(ticker))
             if state is None:
                 missing += 1
                 continue
             await self._upsert_state(ticker, trade_date, state)
             written += 1
+            # Persisting raw bars is a best-effort side effect: a failure here must
+            # not break the state upsert the picker/auto-trader actually read.
+            try:
+                bars_written += await self._persist_bars(ticker, sess)
+            except Exception as exc:  # noqa: BLE001
+                logger.warning("[IntradayVWAP] persist bars failed for %s: %s", ticker, exc)
 
-        result.update(stage="updated", fetched=len(tickers), written=written, missing=missing)
+        result.update(
+            stage="updated", fetched=len(tickers), written=written,
+            missing=missing, bars_written=bars_written,
+        )
         return result
 
     async def run_loop(self):
@@ -276,9 +315,10 @@ class IntradayVwapSync:
         except Exception:
             return None
 
-    def _compute_state(
-        self, ticker: str, frame: pd.DataFrame, now_et: datetime, avg_volume_20: Optional[float]
-    ) -> Optional[Dict[str, Any]]:
+    def _session_frame(
+        self, ticker: str, frame: pd.DataFrame, now_et: datetime
+    ) -> Optional[pd.DataFrame]:
+        """Today's regular-session 5m bars for one ticker, ET-indexed (or None)."""
         tdf = self._ticker_frame(ticker, frame)
         if tdf is None:
             return None
@@ -298,9 +338,12 @@ class IntradayVwapSync:
             & (tdf.index.time < self.MARKET_CLOSE)
         )
         sess = tdf[session_mask]
-        if sess.empty:
-            return None
+        return sess if not sess.empty else None
 
+    def _compute_state(
+        self, sess: pd.DataFrame, now_et: datetime, avg_volume_20: Optional[float]
+    ) -> Optional[Dict[str, Any]]:
+        today = now_et.date()
         high = sess["High"].astype(float)
         low = sess["Low"].astype(float)
         close = sess["Close"].astype(float)
@@ -353,3 +396,45 @@ class IntradayVwapSync:
             state["cum_volume"], state["bars_today"], state["intraday_rvol_pace"],
             state["avg_volume_20"],
         )
+
+    @staticmethod
+    def _bar_float(value: Any) -> Optional[float]:
+        return float(value) if value is not None and not pd.isna(value) else None
+
+    async def _persist_bars(self, ticker: str, sess: pd.DataFrame) -> int:
+        """Bulk-upsert today's raw 5m bars; idempotent on (ticker, '5m', bar_time).
+
+        Re-run every cycle, so the still-forming last bar is overwritten in place
+        rather than duplicated. Returns the number of bars written.
+        """
+        rows: List[tuple] = []
+        for idx, bar in sess.iterrows():
+            close = bar.get("Close")
+            if close is None or pd.isna(close):
+                continue  # skip a not-yet-printed / all-NaN bar
+            volume = bar.get("Volume")
+            volume = int(volume) if volume is not None and not pd.isna(volume) else 0
+            rows.append((
+                ticker,
+                idx.to_pydatetime(),  # tz-aware (ET) bar start -> timestamptz
+                self._bar_float(bar.get("Open")),
+                self._bar_float(bar.get("High")),
+                self._bar_float(bar.get("Low")),
+                float(close),
+                volume,
+            ))
+        if not rows:
+            return 0
+        await self.db.executemany("""
+            INSERT INTO stock_intraday_candles (
+                ticker, timeframe, bar_time, open, high, low, close, volume, source, as_of
+            ) VALUES ($1, '5m', $2, $3, $4, $5, $6, $7, 'yfinance_5m', NOW())
+            ON CONFLICT (ticker, timeframe, bar_time) DO UPDATE SET
+                open = EXCLUDED.open,
+                high = EXCLUDED.high,
+                low = EXCLUDED.low,
+                close = EXCLUDED.close,
+                volume = EXCLUDED.volume,
+                as_of = NOW()
+        """, rows)
+        return len(rows)
