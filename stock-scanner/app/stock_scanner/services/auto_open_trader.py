@@ -31,8 +31,13 @@ class AutoOpenTrader:
         "MAX_ORDERS_PER_RUN": ("max_orders_per_run", "int", "5"),
         "AUTO_TRADE_MAX_SPREAD_PCT": ("max_spread_pct", "float", "0.4"),
         "AUTO_TRADE_MIN_SCORE": ("min_score", "float", "65"),
+        # RVOL floor + VWAP veto: live-intraday confirmation gates. The values
+        # below are conservative code fallbacks; the live runtime values come from
+        # stock_auto_trade_settings (authoritative) / compose env. Enabled Jun 7
+        # 2026 after the intraday-vwap worker was verified populating on cadence.
         "AUTO_TRADE_MIN_RELATIVE_VOLUME": ("min_relative_volume", "float", "0"),
         "AUTO_TRADE_REQUIRE_INTRADAY_RVOL": ("require_intraday_rvol", "bool", "false"),
+        "AUTO_TRADE_REQUIRE_ABOVE_VWAP": ("require_above_vwap", "bool", "true"),
         "AUTO_TRADE_MAX_QUOTE_AGE_MINUTES": ("max_quote_age_minutes", "int", "3"),
         "AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT": ("pullback_limit_offset_pct", "float", "0.3"),
         "AUTO_TRADE_START_DELAY_MINUTES": ("start_delay_minutes", "int", "15"),
@@ -126,6 +131,10 @@ class AutoOpenTrader:
         await self.db.execute("""
             ALTER TABLE stock_auto_trade_candidates
             ADD COLUMN IF NOT EXISTS atr_percent DECIMAL(10,4)
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS session_vwap DECIMAL(12,4)
         """)
         await self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_stock_auto_trade_candidates_run_status
@@ -263,6 +272,7 @@ class AutoOpenTrader:
             "min_score": self.min_score,
             "min_relative_volume": self.min_relative_volume,
             "require_intraday_rvol": self.require_intraday_rvol,
+            "require_above_vwap": self.require_above_vwap,
             "max_quote_age_minutes": self.max_quote_age_minutes,
             "pullback_limit_offset_pct": self.pullback_limit_offset_pct,
             "start_delay_minutes": self.start_delay_minutes,
@@ -305,8 +315,8 @@ class AutoOpenTrader:
                     order_bias, pm_status, pm_direction, broker_bid, broker_ask,
                     broker_last, broker_spread_pct, broker_quote_age_minutes,
                     relative_volume, intraday_relative_volume, atr_percent,
-                    planned_entry, planned_stop_loss, planned_take_profit
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20)
+                    planned_entry, planned_stop_loss, planned_take_profit, session_vwap
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
                 ON CONFLICT (run_id, ticker) DO UPDATE SET
                     rank = EXCLUDED.rank,
                     candidate_score = EXCLUDED.candidate_score,
@@ -322,6 +332,7 @@ class AutoOpenTrader:
                     relative_volume = EXCLUDED.relative_volume,
                     intraday_relative_volume = EXCLUDED.intraday_relative_volume,
                     atr_percent = EXCLUDED.atr_percent,
+                    session_vwap = EXCLUDED.session_vwap,
                     planned_entry = CASE
                         WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
                         THEN stock_auto_trade_candidates.planned_entry
@@ -349,6 +360,7 @@ class AutoOpenTrader:
                 self._num(row.get("atr_percent")),
                 self._num(row.get("pm_suggested_entry")),
                 self._num(row.get("pm_suggested_stop")), self._num(row.get("pm_suggested_target")),
+                self._num(row.get("session_vwap")),
             )
             count += 1
         return count
@@ -650,6 +662,22 @@ class AutoOpenTrader:
                 return "Missing live intraday RVOL"
         elif intraday_rvol < self.min_relative_volume:
             return f"Intraday RVOL {intraday_rvol:.2f} < min {self.min_relative_volume:.2f}"
+        # Live VWAP veto: a day-trade long below the session VWAP is buying into
+        # intraday weakness (exactly what BIDU/CADL did on Jun 5 -- both below
+        # VWAP at the snapshot). session_vwap is the intraday-vwap worker's real
+        # sub-hourly VWAP; compare it to the CURRENT broker price (last, fallback
+        # ask) -- current price vs session average is the "holding above VWAP"
+        # read. Fail-closed when required: no live VWAP -> no confirmation -> skip
+        # rather than trade blind. Off switch: AUTO_TRADE_REQUIRE_ABOVE_VWAP=false.
+        if self.require_above_vwap:
+            session_vwap = self._num(row.get("session_vwap"))
+            price_for_vwap = self._num(row.get("broker_last")) or self._num(row.get("broker_ask"))
+            if session_vwap is None or session_vwap <= 0:
+                return "Missing live session VWAP (require_above_vwap)"
+            if price_for_vwap is None or price_for_vwap <= 0:
+                return "Missing broker price for VWAP check"
+            if price_for_vwap < session_vwap:
+                return f"Price {price_for_vwap:.2f} below session VWAP {session_vwap:.2f}"
         ask = self._num(row.get("broker_ask"))
         if ask is None or ask <= 0:
             return "Missing broker ask"

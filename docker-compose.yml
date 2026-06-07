@@ -458,8 +458,9 @@ services:
       - MAX_ORDERS_PER_RUN=5
       - AUTO_TRADE_MAX_SPREAD_PCT=0.4
       - AUTO_TRADE_MIN_SCORE=65
-      - AUTO_TRADE_MIN_RELATIVE_VOLUME=0
-      - AUTO_TRADE_REQUIRE_INTRADAY_RVOL=false
+      - AUTO_TRADE_MIN_RELATIVE_VOLUME=1.0
+      - AUTO_TRADE_REQUIRE_INTRADAY_RVOL=true
+      - AUTO_TRADE_REQUIRE_ABOVE_VWAP=true
       - AUTO_TRADE_MAX_QUOTE_AGE_MINUTES=3
       - AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT=0.3
       - AUTO_TRADE_STOP_LOSS_PCT=3.0
@@ -493,7 +494,10 @@ services:
       - INTRADAY_VWAP_ENABLED=true
       - INTRADAY_VWAP_POOL_LIMIT=50
       - INTRADAY_VWAP_START_BEFORE_OPEN_MIN=5
-      - INTRADAY_VWAP_STOP_AFTER_OPEN_MIN=60
+      # Cover the auto-trader's full window (AUTO_TRADE_STOP_AFTER_MINUTES=90):
+      # the trader now gates on session VWAP, so live state must stay fresh until
+      # the trader stops placing orders (else late trades hit "Missing live VWAP").
+      - INTRADAY_VWAP_STOP_AFTER_OPEN_MIN=95
       - INTRADAY_VWAP_INTERVAL_SECONDS=150
     command: ["python", "-m", "stock_scanner.scheduler", "intraday-vwap"]
     networks:
