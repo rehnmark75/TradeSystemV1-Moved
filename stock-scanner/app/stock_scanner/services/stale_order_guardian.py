@@ -18,6 +18,11 @@ logger = logging.getLogger("stale_order_guardian")
 
 class StaleOrderGuardian:
     MAX_AGE_HOURS = 48
+    # An order that has left the broker's active book but has no matching
+    # broker_trades deal yet, and is younger than this, is left 'submitted' for
+    # the next cycle rather than labelled 'cancelled' — the broker sync may not
+    # have recorded a late fill yet.
+    FILL_GRACE_SECONDS = 900
 
     def __init__(self, db_manager):
         self.db = db_manager
@@ -75,10 +80,11 @@ class StaleOrderGuardian:
             ticker = order['ticker']
             db_id = order['id']
 
-            # Order no longer active at broker → sync status
+            # Order no longer active at broker → reconcile against broker_trades
             if broker_id not in broker_order_ids:
-                await self._sync_missing_order(order)
-                result['synced'] += 1
+                outcome = await self._sync_missing_order(order)
+                if outcome in ('filled', 'cancelled'):
+                    result['synced'] += 1
                 continue
 
             # Check cancellation rules
@@ -216,20 +222,80 @@ class StaleOrderGuardian:
             WHERE id = $2
         """, reason, order_id)
 
-    async def _sync_missing_order(self, order: dict):
+    async def _sync_missing_order(self, order: dict) -> str:
         """
-        DB order is 'submitted' but not in broker active set.
-        Mark as filled (optimistic - broker filled or cancelled it).
+        DB order is 'submitted' but no longer in the broker's active set, so it
+        either filled or was cancelled/expired. Reconcile against broker_trades
+        (the execution ledger, synced ~5 min before this run) instead of
+        assuming a fill: a matching deal → 'filled', none → 'cancelled'.
+
+        Returns the resulting status ('filled' / 'cancelled'), or 'pending' if
+        the order is too fresh to classify yet (rechecked next cycle).
         """
         db_id = order['id']
+        ticker = order['ticker']
+        submitted_at = order.get('created_at')
+        if submitted_at is not None and submitted_at.tzinfo is None:
+            submitted_at = submitted_at.replace(tzinfo=timezone.utc)
+
+        deal = await self._find_broker_fill(ticker, submitted_at)
+        if deal:
+            await self.db.execute("""
+                UPDATE stock_orders
+                SET status = 'filled',
+                    filled_at = NOW(),
+                    updated_at = NOW()
+                WHERE id = $1
+                  AND status = 'submitted'
+            """, db_id)
+            logger.info(
+                f"[Guardian] Order {db_id} ({ticker}) → filled "
+                f"(matched broker deal {deal['deal_id']})"
+            )
+            return 'filled'
+
+        # No matching deal. If the order only just left the book, the broker sync
+        # may not have recorded a late fill yet — defer rather than false-cancel.
+        if submitted_at is not None:
+            age = (datetime.now(timezone.utc) - submitted_at).total_seconds()
+            if age < self.FILL_GRACE_SECONDS:
+                logger.info(
+                    f"[Guardian] Order {db_id} ({ticker}) left broker book but no "
+                    f"deal recorded yet ({age:.0f}s old) → recheck next cycle"
+                )
+                return 'pending'
+
         await self.db.execute("""
             UPDATE stock_orders
-            SET status = 'filled',
-                filled_at = NOW(),
+            SET status = 'cancelled',
+                error_message = 'Left broker active set with no matching fill (cancelled/expired)',
                 updated_at = NOW()
             WHERE id = $1
               AND status = 'submitted'
         """, db_id)
         logger.info(
-            f"[Guardian] Order {db_id} ({order['ticker']}) no longer active at broker → marked filled"
+            f"[Guardian] Order {db_id} ({ticker}) → cancelled (no matching broker deal)"
         )
+        return 'cancelled'
+
+    async def _find_broker_fill(self, ticker: str, submitted_at) -> dict | None:
+        """
+        Find a broker_trades deal corresponding to this order: same base ticker,
+        opened at/after the order was submitted. broker_trades.ticker carries an
+        exchange suffix (e.g. 'NAVI.nq') while stock_orders.ticker does not
+        ('NAVI'). The open_time floor avoids matching an older deal for the same
+        ticker (e.g. a position carried over from a previous day). Returns the
+        most recent matching row, or None.
+        """
+        row = await self.db.fetchrow("""
+            SELECT deal_id, open_time
+            FROM broker_trades
+            WHERE split_part(ticker, '.', 1) = $1
+              AND (
+                  $2::timestamptz IS NULL
+                  OR open_time >= $2::timestamptz - INTERVAL '5 minutes'
+              )
+            ORDER BY open_time DESC
+            LIMIT 1
+        """, ticker, submitted_at)
+        return dict(row) if row else None
