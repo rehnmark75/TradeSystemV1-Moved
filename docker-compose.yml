@@ -456,6 +456,11 @@ services:
       - MAX_ORDER_NOTIONAL_USD=500
       - MAX_ACTIVE_STOCK_ORDERS=5
       - MAX_ORDERS_PER_RUN=5
+      # Candidate pool (NOT an order cap). 50 lets the rank-ordered loop backfill
+      # from rank 21-50 when the top names are gate-rejected; the 5/5 caps above
+      # still bound how many orders fire. MUST be <= stock-intraday-vwap's
+      # INTRADAY_VWAP_POOL_LIMIT (50) so backups have session VWAP (fail-closed gate).
+      - AUTO_TRADE_CANDIDATE_POOL_LIMIT=50
       - AUTO_TRADE_MAX_SPREAD_PCT=0.4
       - AUTO_TRADE_MIN_SCORE=65
       - AUTO_TRADE_MIN_RELATIVE_VOLUME=1.0

@@ -29,6 +29,14 @@ class AutoOpenTrader:
         "MAX_ORDER_NOTIONAL_USD": ("max_notional", "float", "500"),
         "MAX_ACTIVE_STOCK_ORDERS": ("max_active_orders", "int", "5"),
         "MAX_ORDERS_PER_RUN": ("max_orders_per_run", "int", "5"),
+        # Candidate pool size (NOT an execution cap -- the 5/5 caps above still
+        # bound how many orders fire). Widening this lets the rank-ordered
+        # placement loop fall back to lower-ranked backups when the top names are
+        # gate-rejected. MUST be <= the intraday-vwap worker's pool
+        # (INTRADAY_VWAP_POOL_LIMIT) or wider names lack session_vwap and get
+        # rejected by the fail-closed VWAP gate. Clamped to the route's 50 cap;
+        # >50 needs the route-cap change (deferred 100/tier-3 phase).
+        "AUTO_TRADE_CANDIDATE_POOL_LIMIT": ("candidate_pool_limit", "int", "50"),
         "AUTO_TRADE_MAX_SPREAD_PCT": ("max_spread_pct", "float", "0.4"),
         "AUTO_TRADE_MIN_SCORE": ("min_score", "float", "65"),
         # RVOL floor + VWAP veto: live-intraday confirmation gates. The values
@@ -297,7 +305,16 @@ class AutoOpenTrader:
         return int(row["id"])
 
     async def _fetch_daytrade_candidates(self) -> List[Dict[str, Any]]:
-        url = f"{self.trading_ui_url}/api/signals/top?limit=20&mode=daytrades"
+        # Clamp to the route's hard cap (daytrades returns at most 50). A larger
+        # configured value is honored only once the route cap is raised (deferred).
+        pool = min(int(self.candidate_pool_limit), 50)
+        if int(self.candidate_pool_limit) > 50:
+            logger.warning(
+                "AUTO_TRADE_CANDIDATE_POOL_LIMIT=%s clamped to 50 (route cap); "
+                "raise the /api/signals/top cap to go higher",
+                self.candidate_pool_limit,
+            )
+        url = f"{self.trading_ui_url}/api/signals/top?limit={pool}&mode=daytrades"
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as response:
@@ -626,7 +643,7 @@ class AutoOpenTrader:
 
     def _reject_reason(self, row: Optional[Dict[str, Any]]) -> Optional[str]:
         if not row:
-            return "Missing from refreshed Top 20 Day Trades"
+            return f"Missing from refreshed Day Trades pool (top {self.candidate_pool_limit})"
         # The route's daytrades tradability gate is authoritative for "not
         # tradable" -- honor it as a veto so we never place an order the picker
         # already rejected (e.g. "Spread eats range", or any future order_bias /

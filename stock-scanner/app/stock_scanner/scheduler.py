@@ -1112,8 +1112,14 @@ class StockScheduler:
         return results
 
     async def _fetch_late_premarket_tickers(self) -> Optional[list[str]]:
-        """Fetch the exact Top 20 Day Trades tickers for the late PM refresh."""
-        url = f"{self.trading_ui_url}/api/signals/top?limit=20&mode=daytrades"
+        """Fetch the Day Trades candidate pool for the late PM refresh.
+
+        Sized to the auto-trader's candidate pool (50) so every name the trader
+        may fall back to has fresh current-session PM data -- pm_status /
+        pm_direction are fail-closed gates in the auto-trader, so an unrefreshed
+        backup would be auto-rejected ('No PM data' / 'Stale PM').
+        """
+        url = f"{self.trading_ui_url}/api/signals/top?limit=50&mode=daytrades"
         timeout = aiohttp.ClientTimeout(total=30)
 
         try:
@@ -1123,7 +1129,7 @@ class StockScheduler:
                     if response.status >= 400:
                         raise RuntimeError(f"Top day trades API returned {response.status}: {payload}")
         except Exception as e:
-            logger.warning("Could not fetch Top 20 Day Trades for late PM refresh: %s", e)
+            logger.warning("Could not fetch Day Trades pool for late PM refresh: %s", e)
             return None
 
         tickers: list[str] = []
@@ -1135,10 +1141,10 @@ class StockScheduler:
                 tickers.append(ticker)
 
         if not tickers:
-            logger.warning("Top 20 Day Trades returned no tickers for late PM refresh")
+            logger.warning("Day Trades pool returned no tickers for late PM refresh")
             return None
 
-        logger.info("Late PM refresh targeting Top 20 Day Trades tickers: %s", ", ".join(tickers))
+        logger.info("Late PM refresh targeting %d Day Trades tickers: %s", len(tickers), ", ".join(tickers))
         return tickers
 
     async def run_intraday_scan(self):
