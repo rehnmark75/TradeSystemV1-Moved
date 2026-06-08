@@ -198,6 +198,17 @@ class SMCMomentumConfig:
         default = self.sl_buffer_pips_jpy if is_jpy else self.sl_buffer_pips
         return float(self._override(epic, "sl_buffer_pips", default))
 
+    def get_pair_max_sl_pips(self, epic: str) -> float:
+        """Per-pair max stop-loss cap in pips. 0 = no cap (default, inert).
+
+        Set via the per-pair ``parameter_overrides`` JSONB key ``max_sl_pips``.
+        When a structure-derived SL exceeds this, the signal is rejected (not
+        clamped) — see the SL wipeout audit (Jun 4 2026). Validated for
+        EURJPY=20; left unset elsewhere (USDJPY 20-30p buckets are profitable,
+        NZDUSD is wider-is-better).
+        """
+        return float(self._override(epic, "max_sl_pips", 0.0))
+
     def get_pair_sweep_min(self, epic: str, is_jpy: bool = False) -> float:
         default = self.sweep_min_pips_jpy if is_jpy else self.sweep_min_pips
         return float(self._override(epic, "sweep_min_pips", default))

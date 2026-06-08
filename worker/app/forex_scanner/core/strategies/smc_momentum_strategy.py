@@ -355,6 +355,16 @@ class SMCMomentumStrategy(StrategyInterface):
             self.logger.debug(f"[SMC_MOMENTUM] Degenerate SL/TP for {epic}: sl={sl_pips:.1f} tp={tp_pips:.1f}")
             return None
 
+        # Per-pair max-SL cap (inert unless set in DB; e.g. EURJPY=20). Reject
+        # rather than clamp — clamping would corrupt the sweep-structure
+        # invalidation level (sl_price). See SL wipeout audit (Jun 4 2026).
+        max_sl_pips = cfg.get_pair_max_sl_pips(epic)
+        if max_sl_pips and sl_pips > max_sl_pips:
+            self._log_rejection(epic, "MAX_SL_EXCEEDED", f"{sl_pips:.1f} > {max_sl_pips}",
+                                direction=sweep.direction, hour_utc=hour_utc,
+                                details={"sl_pips": round(sl_pips, 1), "max_sl_pips": max_sl_pips})
+            return None
+
         # --- 13. Build signal ---
         signal = self._build_signal(
             epic=epic,
