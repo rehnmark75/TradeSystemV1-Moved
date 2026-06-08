@@ -24,6 +24,8 @@ from .backtest_order_logger import BacktestOrderLogger
 from ...strategies.ema_trend_pullback import EMATrendPullbackStrategy, PullbackSignal
 from ...strategies.macd_momentum import MACDMomentumStrategy, MACDMomentumSignal
 from ...strategies.zlma_crossover import ZLMACrossoverStrategy, ZLMASignal
+from ...strategies.squeeze_momentum import SqueezeMomentumStrategy
+from ...strategies.ultimate_ma_mtf import UltimateMAMTFStrategy
 
 # New strategies to be backtested
 from ...strategies.breakout_confirmation import BreakoutConfirmationStrategy
@@ -41,6 +43,12 @@ STRATEGY_REGISTRY: Dict[str, Type] = {
     'MACD': MACDMomentumStrategy,
     'ZLMA_CROSSOVER': ZLMACrossoverStrategy,
     'ZLMA': ZLMACrossoverStrategy,
+    'SQUEEZE_MOMENTUM': SqueezeMomentumStrategy,
+    'SQUEEZE': SqueezeMomentumStrategy,
+    'SQZ': SqueezeMomentumStrategy,
+    'ULTIMATE_MA_MTF': UltimateMAMTFStrategy,
+    'ULTIMATE_MA': UltimateMAMTFStrategy,
+    'UMA': UltimateMAMTFStrategy,
     # Backtested strategies
     'BREAKOUT': BreakoutConfirmationStrategy,
     'BREAKOUT_CONFIRMATION': BreakoutConfirmationStrategy,

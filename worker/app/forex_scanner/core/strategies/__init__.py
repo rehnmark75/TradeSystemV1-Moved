@@ -25,6 +25,7 @@ from .range_fade_strategy import (
 from .smc_momentum_strategy import SMCMomentumStrategy
 from .fa_or_atr_trail_strategy import FAORATRTrailStrategy, create_fa_or_atr_trail_strategy
 from .inside_day_breakout_strategy import InsideDayBreakoutStrategy, create_inside_day_strategy
+from .squeeze_momentum_strategy import SqueezeMomentumStrategy
 from .signal_result import SignalResult
 from .strategy_registry import (
     StrategyRegistry,
@@ -54,6 +55,7 @@ __all__ = [
     'create_fa_or_atr_trail_strategy',
     'InsideDayBreakoutStrategy',
     'create_inside_day_strategy',
+    'SqueezeMomentumStrategy',
 
     # Registry
     'StrategyRegistry',

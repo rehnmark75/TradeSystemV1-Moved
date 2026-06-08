@@ -42,6 +42,7 @@ try:
     from services.donchian_turtle_config_service import DonchianTurtleConfigService
     from services.inside_day_config_service import get_inside_day_config_service
     from services.kama_v2_config_service import get_kama_v2_config_service
+    from services.squeeze_momentum_config_service import SqueezeMomentumConfigService
 except ImportError:
     from forex_scanner.services.scanner_config_service import get_scanner_config
     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
@@ -53,6 +54,7 @@ except ImportError:
     from forex_scanner.services.donchian_turtle_config_service import DonchianTurtleConfigService
     from forex_scanner.services.inside_day_config_service import get_inside_day_config_service
     from forex_scanner.services.kama_v2_config_service import get_kama_v2_config_service
+    from forex_scanner.services.squeeze_momentum_config_service import SqueezeMomentumConfigService
 
 
 class SignalDetector:
@@ -147,6 +149,11 @@ class SignalDetector:
         # KAMA_V2 runs concurrently (AUDUSD-only 5m crossover, monitor-only at launch).
         self.kama_v2_enabled = True
 
+        # SQUEEZE_MOMENTUM runs concurrently as a monitor-only squeeze-release
+        # theory test. Per-pair rows decide enablement; direct backtests can
+        # force-initialize it regardless of scanner_global_config.
+        self.squeeze_momentum_enabled = True
+
         # SMC_SIMPLE_V2 runs concurrently for forward testing. The strategy itself
         # is scoped to its validated epics (currently EURUSD only).
         try:
@@ -224,6 +231,7 @@ class SignalDetector:
                 'FA_OR_ATR_TRAIL': 'fa_or_atr_trail_strategy',
                 'DONCHIAN_TURTLE': 'donchian_turtle_strategy',
                 'KAMA_V2': 'kama_v2_strategy',
+                'SQUEEZE_MOMENTUM': 'squeeze_momentum_strategy',
                 'SMC_SIMPLE_V2': 'smc_simple_v2_strategy',
             }
             module_name = module_map.get(key)
@@ -286,6 +294,9 @@ class SignalDetector:
             'FAOR': 'FA_OR_ATR_TRAIL',
             'FA_OR': 'FA_OR_ATR_TRAIL',
             'ATR_TRAIL': 'FA_OR_ATR_TRAIL',
+            'SQZ': 'SQUEEZE_MOMENTUM',
+            'SQUEEZE': 'SQUEEZE_MOMENTUM',
+            'SQZMOM': 'SQUEEZE_MOMENTUM',
         }
         canonical = aliases.get(strategy_name, strategy_name)
 
@@ -1071,6 +1082,32 @@ class SignalDetector:
                     self.logger.error(f"❌ [KAMA_V2] Error for {epic}: {e}")
                     individual_results['kama_v2'] = None
 
+            if (
+                self.squeeze_momentum_enabled
+                and not self._is_gold_epic(epic)
+                and SqueezeMomentumConfigService.get_instance().get_config().is_pair_enabled(epic)
+            ):
+                try:
+                    self.logger.debug(f"🔍 [SQUEEZE_MOMENTUM] Starting detection for {epic}")
+                    _sqz_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _sqz_ts = _sqz_bt_time if _sqz_bt_time is not None else datetime.now(timezone.utc)
+                    sqz_signal = self.detect_squeeze_momentum_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_sqz_ts
+                    )
+                    individual_results['squeeze_momentum'] = sqz_signal
+                    if sqz_signal:
+                        all_signals.append(sqz_signal)
+                        mode = "MONITOR" if sqz_signal.get("monitor_only") else "ACTIVE"
+                        self.logger.info(
+                            f"✅ [SQUEEZE_MOMENTUM:{mode}] Signal detected for {epic}: "
+                            f"{sqz_signal.get('signal')} @ {sqz_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [SQUEEZE_MOMENTUM] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [SQUEEZE_MOMENTUM] Error for {epic}: {e}")
+                    individual_results['squeeze_momentum'] = None
+
             if self.smc_simple_v2_enabled and not self._is_gold_epic(epic):
                 try:
                     self.logger.debug(f"🔍 [SMC_SIMPLE_V2] Starting detection for {epic}")
@@ -1145,6 +1182,9 @@ class SignalDetector:
         'FAOR': 'FA_OR_ATR_TRAIL',
         'FA_OR': 'FA_OR_ATR_TRAIL',
         'ATR_TRAIL': 'FA_OR_ATR_TRAIL',
+        'SQZ': 'SQUEEZE_MOMENTUM',
+        'SQUEEZE': 'SQUEEZE_MOMENTUM',
+        'SQZMOM': 'SQUEEZE_MOMENTUM',
     }
 
     def _detect_single_strategy(
@@ -1182,6 +1222,8 @@ class SignalDetector:
                 signal = self.detect_donchian_turtle_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'KAMA_V2':
                 signal = self.detect_kama_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'SQUEEZE_MOMENTUM':
+                signal = self.detect_squeeze_momentum_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'SMC_SIMPLE_V2':
                 signal = self.detect_smc_simple_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'INSIDE_DAY':
@@ -2216,6 +2258,78 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting KAMA V2 signals for {epic}: {e}")
+            return None
+
+    def detect_squeeze_momentum_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using LazyBear-style squeeze momentum release."""
+        try:
+            strategy = self._get_strategy('SQUEEZE_MOMENTUM')
+            if strategy is None:
+                return None
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_squeeze_momentum_backtest_id', None) != current_id:
+                    self._squeeze_momentum_backtest_id = current_id
+                    strategy.reset_cooldowns()
+
+            cfg = SqueezeMomentumConfigService.get_instance().get_config()
+            entry_tf = getattr(cfg, 'entry_timeframe', '15m') or '15m'
+            htf_tf = getattr(cfg, 'htf_timeframe', '1h') or '1h'
+
+            df_entry = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=entry_tf,
+                lookback_hours=96,
+            )
+            df_htf = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe=htf_tf,
+                lookback_hours=240,
+            )
+
+            df_entry = self._filter_incomplete_candles(df_entry, entry_tf)
+            df_htf = self._filter_incomplete_candles(df_htf, htf_tf)
+
+            if df_entry is None or df_entry.empty:
+                self.logger.debug(f"[SQUEEZE_MOMENTUM] No {entry_tf} data for {epic}")
+                return None
+            if df_htf is None or df_htf.empty:
+                self.logger.debug(f"[SQUEEZE_MOMENTUM] No {htf_tf} data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_entry,
+                df_htf=df_htf,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_entry)
+
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting Squeeze Momentum signals for {epic}: {e}")
             return None
 
     def detect_smc_simple_v2_signals(

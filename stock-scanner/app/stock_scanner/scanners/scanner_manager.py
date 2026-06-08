@@ -37,6 +37,8 @@ from .strategies import (
     HighRetestScanner,
     RelativeStrengthLeaderScanner,
     PreMarketCatalystScanner,
+    SqueezeMomentumScanner,
+    UltimateMAMTFScanner,
     # TrendReversalScanner removed - PF 1.09 too low
 )
 
@@ -121,6 +123,8 @@ class ScannerManager:
         'high_retest': HighRetestScanner,
         'relative_strength_leader': RelativeStrengthLeaderScanner,
         'premarket_catalyst': PreMarketCatalystScanner,
+        'squeeze_momentum': SqueezeMomentumScanner,
+        'ultimate_ma_mtf': UltimateMAMTFScanner,
     }
 
     DEFAULT_ENABLED_SCANNERS = [
@@ -129,6 +133,7 @@ class ScannerManager:
         'volatility_contraction_breakout',
         'premarket_catalyst',
         'gap_and_go',
+        'squeeze_momentum',
     ]
 
     def __init__(

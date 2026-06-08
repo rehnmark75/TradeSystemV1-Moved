@@ -738,7 +738,8 @@ export async function GET(request: Request) {
                 "Wait",
                 "Wait pullback",
               ].includes(orderBias);
-              const tradable = !(hardPmReject || hardBiasReject);
+              const hardSignalReject = String(row.signal_type ?? "") !== "BUY";
+              const tradable = !(hardSignalReject || hardPmReject || hardBiasReject);
               // #1 SECOND tradable path: a name confirmed in play by LIVE volume
               // (intraday RVOL pace >= 2 and holding >= VWAP) is tradable even
               // without a premarket row -- never overriding an explicit bearish PM
@@ -749,7 +750,7 @@ export async function GET(request: Request) {
               const hardSpreadReject = orderBias === "Avoid spread" || orderBias === "Spread eats range";
               const liveInPlay =
                 liveIntradayRvol != null && liveIntradayRvol >= 2 && vwapPosition !== "below" && !hardSpreadReject;
-              const rescued = !tradable && liveInPlay && !pmExplicitlyBearish;
+              const rescued = !tradable && liveInPlay && !pmExplicitlyBearish && !hardSignalReject;
               const finalTradable = tradable || rescued;
               return {
                 ...row,
@@ -788,7 +789,9 @@ export async function GET(request: Request) {
                 tradable: finalTradable,
                 gate_reason: finalTradable
                   ? rescued ? "In play (live)" : "Tradable"
-                  : hardPmReject ? String(finalPmStatus) : orderBias,
+                  : hardSignalReject ? "Long-only auto trader"
+                    : hardPmReject ? String(finalPmStatus)
+                    : orderBias,
               };
             });
             daytradeTradableCount = enrichedRows.filter((row) => row.tradable).length;

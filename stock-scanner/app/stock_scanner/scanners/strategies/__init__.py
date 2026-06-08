@@ -21,6 +21,8 @@ Other Strategies:
 - HighRetestScanner: 52-week high retest/reclaim setups
 - RelativeStrengthLeaderScanner: Fresh RS leaders
 - PreMarketCatalystScanner: Stored pre-market gap/news catalysts
+- SqueezeMomentumScanner: BB/KC squeeze release momentum
+- UltimateMAMTFScanner: Configurable MA reclaim/cross scanner
 """
 
 # Backtested & optimized strategies (PF > 1.5)
@@ -34,6 +36,8 @@ from .breakout_confirmation import BreakoutConfirmationScanner
 from .gap_and_go import GapAndGoScanner
 from .rsi_divergence import RSIDivergenceScanner
 from .pocket_pivot import PocketPivotScanner
+from .squeeze_momentum import SqueezeMomentumScanner
+from .ultimate_ma_mtf import UltimateMAMTFScanner
 from .catalyst_scanners import (
     EarningsDriftScanner,
     ShortSqueezeBreakoutScanner,
@@ -55,6 +59,8 @@ __all__ = [
     'GapAndGoScanner',
     'RSIDivergenceScanner',
     'PocketPivotScanner',
+    'SqueezeMomentumScanner',
+    'UltimateMAMTFScanner',
     'EarningsDriftScanner',
     'ShortSqueezeBreakoutScanner',
     'SectorRotationLeaderScanner',
