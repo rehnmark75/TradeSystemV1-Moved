@@ -593,6 +593,7 @@ REASON: Analysis error - neutral assessment"""
                 smc_momentum,
                 impulse_fade,
                 smc_simple,
+                smc_simple_v2,
                 xau_gold,
             )
         except ImportError:
@@ -603,6 +604,7 @@ REASON: Analysis error - neutral assessment"""
                 smc_momentum,
                 impulse_fade,
                 smc_simple,
+                smc_simple_v2,
                 xau_gold,
             )
 
@@ -615,6 +617,8 @@ REASON: Analysis error - neutral assessment"""
             return range_fade.build_prompt(signal, has_chart)
         if strategy == 'SMC_MOMENTUM':
             return smc_momentum.build_prompt(signal, has_chart)
+        if strategy == 'SMC_SIMPLE_V2':
+            return smc_simple_v2.build_prompt(signal, has_chart)
         if strategy == 'IMPULSE_FADE':
             return impulse_fade.build_prompt(signal, has_chart)
         if strategy == 'XAU_GOLD':

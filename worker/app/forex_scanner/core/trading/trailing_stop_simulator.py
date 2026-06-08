@@ -668,6 +668,7 @@ class TrailingStopSimulator:
         # For limit orders, we need to wait for price to reach the limit entry
         # before starting the trade simulation
         order_type = signal.get('order_type', 'market') if signal else 'market'
+        api_order_type = str(signal.get('api_order_type', '')).upper() if signal else ''
         limit_expiry_minutes = signal.get('limit_expiry_minutes', 20) if signal else 20  # Default 20 min for limit orders
         market_price = signal.get('market_price') if signal else None
 
@@ -682,16 +683,28 @@ class TrailingStopSimulator:
                 if bar_idx >= expiry_bars:
                     break  # Limit order expired
 
-                if is_long:
-                    # BUY limit: fills when price goes UP to limit entry (stop entry style)
-                    if bar['high'] >= entry_price:
-                        fill_bar = bar_idx
-                        break
-                elif is_short:
-                    # SELL limit: fills when price goes DOWN to limit entry (stop entry style)
-                    if bar['low'] <= entry_price:
-                        fill_bar = bar_idx
-                        break
+                if api_order_type == 'LIMIT':
+                    if is_long:
+                        # BUY LIMIT: fills when price pulls down to the better entry.
+                        if bar['low'] <= entry_price:
+                            fill_bar = bar_idx
+                            break
+                    elif is_short:
+                        # SELL LIMIT: fills when price pulls up to the better entry.
+                        if bar['high'] >= entry_price:
+                            fill_bar = bar_idx
+                            break
+                else:
+                    if is_long:
+                        # BUY STOP: fills when price breaks up to the confirmation entry.
+                        if bar['high'] >= entry_price:
+                            fill_bar = bar_idx
+                            break
+                    elif is_short:
+                        # SELL STOP: fills when price breaks down to the confirmation entry.
+                        if bar['low'] <= entry_price:
+                            fill_bar = bar_idx
+                            break
 
             if fill_bar is None:
                 # Limit order not filled - return no trade result

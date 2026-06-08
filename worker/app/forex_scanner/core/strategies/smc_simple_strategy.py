@@ -803,6 +803,11 @@ class SMCSimpleStrategy:
             'limit_expiry_minutes': 'limit_expiry_minutes',
             'momentum_offset_pips': 'momentum_offset_pips',
             'scalp_limit_offset_pips': 'scalp_limit_offset_pips',  # Scalp mode offset override
+            'scalp_use_market_orders': 'scalp_use_market_orders',
+            'scalp_use_limit_orders': 'scalp_use_limit_orders',
+            'market_order_min_confidence': 'market_order_min_confidence',
+            'market_order_min_ema_slope': 'market_order_min_ema_slope',
+            'low_confidence_extra_offset': 'low_confidence_extra_offset',
             'pullback_offset_min_pips': 'pullback_offset_min_pips',
             'pullback_offset_max_pips': 'pullback_offset_max_pips',
 
@@ -813,7 +818,15 @@ class SMCSimpleStrategy:
             'scalp_entry_timeframe': 'scalp_entry_timeframe',
             'scalp_ema_period': 'scalp_ema_period',
             'scalp_swing_lookback_bars': 'scalp_swing_lookback_bars',
+            'scalp_micro_pullback_lookback': 'scalp_micro_pullback_lookback',
             'scalp_swing_break_tolerance_pips': 'scalp_swing_break_tolerance_pips',
+            'scalp_rejection_break_entry_enabled': 'scalp_rejection_break_entry_enabled',
+            'scalp_rejection_break_entry_directions': 'scalp_rejection_break_entry_directions',
+            'scalp_rejection_break_min_wick_ratio': 'scalp_rejection_break_min_wick_ratio',
+            'scalp_rejection_break_max_body_ratio': 'scalp_rejection_break_max_body_ratio',
+            'scalp_rejection_break_min_engulfing_ratio': 'scalp_rejection_break_min_engulfing_ratio',
+            'scalp_rejection_break_require_close_break': 'scalp_rejection_break_require_close_break',
+            'scalp_rejection_break_min_confirm_body_ratio': 'scalp_rejection_break_min_confirm_body_ratio',
             'scalp_tp_pips': 'scalp_tp_pips',
             'scalp_sl_pips': 'scalp_sl_pips',
             'scalp_min_confidence': 'scalp_min_confidence',
@@ -999,6 +1012,13 @@ class SMCSimpleStrategy:
         self.scalp_fib_pullback_min = getattr(config, 'scalp_fib_pullback_min', 0.0)
         self.scalp_fib_pullback_max = getattr(config, 'scalp_fib_pullback_max', 1.0)
         self.scalp_micro_pullback_lookback = getattr(config, 'scalp_micro_pullback_lookback', 10)
+        self.scalp_rejection_break_entry_enabled = getattr(config, 'scalp_rejection_break_entry_enabled', False)
+        self.scalp_rejection_break_entry_directions = getattr(config, 'scalp_rejection_break_entry_directions', 'BEAR')
+        self.scalp_rejection_break_min_wick_ratio = getattr(config, 'scalp_rejection_break_min_wick_ratio', 0.45)
+        self.scalp_rejection_break_max_body_ratio = getattr(config, 'scalp_rejection_break_max_body_ratio', 0.55)
+        self.scalp_rejection_break_min_engulfing_ratio = getattr(config, 'scalp_rejection_break_min_engulfing_ratio', 0.80)
+        self.scalp_rejection_break_require_close_break = getattr(config, 'scalp_rejection_break_require_close_break', False)
+        self.scalp_rejection_break_min_confirm_body_ratio = getattr(config, 'scalp_rejection_break_min_confirm_body_ratio', 0.20)
 
         # Scalp reversal override (counter-trend) settings
         self.scalp_reversal_enabled = getattr(config, 'scalp_reversal_enabled', True)
@@ -1017,6 +1037,7 @@ class SMCSimpleStrategy:
 
         # Scalp market orders (faster fills, spread filter is the safeguard)
         self.scalp_use_market_orders = getattr(config, 'scalp_use_market_orders', True)
+        self.scalp_use_limit_orders = getattr(config, 'scalp_use_limit_orders', False)
 
         # v2.22.0: Scalp entry filters (based on Jan 2026 trade analysis)
         # These filters block non-winning entry patterns
@@ -2153,6 +2174,7 @@ class SMCSimpleStrategy:
             # v2.24.0: Initialize pattern/divergence data for alternative entry detection
             pattern_data = None
             rsi_divergence_data = None
+            rejection_break_data = None
             alternative_entry_type = None  # Will be set if pattern/divergence triggers entry
 
             # v2.24.0: Detect patterns and divergence BEFORE pullback validation
@@ -2205,8 +2227,19 @@ class SMCSimpleStrategy:
                 pattern_as_entry = getattr(self, 'pattern_as_entry_enabled', False)
                 divergence_as_entry = getattr(self, 'divergence_as_entry_enabled', False)
 
+                rejection_break = self._check_scalp_rejection_break_entry(
+                    entry_df,
+                    direction,
+                    pip_value,
+                    epic
+                )
+                if rejection_break.get('valid'):
+                    alternative_entry_type = 'REJECTION_BREAK'
+                    rejection_break_data = rejection_break
+                    self.logger.debug(f"   ✅ ALTERNATIVE ENTRY: {rejection_break.get('reason')}")
+
                 # Check if pattern can serve as alternative entry
-                if pattern_as_entry and pattern_data:
+                if not alternative_entry_type and pattern_as_entry and pattern_data:
                     pattern_strength = pattern_data.get('strength', 0)
                     if pattern_strength >= pattern_entry_threshold:
                         alternative_entry_type = 'PATTERN'
@@ -2214,7 +2247,7 @@ class SMCSimpleStrategy:
                                        f"strength {pattern_strength*100:.0f}% >= {pattern_entry_threshold*100:.0f}% threshold")
 
                 # Check if divergence can serve as alternative entry
-                if not alternative_entry_type and getattr(self, 'divergence_as_entry_enabled', False) and rsi_divergence_data:
+                if not alternative_entry_type and divergence_as_entry and rsi_divergence_data:
                     divergence_strength = rsi_divergence_data.get('strength', 0)
                     if divergence_strength >= divergence_entry_threshold:
                         alternative_entry_type = 'DIVERGENCE'
@@ -2237,11 +2270,18 @@ class SMCSimpleStrategy:
             # v2.24.0: Set entry variables based on pullback or alternative entry
             if alternative_entry_type:
                 # Alternative entry: use current market price
-                market_price = entry_df['close'].iloc[-1]
+                market_price = (
+                    rejection_break_data['entry_price']
+                    if alternative_entry_type == 'REJECTION_BREAK' and rejection_break_data
+                    else entry_df['close'].iloc[-1]
+                )
                 pullback_depth = 0.0  # Not applicable for pattern/divergence entries
                 in_optimal_zone = False  # Not applicable
 
-                if alternative_entry_type == 'PATTERN':
+                if alternative_entry_type == 'REJECTION_BREAK':
+                    entry_type = 'REJECTION_BREAK'
+                    trigger_type = rejection_break_data.get('trigger_type', 'rejection_break') if rejection_break_data else 'rejection_break'
+                elif alternative_entry_type == 'PATTERN':
                     entry_type = 'PATTERN'
                     trigger_type = f"pattern_{pattern_data.get('pattern_type', 'unknown')}"
                 else:  # DIVERGENCE
@@ -2263,6 +2303,8 @@ class SMCSimpleStrategy:
                 'macd_aligned': tier1_macd_aligned,  # From TIER 1 EMA check
                 'alternative_entry': alternative_entry_type,
             }
+            if rejection_break_data:
+                trigger_details['rejection_break'] = rejection_break_data
 
             # v2.23.0: Enhance trigger type with pattern/divergence suffixes (for pullback entries)
             if pattern_data and not alternative_entry_type:
@@ -2305,7 +2347,7 @@ class SMCSimpleStrategy:
             rsi_value = None  # Initialized here so confidence scoring at line ~3434 is safe in non-scalp mode
             if self.scalp_mode_enabled:
                 # Filter 1: Momentum-only (block pullback entries, allow PATTERN/DIVERGENCE/CONTINUATION)
-                allowed_entry_types = ['MOMENTUM', 'CONTINUATION', 'PATTERN', 'DIVERGENCE']
+                allowed_entry_types = ['MOMENTUM', 'CONTINUATION', 'PATTERN', 'DIVERGENCE', 'REJECTION_BREAK']
                 if self.scalp_momentum_only_filter and entry_type not in allowed_entry_types:
                     rejection_reason = f"Scalp filter: Non-momentum entry ({entry_type}) blocked"
                     self.logger.info(f"[SMC_SIMPLE] {pair} ❌ {rejection_reason}")
@@ -2972,7 +3014,11 @@ class SMCSimpleStrategy:
             market_order_min_ema_slope = 1.0    # Default
             low_confidence_extra_offset = 2.0   # Default
 
-            if hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
+            if self._backtest_mode and self._config_override:
+                market_order_min_confidence = getattr(self, 'market_order_min_confidence', market_order_min_confidence)
+                market_order_min_ema_slope = getattr(self, 'market_order_min_ema_slope', market_order_min_ema_slope)
+                low_confidence_extra_offset = getattr(self, 'low_confidence_extra_offset', low_confidence_extra_offset)
+            elif hasattr(self, '_using_database_config') and self._using_database_config and self._db_config:
                 # _db_config is already the SMCSimpleConfig object (not the service)
                 market_order_min_confidence = getattr(self._db_config, 'market_order_min_confidence', 0.65)
                 market_order_min_ema_slope = getattr(self._db_config, 'market_order_min_ema_slope', 1.0)
@@ -5367,6 +5413,145 @@ class SMCSimpleStrategy:
 
         return round(min(max(significance, 0.0), 1.0), 3)
 
+    def _check_scalp_rejection_break_entry(
+        self,
+        df: pd.DataFrame,
+        direction: str,
+        pip_value: float,
+        epic: str = None
+    ) -> Dict:
+        """Alternative scalp entry using 1m rejection candle plus confirmation.
+
+        This is intentionally stricter than the broad pattern-as-entry path:
+        the rejection pattern must be the previous completed entry-TF candle,
+        and the latest candle must confirm direction.
+        """
+        enabled = bool(getattr(self, 'scalp_rejection_break_entry_enabled', False))
+        if not enabled or not self.scalp_mode_enabled:
+            return {'valid': False, 'reason': 'rejection-break entry disabled'}
+
+        allowed_raw = str(getattr(self, 'scalp_rejection_break_entry_directions', 'BEAR') or '')
+        allowed = {item.strip().upper() for item in allowed_raw.split(',') if item.strip()}
+        if allowed and direction.upper() not in allowed:
+            return {'valid': False, 'reason': f'{direction} not enabled for rejection-break entry'}
+
+        if df is None or len(df) < 3:
+            return {'valid': False, 'reason': 'insufficient entry candles for rejection-break entry'}
+
+        pattern = df.iloc[-2]
+        confirm = df.iloc[-1]
+        previous = df.iloc[-3]
+
+        pattern_range = float(pattern['high'] - pattern['low'])
+        confirm_range = float(confirm['high'] - confirm['low'])
+        if pattern_range <= 0 or confirm_range <= 0:
+            return {'valid': False, 'reason': 'zero-range candle in rejection-break entry'}
+
+        pattern_body = abs(float(pattern['close'] - pattern['open']))
+        confirm_body = abs(float(confirm['close'] - confirm['open']))
+        pattern_body_ratio = pattern_body / pattern_range
+        confirm_body_ratio = confirm_body / confirm_range
+
+        max_body = float(getattr(self, 'scalp_rejection_break_max_body_ratio', 0.55))
+        min_wick = float(getattr(self, 'scalp_rejection_break_min_wick_ratio', 0.45))
+        min_engulf = float(getattr(self, 'scalp_rejection_break_min_engulfing_ratio', 0.80))
+        min_confirm_body = float(getattr(self, 'scalp_rejection_break_min_confirm_body_ratio', 0.20))
+        require_close_break = bool(getattr(self, 'scalp_rejection_break_require_close_break', False))
+
+        pattern_type = None
+        pattern_strength = 0.0
+        rejection_level = None
+
+        if direction.upper() == 'BEAR':
+            upper_wick = float(pattern['high'] - max(pattern['open'], pattern['close']))
+            lower_wick = float(min(pattern['open'], pattern['close']) - pattern['low'])
+            upper_ratio = upper_wick / pattern_range
+            lower_ratio = lower_wick / pattern_range
+
+            if upper_ratio >= min_wick and pattern_body_ratio <= max_body and lower_ratio <= upper_ratio:
+                pattern_type = 'bearish_rejection_break'
+                pattern_strength = min(1.0, (upper_ratio + (1.0 - pattern_body_ratio)) / 2.0)
+                rejection_level = float(pattern['high'])
+
+            prev_body = abs(float(previous['close'] - previous['open']))
+            engulf_ratio = pattern_body / prev_body if prev_body > 0 else 0.0
+            bearish_engulf = (
+                pattern['close'] < pattern['open']
+                and previous['close'] > previous['open']
+                and pattern['open'] >= previous['close']
+                and pattern['close'] <= previous['open']
+                and engulf_ratio >= min_engulf
+            )
+            if bearish_engulf and engulf_ratio / 2.0 > pattern_strength:
+                pattern_type = 'bearish_engulfing_break'
+                pattern_strength = min(1.0, engulf_ratio / 2.0)
+                rejection_level = float(max(pattern['high'], previous['high']))
+
+            confirm_aligned = confirm['close'] < confirm['open'] and confirm_body_ratio >= min_confirm_body
+            if require_close_break:
+                confirm_break = confirm['close'] < pattern['low']
+            else:
+                confirm_break = confirm['low'] < pattern['low'] or confirm['close'] < pattern['close']
+
+        elif direction.upper() == 'BULL':
+            lower_wick = float(min(pattern['open'], pattern['close']) - pattern['low'])
+            upper_wick = float(pattern['high'] - max(pattern['open'], pattern['close']))
+            lower_ratio = lower_wick / pattern_range
+            upper_ratio = upper_wick / pattern_range
+
+            if lower_ratio >= min_wick and pattern_body_ratio <= max_body and upper_ratio <= lower_ratio:
+                pattern_type = 'bullish_rejection_break'
+                pattern_strength = min(1.0, (lower_ratio + (1.0 - pattern_body_ratio)) / 2.0)
+                rejection_level = float(pattern['low'])
+
+            prev_body = abs(float(previous['close'] - previous['open']))
+            engulf_ratio = pattern_body / prev_body if prev_body > 0 else 0.0
+            bullish_engulf = (
+                pattern['close'] > pattern['open']
+                and previous['close'] < previous['open']
+                and pattern['open'] <= previous['close']
+                and pattern['close'] >= previous['open']
+                and engulf_ratio >= min_engulf
+            )
+            if bullish_engulf and engulf_ratio / 2.0 > pattern_strength:
+                pattern_type = 'bullish_engulfing_break'
+                pattern_strength = min(1.0, engulf_ratio / 2.0)
+                rejection_level = float(min(pattern['low'], previous['low']))
+
+            confirm_aligned = confirm['close'] > confirm['open'] and confirm_body_ratio >= min_confirm_body
+            if require_close_break:
+                confirm_break = confirm['close'] > pattern['high']
+            else:
+                confirm_break = confirm['high'] > pattern['high'] or confirm['close'] > pattern['close']
+
+        else:
+            return {'valid': False, 'reason': f'unsupported direction {direction}'}
+
+        if not pattern_type:
+            return {'valid': False, 'reason': 'no rejection/engulfing pattern on previous 1m candle'}
+        if not confirm_aligned:
+            return {'valid': False, 'reason': 'confirmation candle not direction-aligned'}
+        if not confirm_break:
+            return {'valid': False, 'reason': 'confirmation candle did not break rejection candle'}
+
+        entry_price = float(confirm['close'])
+        return {
+            'valid': True,
+            'entry_price': entry_price,
+            'pullback_depth': 0.0,
+            'in_optimal_zone': False,
+            'entry_type': 'REJECTION_BREAK',
+            'trigger_type': f"rejection_break_{pattern_type}",
+            'pattern_type': pattern_type,
+            'pattern_strength': round(pattern_strength, 3),
+            'rejection_level': rejection_level,
+            'confirm_body_ratio': round(confirm_body_ratio, 3),
+            'reason': (
+                f"{pattern_type} confirmed on {self.entry_tf} "
+                f"(strength={pattern_strength:.2f}, confirm_body={confirm_body_ratio:.2f})"
+            )
+        }
+
     def _check_pullback_zone(
         self,
         df: pd.DataFrame,
@@ -6201,7 +6386,11 @@ class SMCSimpleStrategy:
         # v2.25.0: Check for rejection candle confirmed - use market order
         # When scalp_require_rejection_candle is enabled and a rejection candle is detected,
         # the candle itself provides momentum confirmation, so we use market order instead of STOP
-        if self.scalp_mode_enabled and getattr(self, '_scalp_rejection_confirmed', False):
+        if (
+            self.scalp_mode_enabled
+            and getattr(self, '_scalp_rejection_confirmed', False)
+            and getattr(self, 'scalp_use_market_on_rejection', True)
+        ):
             self.logger.info(f"   📍 Market price: {current_close:.5f}")
             self.logger.info(f"   📍 MARKET order (rejection candle confirmation)")
             self._current_api_order_type = 'MARKET'
@@ -6210,7 +6399,11 @@ class SMCSimpleStrategy:
         # v2.25.1: Check for entry candle alignment confirmed - use market order
         # When scalp_require_entry_candle_alignment is enabled and candle color matches direction,
         # the aligned candle provides momentum confirmation, so we use market order instead of STOP
-        if self.scalp_mode_enabled and getattr(self, '_scalp_entry_alignment_confirmed', False):
+        if (
+            self.scalp_mode_enabled
+            and getattr(self, '_scalp_entry_alignment_confirmed', False)
+            and getattr(self, 'scalp_use_market_on_entry_alignment', True)
+        ):
             self.logger.info(f"   📍 Market price: {current_close:.5f}")
             self.logger.info(f"   📍 MARKET order (entry candle alignment confirmation)")
             self._current_api_order_type = 'MARKET'
@@ -6267,7 +6460,9 @@ class SMCSimpleStrategy:
         use_limit_entry = False
         if self.scalp_mode_enabled:
             # Check for scalp_use_limit_orders config option (defaults to False for backward compatibility)
-            if hasattr(self, '_db_config') and self._db_config:
+            if self._backtest_mode and self._config_override and 'scalp_use_limit_orders' in self._config_override:
+                use_limit_entry = bool(getattr(self, 'scalp_use_limit_orders', False))
+            elif hasattr(self, '_db_config') and self._db_config:
                 use_limit_entry = getattr(self._db_config, 'scalp_use_limit_orders', False)
             else:
                 use_limit_entry = getattr(self, 'scalp_use_limit_orders', False)

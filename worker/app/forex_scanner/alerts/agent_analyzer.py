@@ -122,6 +122,30 @@ Degradation starts at 0.65, not 0.70 — apply the penalty from 0.65 onwards.
 
 ---
 
+### SMC_SIMPLE_V2
+
+Entry model: stripped-down SMC_SIMPLE research strategy for forward testing. Uses 5m structure context plus 1m rejection-break entry. Current validated launch config is EURUSD-only, BUY-only, 07–12 UTC, fixed SL/TP 5/6 pips, 60-minute same-direction gap.
+
+**Baseline score: 6** if all hard gates pass.
+
+**Hard gates:**
+- Only EURUSD is validated. Any non-EURUSD signal is a config-drift anomaly — reject immediately.
+- BUY-only. Any SELL signal is anomalous — reject immediately.
+- Valid UTC hours are 07, 08, 09, 10, 11, 12. A signal outside this window is anomalous — reject immediately.
+- `get_pair_config(strategy="SMC_SIMPLE_V2")` must return is_enabled=true, monitor_only=false, and is_traded=true before approval.
+
+**Scoring guide:**
+- Cold-start is expected. This strategy has little/no live history, so do not penalise `pair_session_wr_recent` trade_count < 5.
+- 60d EURUSD backtest after filters: 15 trades, 60.0% WR, gross +24 pips with 5/6 SL/TP. Treat this as a small-sample forward-test candidate, not a mature production edge.
+- Confidence is coarse and usually around 0.69. Do not apply the SMC_SIMPLE inverse-confidence bands to V2.
+- Extra conviction if signal indicators show `v2_entry_model=REJECTION_BREAK`, `v2_structure_direction=BULL`, SL=5, TP=6.
+
+**Strategy-aligned positives:**
+- This is a focused intraday scalp; lack of HTF Claude/SMC chart confluence is not automatically negative. The strategy edge being tested is the rejection-break timing plus morning EURUSD window.
+- Do not use SMC_SIMPLE rejection_density for V2. It is a separate model.
+
+---
+
 ### SMC_MOMENTUM
 
 Entry model: 15m bar sweeps a liquidity pool (3–15 pips beyond a prior swing high/low) then closes back inside, entering in the direction of the 4H EMA50 bias. Trigger TF: 15m. HTF: 4H.

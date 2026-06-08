@@ -403,6 +403,17 @@ class SMCSimpleConfig:
     scalp_use_market_orders: bool = True
     scalp_use_limit_orders: bool = False  # v3.3.0: Use LIMIT orders (better price) instead of STOP orders (momentum)
 
+    # SCALP REJECTION-BREAK ENTRY (experimental)
+    # Alternative Tier3 entry: previous 1m candle rejects the pullback, current
+    # 1m candle confirms by breaking/closing in the signal direction.
+    scalp_rejection_break_entry_enabled: bool = False
+    scalp_rejection_break_entry_directions: str = "BEAR"
+    scalp_rejection_break_min_wick_ratio: float = 0.45
+    scalp_rejection_break_max_body_ratio: float = 0.55
+    scalp_rejection_break_min_engulfing_ratio: float = 0.80
+    scalp_rejection_break_require_close_break: bool = False
+    scalp_rejection_break_min_confirm_body_ratio: float = 0.20
+
     # SCALP REVERSAL OVERRIDE (counter-trend)
     scalp_reversal_enabled: bool = True
     scalp_reversal_min_runway_pips: float = 15.0

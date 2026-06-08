@@ -147,6 +147,15 @@ class SignalDetector:
         # KAMA_V2 runs concurrently (AUDUSD-only 5m crossover, monitor-only at launch).
         self.kama_v2_enabled = True
 
+        # SMC_SIMPLE_V2 runs concurrently for forward testing. The strategy itself
+        # is scoped to its validated epics (currently EURUSD only).
+        try:
+            scanner_cfg = get_scanner_config()
+            self.smc_simple_v2_enabled = scanner_cfg.is_strategy_enabled("SMC_SIMPLE_V2")
+        except Exception as e:
+            self.logger.warning(f"⚠️ SMC_SIMPLE_V2 config check failed; disabled: {e}")
+            self.smc_simple_v2_enabled = False
+
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
         self._strategy_router = None
@@ -215,6 +224,7 @@ class SignalDetector:
                 'FA_OR_ATR_TRAIL': 'fa_or_atr_trail_strategy',
                 'DONCHIAN_TURTLE': 'donchian_turtle_strategy',
                 'KAMA_V2': 'kama_v2_strategy',
+                'SMC_SIMPLE_V2': 'smc_simple_v2_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -1061,6 +1071,28 @@ class SignalDetector:
                     self.logger.error(f"❌ [KAMA_V2] Error for {epic}: {e}")
                     individual_results['kama_v2'] = None
 
+            if self.smc_simple_v2_enabled and not self._is_gold_epic(epic):
+                try:
+                    self.logger.debug(f"🔍 [SMC_SIMPLE_V2] Starting detection for {epic}")
+                    _v2_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _v2_ts = _v2_bt_time if _v2_bt_time is not None else datetime.now(timezone.utc)
+                    v2_signal = self.detect_smc_simple_v2_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_v2_ts
+                    )
+                    individual_results['smc_simple_v2'] = v2_signal
+                    if v2_signal:
+                        all_signals.append(v2_signal)
+                        mode = "MONITOR" if v2_signal.get("monitor_only") else "ACTIVE"
+                        self.logger.info(
+                            f"✅ [SMC_SIMPLE_V2:{mode}] Signal detected for {epic}: "
+                            f"{v2_signal.get('signal')} @ {v2_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [SMC_SIMPLE_V2] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [SMC_SIMPLE_V2] Error for {epic}: {e}")
+                    individual_results['smc_simple_v2'] = None
+
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
@@ -1150,6 +1182,8 @@ class SignalDetector:
                 signal = self.detect_donchian_turtle_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'KAMA_V2':
                 signal = self.detect_kama_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'SMC_SIMPLE_V2':
+                signal = self.detect_smc_simple_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'INSIDE_DAY':
                 signal = self.detect_inside_day_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
@@ -2182,4 +2216,71 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting KAMA V2 signals for {epic}: {e}")
+            return None
+
+    def detect_smc_simple_v2_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect SMC_SIMPLE_V2 raw 5m structure + 1m entry-model signals."""
+        try:
+            strategy = self._get_strategy('SMC_SIMPLE_V2')
+            if strategy is None:
+                return None
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_smc_simple_v2_backtest_id', None) != current_id:
+                    self._smc_simple_v2_backtest_id = current_id
+                    strategy.reset_cooldowns()
+
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='5m',
+                lookback_hours=24 if is_backtest else 12,
+            )
+            df_5m = self._filter_incomplete_candles(df_5m, '5m')
+            if df_5m is None or len(df_5m) < 20:
+                self.logger.debug(f"[SMC_SIMPLE_V2] Insufficient 5m data for {epic}: {0 if df_5m is None else len(df_5m)} bars")
+                return None
+
+            df_1m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1m',
+                lookback_hours=4 if is_backtest else 2,
+            )
+            df_1m = self._filter_incomplete_candles(df_1m, '1m')
+            if df_1m is None or len(df_1m) < 8:
+                self.logger.debug(f"[SMC_SIMPLE_V2] Insufficient 1m data for {epic}: {0 if df_1m is None else len(df_1m)} bars")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_5m,
+                df_entry=df_1m,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_5m)
+
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting SMC Simple V2 signals for {epic}: {e}")
             return None

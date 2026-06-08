@@ -2273,6 +2273,7 @@ class TradeValidator:
 
             # 🔥 STRATEGY-SPECIFIC CONFIDENCE THRESHOLDS (bypass general threshold)
             strategy = signal.get('strategy', '')
+            strategy_upper = (strategy or '').upper()
             scalping_mode = signal.get('scalping_mode', '')
 
             # Check if this is a scalping signal (by strategy name or scalping_mode)
@@ -2294,8 +2295,12 @@ class TradeValidator:
                     return False, f"SMC_STRUCTURE confidence {confidence:.1%} below SMC minimum {smc_min_confidence:.1%}"
                 return True, f"SMC_STRUCTURE confidence {confidence:.1%} meets requirements (min: {smc_min_confidence:.1%})"
 
+            # SMC_SIMPLE_V2: forward-test strategy validates confidence internally.
+            elif strategy_upper == 'SMC_SIMPLE_V2':
+                return True, f"SMC_SIMPLE_V2 confidence {confidence:.1%} (validated by strategy)"
+
             # SMC_SIMPLE: Skip redundant check - strategy already validates via config's MIN_CONFIDENCE_THRESHOLD
-            elif 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower():
+            elif strategy_upper in ('SMC_SIMPLE', 'SMC'):
                 return True, f"SMC_SIMPLE confidence {confidence:.1%} (validated by strategy)"
 
             # EMA_DOUBLE_CONFIRMATION uses 50% minimum confidence with multi-filter validation
@@ -2423,7 +2428,11 @@ class TradeValidator:
 
             # SMC_SIMPLE: Skip - strategy already validates R:R with ATR-based caps and structural stops
             strategy = signal.get('strategy', '')
-            if 'SMC_SIMPLE' in strategy or 'smc_simple' in strategy.lower():
+            strategy_upper = (strategy or '').upper()
+            if strategy_upper == 'SMC_SIMPLE_V2':
+                return True, "SMC_SIMPLE_V2 risk parameters (fixed 5/6 SL/TP validated by strategy)"
+
+            if strategy_upper in ('SMC_SIMPLE', 'SMC'):
                 return True, "SMC_SIMPLE risk parameters (validated by strategy)"
 
             # Check if risk parameters are present

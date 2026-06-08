@@ -130,10 +130,13 @@ def main():
             # Handle strategy shortcuts
             # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
             # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
-            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF", "FA_OR_ATR_TRAIL", "FAOR", "FA_OR", "ATR_TRAIL", "DONCHIAN_TURTLE", "DONCHIAN", "TURTLE", "KAMA_V2", "KAMA"]:
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_SIMPLE_V2", "SMCV2", "V2", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF", "FA_OR_ATR_TRAIL", "FAOR", "FA_OR", "ATR_TRAIL", "DONCHIAN_TURTLE", "DONCHIAN", "TURTLE", "KAMA_V2", "KAMA"]:
                 strategy_mapping = {
                     "SMC": "SMC_SIMPLE",
                     "SMC_SIMPLE": "SMC_SIMPLE",
+                    "SMC_SIMPLE_V2": "SMC_SIMPLE_V2",
+                    "SMCV2": "SMC_SIMPLE_V2",
+                    "V2": "SMC_SIMPLE_V2",
                     "SMC_EMA": "SMC_SIMPLE",
                     "FVG_RETEST": "FVG_RETEST",
                     "FVG": "FVG_RETEST",
@@ -489,7 +492,7 @@ Supported Pairs:
   EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY
 
 Supported Strategies:
-  SMC_SIMPLE, SMC_MOMENTUM, MEAN_REVERSION, IMPULSE_FADE, RANGE_FADE, XAU_GOLD
+  SMC_SIMPLE, SMC_SIMPLE_V2, SMC_MOMENTUM, MEAN_REVERSION, IMPULSE_FADE, RANGE_FADE, XAU_GOLD
 
 Additional Options:
   --show-signals     Show detailed signal breakdown

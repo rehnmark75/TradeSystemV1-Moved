@@ -360,6 +360,29 @@ def get_pair_config(epic: str, strategy: str = "SMC_SIMPLE") -> Dict:
     Returns monitor_only flag, SL/TP pips, and confidence thresholds.
     """
     strategy_upper = strategy.upper()
+    if strategy_upper == "SMC_SIMPLE_V2":
+        is_eurusd = epic == "CS.D.EURUSD.CEEM.IP"
+        return {
+            "epic": epic,
+            "strategy": strategy_upper,
+            "table": "code_defaults",
+            "found": True,
+            "is_enabled": is_eurusd,
+            "monitor_only": False,
+            "is_traded": is_eurusd,
+            "fixed_stop_loss_pips": 5.0,
+            "fixed_take_profit_pips": 6.0,
+            "min_confidence": 0.60,
+            "max_confidence": None,
+            "parameter_overrides": {
+                "enabled_epics": "CS.D.EURUSD.CEEM.IP",
+                "entry_models": "REJECTION_BREAK",
+                "directions": "BULL",
+                "allowed_hours_utc": "7,8,9,10,11,12",
+                "min_signal_gap_minutes": 60,
+            },
+        }
+
     table = _STRATEGY_CONFIG_TABLE.get(strategy_upper)
     if not table:
         return {"error": f"Unknown strategy '{strategy}'. Known: {list(_STRATEGY_CONFIG_TABLE)}", "epic": epic}
@@ -518,7 +541,7 @@ TOOL_DEFINITIONS = [
             "IMPULSE_FADE losses on EURJPY at hour 20 must not contaminate SMC_SIMPLE WR at hour 8. "
             "Use this first to detect adverse environments before approving a signal. "
             "Key warning: XAU_GOLD in 'ranging' regime has historically shown <25% WR. "
-            "Supported strategy values: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
+            "Supported strategy values: SMC_SIMPLE, SMC_SIMPLE_V2, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
             "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL, KAMA_V2, INSIDE_DAY."
         ),
         "input_schema": {
@@ -541,7 +564,7 @@ TOOL_DEFINITIONS = [
                 "strategy": {
                     "type": "string",
                     "description": (
-                        "Strategy name to filter by, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
+                        "Strategy name to filter by, e.g. 'SMC_SIMPLE', 'SMC_SIMPLE_V2', 'XAU_GOLD', 'IMPULSE_FADE', "
                         "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM', 'RANGE_FADE', "
                         "'FA_OR_ATR_TRAIL', 'KAMA_V2', 'INSIDE_DAY'. Empty string aggregates all strategies "
                         "(not recommended)."
@@ -619,7 +642,7 @@ TOOL_DEFINITIONS = [
             "Retrieve the pair configuration for a specific strategy: monitor_only flag, "
             "SL/TP pips, and confidence thresholds. Each strategy has its own config table — "
             "always pass the strategy name so the correct table is queried. "
-            "Supported strategies: SMC_SIMPLE, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
+            "Supported strategies: SMC_SIMPLE, SMC_SIMPLE_V2, XAU_GOLD, IMPULSE_FADE, DONCHIAN_TURTLE, "
             "MEAN_REVERSION, SMC_MOMENTUM, RANGE_FADE, FA_OR_ATR_TRAIL, KAMA_V2, INSIDE_DAY. "
             "Note: FA_OR_ATR_TRAIL uses ATR-based stops so fixed_stop_loss_pips will be null. "
             "Call this to verify the pair is actively traded before approving."
@@ -631,7 +654,7 @@ TOOL_DEFINITIONS = [
                 "strategy": {
                     "type": "string",
                     "description": (
-                        "Strategy name, e.g. 'SMC_SIMPLE', 'XAU_GOLD', 'IMPULSE_FADE', "
+                        "Strategy name, e.g. 'SMC_SIMPLE', 'SMC_SIMPLE_V2', 'XAU_GOLD', 'IMPULSE_FADE', "
                         "'DONCHIAN_TURTLE', 'MEAN_REVERSION', 'SMC_MOMENTUM', "
                         "'RANGE_FADE', 'FA_OR_ATR_TRAIL', 'KAMA_V2', 'INSIDE_DAY'. Required."
                     ),

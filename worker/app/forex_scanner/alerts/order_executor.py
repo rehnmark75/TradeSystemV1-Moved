@@ -648,7 +648,7 @@ class OrderExecutor:
             is_scalp_trade = False
             virtual_sl_pips = None  # Let VSL service use its per-pair config
             signal_strategy_name = (signal.get('strategy') or '').upper()
-            if 'SMC_SIMPLE' in signal_strategy_name or signal_strategy_name == 'SMC':
+            if signal_strategy_name in ('SMC_SIMPLE', 'SMC'):
                 try:
                     from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
                     smc_config = get_smc_simple_config()

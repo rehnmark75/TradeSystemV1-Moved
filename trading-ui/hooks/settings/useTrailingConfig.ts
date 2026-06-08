@@ -4,6 +4,7 @@ import { apiUrl } from "../../lib/settings/api";
 export const TRAILING_STRATEGIES = [
   "DEFAULT",
   "SMC_SIMPLE",
+  "SMC_SIMPLE_V2",
   "XAU_GOLD",
   "RANGE_FADE",
   "MEAN_REVERSION",

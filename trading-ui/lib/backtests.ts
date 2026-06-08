@@ -5,6 +5,7 @@ export const DEFAULT_BACKTEST_LIMIT = 20;
 export const BACKTEST_TIMEFRAMES = ["5m", "15m", "30m", "1h", "4h"] as const;
 export const BACKTEST_STRATEGIES = [
   "SMC_SIMPLE",
+  "SMC_SIMPLE_V2",
   "SMC_MOMENTUM",
   "MEAN_REVERSION",
   "IMPULSE_FADE",
@@ -17,6 +18,7 @@ export type BacktestStrategy = (typeof BACKTEST_STRATEGIES)[number];
 
 export const BACKTEST_STRATEGY_LABELS: Record<BacktestStrategy, string> = {
   SMC_SIMPLE: "SMC Simple (FX scalp)",
+  SMC_SIMPLE_V2: "SMC Simple V2 (EURUSD entry model)",
   SMC_MOMENTUM: "SMC Momentum",
   MEAN_REVERSION: "Mean Reversion",
   IMPULSE_FADE: "Impulse Fade",
@@ -79,6 +81,7 @@ export function formatDuration(seconds: number | null | undefined) {
 
 export const STRATEGY_METADATA_ENDPOINT: Record<BacktestStrategy, string> = {
   SMC_SIMPLE: "/trading/api/settings/strategy/smc/metadata",
+  SMC_SIMPLE_V2: "/trading/api/settings/strategy/smc/metadata",
   SMC_MOMENTUM: "/trading/api/settings/strategy/smc-momentum/metadata",
   MEAN_REVERSION: "/trading/api/settings/strategy/mean-reversion/metadata",
   IMPULSE_FADE: "/trading/api/settings/strategy/impulse-fade/metadata",
