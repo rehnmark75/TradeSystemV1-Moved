@@ -75,7 +75,7 @@ const SETTING_DEFS: Record<string, {
   },
   AUTO_TRADE_MIN_SCORE: {
     label: "Min Score",
-    description: "Minimum Top 20 Day Trades score required after the open.",
+    description: "Minimum Top 50 Day Trades score required after the open.",
     type: "float",
     defaultValue: "65",
     min: 0,

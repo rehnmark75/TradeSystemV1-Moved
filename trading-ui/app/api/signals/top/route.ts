@@ -53,7 +53,7 @@ const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 // confirmed in play by live volume (intraday RVOL pace >= 2, holding >= VWAP) is
 // tradable even WITHOUT a premarket row -- this breaks a feedback loop, because
 // the 9:00 AM ET premarket-pricing job enriches exactly the tickers THIS route
-// returns as the Top 20, so a mover buried for lack of PM data would never get
+// returns as the Top 50, so a mover buried for lack of PM data would never get
 // enriched. Surfacing it lets the next cycle enrich it.
 //
 // The row projection MIRRORS /api/signals/results so the signals-page detail
@@ -741,7 +741,7 @@ export async function GET(request: Request) {
               // without a premarket row -- never overriding an explicit bearish PM
               // read, and only when the spread is not a hard reject. This breaks
               // the feedback loop where the 9:00 AM premarket-pricing job enriches
-              // only the tickers this route already ranks in the Top 20.
+              // only the tickers this route already ranks in the Top 50.
               const pmExplicitlyBearish = ["PM against", "PM fading"].includes(String(finalPmStatus ?? ""));
               const hardSpreadReject = orderBias === "Avoid spread" || orderBias === "Spread eats range";
               const liveInPlay =

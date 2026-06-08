@@ -494,7 +494,7 @@ export default function SignalsPage() {
     const loadTop = async () => {
       setTopLoading(true);
       try {
-        const params = new URLSearchParams({ limit: viewMode === "daytrades" ? "20" : "10" });
+        const params = new URLSearchParams({ limit: viewMode === "daytrades" ? "50" : "10" });
         if (viewMode === "daytrades") params.set("mode", "daytrades");
         const res = await fetch(`${apiPath("signals/top")}?${params.toString()}`);
         const data = await res.json();
@@ -1293,13 +1293,13 @@ export default function SignalsPage() {
         <div className="view-toggle" style={{ display: "flex", gap: 8, margin: "4px 0 14px" }}>
           <button className="claude-btn" style={{ opacity: viewMode === "all" ? 1 : 0.5 }} onClick={() => setViewMode("all")}>All Signals</button>
           <button className="claude-btn" style={{ opacity: viewMode === "top10" ? 1 : 0.5 }} onClick={() => setViewMode("top10")}>Top 10 Candidates</button>
-          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => setViewMode("daytrades")}>Top 20 Day Trades</button>
+          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => setViewMode("daytrades")}>Top 50 Day Trades</button>
         </div>
 
         {viewMode === "top10" || viewMode === "daytrades" ? (
           <div className="top10-view">
             <div className="footer-note" style={{ marginBottom: 10 }}>
-              {viewMode === "daytrades" ? "Top 20 day trades" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
+              {viewMode === "daytrades" ? "Top 50 day trades" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
               {viewMode === "daytrades"
                 ? " Score (0–100) leads with activity: 0.30×RVOL + 0.14×range + 0.16×RS + 0.12×TV + 0.12×premarket conviction + 0.08×live news + 0.08×entry-not-extended, ± rising-RS / gap / overbought / liquidity / low-float / squeeze / earnings. Names streaming live 1h candles also earn a bonus for intraday RVOL pace + holding above session VWAP. A tradability gate (current-session premarket BUY, or live-volume confirmation, + acceptable spread) ranks above score — non-tradable rows are dimmed."
                 : " Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties."}
@@ -1311,7 +1311,7 @@ export default function SignalsPage() {
               {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; scanner PF is shown so marginal scanners stay visible.
             </div>
             {topLoading ? (
-              <div className="footer-note">Loading {viewMode === "daytrades" ? "top 20 day trades" : "top candidates"}…</div>
+              <div className="footer-note">Loading {viewMode === "daytrades" ? "top 50 day trades" : "top candidates"}…</div>
             ) : topCandidates.length === 0 ? (
               <div className="footer-note">No {viewMode === "daytrades" ? "day-trade candidates" : "candidates"} in the latest batch.</div>
             ) : (
