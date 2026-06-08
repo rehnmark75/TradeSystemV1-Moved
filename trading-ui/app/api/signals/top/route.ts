@@ -142,6 +142,7 @@ type IntradayCandleStat = {
   last_close: number | null;
   bars_today: number | null;
   candle_session: string | null;
+  live_as_of: string | null; // ISO UTC; when the intraday-vwap worker last wrote this row
 };
 
 // Live intraday enrichment, sourced from stock_intraday_state -- a small
@@ -166,7 +167,8 @@ const fetchIntradayCandleStats = async (
              session_vwap,
              last_price AS last_close,
              bars_today,
-             trade_date::text AS candle_session
+             trade_date::text AS candle_session,
+             as_of
       FROM stock_intraday_state
       WHERE ticker = ANY($1)
         AND trade_date = (NOW() AT TIME ZONE 'America/New_York')::date
@@ -187,6 +189,7 @@ const fetchIntradayCandleStats = async (
         last_close: r.last_close == null ? null : Number(r.last_close),
         bars_today: r.bars_today == null ? null : Number(r.bars_today),
         candle_session: r.candle_session == null ? null : String(r.candle_session),
+        live_as_of: r.as_of == null ? null : new Date(r.as_of as string).toISOString(),
       };
     }
     return out;
@@ -755,6 +758,7 @@ export async function GET(request: Request) {
                 broker_quote_age_minutes: quoteAgeMinutes,
                 intraday_relative_volume: intradayRelativeVolume,
                 live_intraday_rvol: liveIntradayRvol,
+                live_as_of: candle?.live_as_of ?? null,
                 session_vwap: sessionVwap,
                 vwap_position: vwapPosition,
                 live_confirmation_bonus: liveConfirmationBonus,

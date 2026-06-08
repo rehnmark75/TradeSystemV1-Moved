@@ -188,6 +188,7 @@ type TopCandidate = SignalRow & {
   session_vwap?: number | null;
   vwap_position?: "above" | "below" | null;
   live_confirmation_bonus?: number | null;
+  live_as_of?: string | null;
   days_to_earnings?: number | string | null;
   tradable?: boolean;
   gate_reason?: string | null;
@@ -433,6 +434,8 @@ export default function SignalsPage() {
   const [topCandidates, setTopCandidates] = useState<TopCandidate[]>([]);
   const [topLoading, setTopLoading] = useState(false);
   const [topMeta, setTopMeta] = useState<TopMeta | null>(null);
+  const [topLoadedAt, setTopLoadedAt] = useState<string | null>(null);
+  const [topRefreshNonce, setTopRefreshNonce] = useState(0);
 
   useEffect(() => {
     const loadStats = async () => {
@@ -500,12 +503,13 @@ export default function SignalsPage() {
         const data = await res.json();
         setTopCandidates(data.rows || []);
         setTopMeta(data.meta || null);
+        setTopLoadedAt(new Date().toLocaleTimeString("en-GB"));
       } finally {
         setTopLoading(false);
       }
     };
     loadTop();
-  }, [viewMode]);
+  }, [viewMode, topRefreshNonce]);
 
   const toggleExpand = async (signal: SignalRow) => {
     const next = !expanded[signal.id];
@@ -1292,8 +1296,8 @@ export default function SignalsPage() {
 
         <div className="view-toggle" style={{ display: "flex", gap: 8, margin: "4px 0 14px" }}>
           <button className="claude-btn" style={{ opacity: viewMode === "all" ? 1 : 0.5 }} onClick={() => setViewMode("all")}>All Signals</button>
-          <button className="claude-btn" style={{ opacity: viewMode === "top10" ? 1 : 0.5 }} onClick={() => setViewMode("top10")}>Top 10 Candidates</button>
-          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => setViewMode("daytrades")}>Top 50 Day Trades</button>
+          <button className="claude-btn" style={{ opacity: viewMode === "top10" ? 1 : 0.5 }} onClick={() => { setViewMode("top10"); setTopRefreshNonce((n) => n + 1); }}>Top 10 Candidates</button>
+          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => { setViewMode("daytrades"); setTopRefreshNonce((n) => n + 1); }} title="Click to refresh">Top 50 Day Trades{viewMode === "daytrades" && topLoadedAt ? ` · ${topLoadedAt}` : ""}</button>
         </div>
 
         {viewMode === "top10" || viewMode === "daytrades" ? (
@@ -1330,6 +1334,7 @@ export default function SignalsPage() {
                     {viewMode === "daytrades" ? <th style={top10CellHead}>Spread</th> : null}
                     {viewMode === "daytrades" ? <th style={top10CellHead}>Bias</th> : null}
                     {viewMode === "daytrades" ? <th style={top10CellHead}>Exec</th> : null}
+                    {viewMode === "daytrades" ? <th style={top10CellHead}>Updated</th> : null}
                     <th style={top10CellHead}>Scanner PF</th>
                     <th style={top10CellHead}>Flags</th>
                   </tr>
@@ -1399,6 +1404,16 @@ export default function SignalsPage() {
                                   S{c.execution_quality_parts.spread ?? 0} Q{c.execution_quality_parts.quote_age ?? 0} E{c.execution_quality_parts.entry ?? 0} Z{c.execution_quality_parts.size ?? 0} R{c.execution_quality_parts.room ?? 0}
                                 </div>
                               ) : null}
+                            </td>
+                            <td style={top10Cell}>
+                              {c.live_as_of ? (
+                                <>
+                                  {new Date(c.live_as_of).toLocaleTimeString("en-GB")}
+                                  <div style={{ fontSize: 11, opacity: 0.55 }}>
+                                    {Math.max(0, Math.round((Date.now() - new Date(c.live_as_of).getTime()) / 60000))}m ago
+                                  </div>
+                                </>
+                              ) : <span style={{ opacity: 0.4 }} title="No live intraday data yet (pre-open or worker idle)">—</span>}
                             </td>
                           </>
                         ) : (
