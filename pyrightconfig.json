@@ -28,7 +28,7 @@
     ".agents",
     ".claude",
     "archive",
-    "analysis",
+    "**/analysis",
     "analysis_docs",
     "certs",
     "data",
