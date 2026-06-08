@@ -18,6 +18,7 @@ from collections import defaultdict
 
 from .base_scanner import BaseScanner, SignalSetup, ScannerConfig, QualityTier
 from .scoring import SignalScorer
+from ..core.backtest.backtest_data_provider import BacktestDataProvider
 from .strategies import (
     # Backtested & optimized strategies
     ZLMATrendScanner,
@@ -102,14 +103,13 @@ class ScannerManager:
         csv = manager.export_tradingview_csv()
     """
 
-    # Available scanner classes (7 total - TREND_REVERSAL removed)
+    # Available scanner classes. Not every registered scanner is enabled by
+    # default; weak live performers stay available for targeted retuning runs.
     SCANNER_CLASSES: Dict[str, Type[BaseScanner]] = {
-        # Backtested & optimized (PF > 1.0)
-        'zlma_trend': ZLMATrendScanner,           # PF: 1.55, WR: 50%
-        'macd_momentum': MACDMomentumScanner,     # PF: 1.71, WR: 42%
-        'ema_pullback': EMAPullbackScanner,       # PF: 2.02
-        'reversal_scanner': ReversalScanner,      # PF: 2.44 - Best performer
-        # Lower PF strategies (still included for diversity)
+        'zlma_trend': ZLMATrendScanner,
+        'macd_momentum': MACDMomentumScanner,
+        'ema_pullback': EMAPullbackScanner,
+        'reversal_scanner': ReversalScanner,
         'breakout_confirmation': BreakoutConfirmationScanner,
         'gap_and_go': GapAndGoScanner,
         'rsi_divergence': RSIDivergenceScanner,
@@ -122,6 +122,14 @@ class ScannerManager:
         'relative_strength_leader': RelativeStrengthLeaderScanner,
         'premarket_catalyst': PreMarketCatalystScanner,
     }
+
+    DEFAULT_ENABLED_SCANNERS = [
+        'zlma_trend',
+        'ema_pullback',
+        'volatility_contraction_breakout',
+        'premarket_catalyst',
+        'gap_and_go',
+    ]
 
     def __init__(
         self,
@@ -139,7 +147,8 @@ class ScannerManager:
         """
         self.db = db_manager
         self.scorer = scorer or SignalScorer()
-        self.enabled_scanners = enabled_scanners or list(self.SCANNER_CLASSES.keys())
+        self.enabled_scanners = enabled_scanners or list(self.DEFAULT_ENABLED_SCANNERS)
+        self.data_provider = BacktestDataProvider(db_manager)
 
         self._scanners: Dict[str, BaseScanner] = {}
         self._latest_signals: List[SignalSetup] = []
@@ -152,10 +161,13 @@ class ScannerManager:
         for scanner_name in self.enabled_scanners:
             if scanner_name in self.SCANNER_CLASSES:
                 scanner_class = self.SCANNER_CLASSES[scanner_name]
-                self._scanners[scanner_name] = scanner_class(
+                scanner = scanner_class(
                     self.db,
                     scorer=self.scorer
                 )
+                if hasattr(scanner, "data_provider"):
+                    scanner.data_provider = self.data_provider
+                self._scanners[scanner_name] = scanner
                 logger.info(f"  Initialized: {scanner_name}")
             else:
                 logger.warning(f"  Unknown scanner: {scanner_name}")

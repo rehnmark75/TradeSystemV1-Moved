@@ -47,15 +47,17 @@ logger = logging.getLogger(__name__)
 class GapAndGoConfig(ScannerConfig):
     """Configuration for Gap & Go Scanner - uses backtested strategy defaults"""
 
-    # Strategy parameters (match backtested strategy)
-    min_gap_pct: float = 2.0          # Minimum gap size
-    large_gap_pct: float = 4.0        # Large gap threshold
-    max_gap_pct: float = 12.0         # Max gap (avoid extremes)
-    min_relative_volume: float = 1.5  # Volume surge threshold
+    # Strategy parameters tightened from live performance review.
+    min_gap_pct: float = 3.0          # Minimum gap size
+    large_gap_pct: float = 5.0        # Large gap threshold
+    max_gap_pct: float = 10.0         # Max gap (avoid extremes)
+    min_relative_volume: float = 2.0  # Volume surge threshold
     stop_multiplier: float = 0.98     # Stop 2% below gap open
     max_stop_pct: float = 5.0         # Maximum stop loss %
-    min_rsi: float = 40.0             # RSI lower bound
-    max_rsi: float = 80.0             # RSI upper bound
+    min_rsi: float = 45.0             # RSI lower bound
+    max_rsi: float = 75.0             # RSI upper bound
+    max_signals_per_run: int = 25
+    min_score_threshold: int = 70
 
 
 class GapAndGoScanner(BaseScanner):
@@ -158,7 +160,7 @@ class GapAndGoScanner(BaseScanner):
                     # Convert to SignalSetup format (pass ticker info as minimal candidate)
                     candidate = {'ticker': ticker, 'sector': sector}
                     signal = self._convert_to_signal_setup(gap_signal, candidate)
-                    if signal:
+                    if signal and signal.composite_score >= self.config.min_score_threshold:
                         signals.append(signal)
                         logger.info(f"{ticker}: Signal generated - {gap_signal.quality_tier} tier, "
                                   f"gap {gap_signal.gap_pct:.1f}%")

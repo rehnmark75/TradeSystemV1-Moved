@@ -445,9 +445,12 @@ class SectorRotationLeaderScanner(DataDrivenScanner):
 
 @dataclass
 class VolatilityContractionConfig(DataDrivenScannerConfig):
+    min_score_threshold: int = 70
+    max_signals_per_run: int = 20
     contraction_lookback: int = 15
-    min_relative_volume: float = 1.1
-    max_recent_range_pct: float = 12.0
+    min_relative_volume: float = 1.3
+    max_recent_range_pct: float = 8.0
+    min_rs_percentile: int = 60
 
 
 class VolatilityContractionBreakoutScanner(DataDrivenScanner):
@@ -478,9 +481,9 @@ class VolatilityContractionBreakoutScanner(DataDrivenScanner):
               AND i.is_active = TRUE
               {self._base_candidate_filters()}
               AND COALESCE(m.relative_volume, 0) >= $5
-              AND COALESCE(m.rs_percentile, 0) >= 50
+              AND COALESCE(m.rs_percentile, 0) >= $6
             ORDER BY COALESCE(m.rs_percentile, 0) DESC
-            LIMIT 350
+            LIMIT 200
         """
         rows = await self.db.fetch(
             query,
@@ -489,6 +492,7 @@ class VolatilityContractionBreakoutScanner(DataDrivenScanner):
             self.config.max_price,
             self.config.min_avg_dollar_volume,
             self.config.min_relative_volume,
+            self.config.min_rs_percentile,
         )
         return [dict(row) for row in rows]
 
@@ -699,10 +703,11 @@ class RelativeStrengthLeaderScanner(DataDrivenScanner):
 
 @dataclass
 class PreMarketCatalystConfig(DataDrivenScannerConfig):
-    max_signals_per_run: int = 25
-    min_gap_pct: float = 2.0
-    min_news_sentiment: float = 0.1
-    min_news_count: int = 1
+    max_signals_per_run: int = 15
+    min_score_threshold: int = 75
+    min_gap_pct: float = 3.0
+    min_news_sentiment: float = 0.15
+    min_news_count: int = 2
 
 
 class PreMarketCatalystScanner(DataDrivenScanner):
@@ -742,7 +747,7 @@ class PreMarketCatalystScanner(DataDrivenScanner):
               AND ABS(COALESCE(p.gap_percent, 0)) >= $2
               AND COALESCE(p.news_count, 0) >= $3
             ORDER BY COALESCE(p.confidence, 0) DESC, ABS(COALESCE(p.gap_percent, 0)) DESC
-            LIMIT 100
+            LIMIT 50
         """
         try:
             rows = await self.db.fetch(

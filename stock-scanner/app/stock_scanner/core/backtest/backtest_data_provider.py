@@ -5,6 +5,7 @@ Retrieves historical stock data with technical indicators for backtesting.
 """
 
 import logging
+import asyncio
 from datetime import datetime, date, timedelta
 from typing import Dict, List, Optional, Tuple
 import pandas as pd
@@ -36,6 +37,7 @@ class BacktestDataProvider:
         self.logger = logging.getLogger(__name__)
         self._data_cache: Dict[str, pd.DataFrame] = {}
         self._cache_timestamps: Dict[str, datetime] = {}
+        self._cache_locks: Dict[str, asyncio.Lock] = {}
 
     async def get_tradeable_tickers(self, sector: Optional[str] = None) -> List[str]:
         """
@@ -87,8 +89,39 @@ class BacktestDataProvider:
         Returns:
             DataFrame with OHLCV + indicators, or empty DataFrame if no data
         """
-        # Check cache first (2-hour TTL to prevent stale candle data across pipeline runs)
         cache_key = f"{ticker}_{timeframe}_{end_date}"
+        cached = self._get_cached_data(cache_key)
+        if cached is not None:
+            return cached
+
+        # Coalesce concurrent requests from parallel scanners. Without this,
+        # each scanner can miss the cache at the same time and duplicate the
+        # same DB fetch plus indicator calculation.
+        lock = self._cache_locks.setdefault(cache_key, asyncio.Lock())
+        async with lock:
+            cached = self._get_cached_data(cache_key)
+            if cached is not None:
+                return cached
+
+            # Fetch ALL available data up to end_date.
+            # This ensures we get maximum warmup for indicators.
+            df = await self._fetch_all_candles(ticker, end_date, timeframe)
+
+            if df.empty:
+                self.logger.warning(f"No data found for {ticker} up to {end_date}")
+                return df
+
+            # Calculate indicators
+            df = self._calculate_indicators(df)
+
+            # Cache the full data
+            self._data_cache[cache_key] = df.copy()
+            self._cache_timestamps[cache_key] = datetime.now()
+
+            return df
+
+    def _get_cached_data(self, cache_key: str) -> Optional[pd.DataFrame]:
+        """Return a fresh cached frame copy, or None if missing/expired."""
         if cache_key in self._data_cache:
             cache_age = (datetime.now() - self._cache_timestamps.get(cache_key, datetime.min)).total_seconds()
             if cache_age < 7200:  # 2-hour TTL
@@ -96,24 +129,7 @@ class BacktestDataProvider:
             # Cache expired — remove it so we fetch fresh data below
             del self._data_cache[cache_key]
             del self._cache_timestamps[cache_key]
-
-        # Fetch ALL available data up to end_date
-        # This ensures we get maximum warmup for indicators
-        # We'll filter to start_date later in the orchestrator
-        df = await self._fetch_all_candles(ticker, end_date, timeframe)
-
-        if df.empty:
-            self.logger.warning(f"No data found for {ticker} up to {end_date}")
-            return df
-
-        # Calculate indicators
-        df = self._calculate_indicators(df)
-
-        # Cache the full data
-        self._data_cache[cache_key] = df.copy()
-        self._cache_timestamps[cache_key] = datetime.now()
-
-        return df
+        return None
 
     async def get_data_at_timestamp(
         self,
@@ -473,4 +489,5 @@ class BacktestDataProvider:
         """Clear the data cache."""
         self._data_cache.clear()
         self._cache_timestamps.clear()
+        self._cache_locks.clear()
         self.logger.info("Data cache cleared")
