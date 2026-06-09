@@ -124,6 +124,12 @@ class SMCMomentumConfig:
     # Wick quality filter (fraction of bar range the wick must represent)
     wick_min_pct_of_range: float = 0.50
 
+    # Rejection candle quality. A sweep must close back inside the swept level
+    # by at least this fraction of the candle range, and the candle body must be
+    # meaningful enough to show actual rejection rather than a passive wick.
+    min_reclaim_pct_of_range: float = 0.15
+    min_body_pct_of_range: float = 0.20
+
     # Kill zone filter (London 07-10 + NY 12-15 UTC; disabled by default for backward compat)
     kill_zone_only: bool = False
     kill_zone_london_start: int = 7
@@ -234,6 +240,12 @@ class SMCMomentumConfig:
 
     def get_pair_wick_min_pct(self, epic: str) -> float:
         return float(self._override(epic, "wick_min_pct_of_range", self.wick_min_pct_of_range))
+
+    def get_pair_min_reclaim_pct(self, epic: str) -> float:
+        return float(self._override(epic, "min_reclaim_pct_of_range", self.min_reclaim_pct_of_range))
+
+    def get_pair_min_body_pct(self, epic: str) -> float:
+        return float(self._override(epic, "min_body_pct_of_range", self.min_body_pct_of_range))
 
     def get_pair_block_asian_session(self, epic: str) -> bool:
         val = self._override(epic, "block_asian_session", self.block_asian_session)

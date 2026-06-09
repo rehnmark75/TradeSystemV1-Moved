@@ -258,6 +258,20 @@ class SMCMomentumStrategy(StrategyInterface):
             self._log_rejection(epic, "NO_SWEEP", "no sweep-and-rejection pattern", hour_utc=hour_utc)
             return None
 
+        if not self._rejection_candle_quality_ok(df_trigger, sweep, cfg, epic):
+            self._log_rejection(
+                epic,
+                "REJECTION_QUALITY",
+                "sweep candle lacks reclaim/body confirmation",
+                direction=sweep.direction,
+                hour_utc=hour_utc,
+                details={
+                    "min_reclaim_pct_of_range": cfg.get_pair_min_reclaim_pct(epic),
+                    "min_body_pct_of_range": cfg.get_pair_min_body_pct(epic),
+                },
+            )
+            return None
+
         # --- 7. HTF alignment gate (load-bearing: PF 0.90 → 1.22) ---
         # BUY (swept low → reversal up): requires bullish HTF bias
         # SELL (swept high → reversal down): requires bearish HTF bias
@@ -353,6 +367,24 @@ class SMCMomentumStrategy(StrategyInterface):
 
         if sl_pips <= 0 or tp_pips <= 0:
             self.logger.debug(f"[SMC_MOMENTUM] Degenerate SL/TP for {epic}: sl={sl_pips:.1f} tp={tp_pips:.1f}")
+            self._log_rejection(epic, "INVALID_RISK_GEOMETRY", "non-positive SL/TP distance",
+                                direction=sweep.direction, hour_utc=hour_utc,
+                                details={"sl_pips": round(sl_pips, 1), "tp_pips": round(tp_pips, 1)})
+            return None
+
+        if not self._risk_geometry_ok(sweep.direction, entry_price, sl_price, tp_price):
+            self._log_rejection(
+                epic,
+                "INVALID_RISK_GEOMETRY",
+                "SL/TP not on correct side of entry",
+                direction=sweep.direction,
+                hour_utc=hour_utc,
+                details={
+                    "entry_price": entry_price,
+                    "stop_loss": sl_price,
+                    "take_profit": tp_price,
+                },
+            )
             return None
 
         # Per-pair max-SL cap (inert unless set in DB; e.g. EURJPY=20). Reject
@@ -412,6 +444,52 @@ class SMCMomentumStrategy(StrategyInterface):
         current_tr = tr_full[-1]
         rolling_avg = float(np.mean(tr_full[-21:-1]))
         return rolling_avg > 0 and current_tr >= threshold * rolling_avg
+
+    def _rejection_candle_quality_ok(
+        self,
+        df: pd.DataFrame,
+        sweep: SweepResult,
+        cfg: SMCMomentumConfig,
+        epic: str,
+    ) -> bool:
+        """Require the sweep candle to reclaim the level with a real body."""
+        if df is None or df.empty:
+            return False
+        bar = df.iloc[-1]
+        o = float(bar["open"])
+        h = float(bar["high"])
+        l = float(bar["low"])
+        c = float(bar["close"])
+        candle_range = h - l
+        if candle_range <= 0:
+            return False
+
+        body_pct = abs(c - o) / candle_range
+        min_body = cfg.get_pair_min_body_pct(epic)
+        if body_pct < min_body:
+            return False
+
+        min_reclaim = cfg.get_pair_min_reclaim_pct(epic)
+        if sweep.direction == "BUY":
+            reclaim_pct = max(0.0, c - sweep.pool_level) / candle_range
+            return c > o and reclaim_pct >= min_reclaim
+
+        reclaim_pct = max(0.0, sweep.pool_level - c) / candle_range
+        return c < o and reclaim_pct >= min_reclaim
+
+    def _risk_geometry_ok(
+        self,
+        direction: str,
+        entry_price: float,
+        stop_loss: float,
+        take_profit: float,
+    ) -> bool:
+        direction = direction.upper()
+        if direction == "BUY":
+            return stop_loss < entry_price < take_profit
+        if direction == "SELL":
+            return take_profit < entry_price < stop_loss
+        return False
 
     def _atr_from_15m(self, df: pd.DataFrame, period: int) -> Optional[float]:
         """Fallback ATR from 15m bars, scaled to 1H (~4 bars per hour, so ×2 for 1H equiv)."""

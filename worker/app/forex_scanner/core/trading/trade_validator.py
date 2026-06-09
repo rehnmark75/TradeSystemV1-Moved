@@ -779,6 +779,7 @@ class TradeValidator:
         'Market Intelligence':  'MARKET_INTELLIGENCE',
         'Market Bias Filter':   'MARKET_INTELLIGENCE',
         'Reversal Regime Filter': 'MARKET_INTELLIGENCE',
+        'Final Confidence':     'CONFIDENCE',
         'Trading':              'TRADING_SUITABILITY',
         'LPF':                  'LPF',
         'Claude filtering':     'CLAUDE',
@@ -1540,6 +1541,12 @@ class TradeValidator:
             signal.setdefault('lpf_would_block', False)
             signal.setdefault('lpf_triggered_rules', [])
 
+            valid, msg = self._validate_smc_momentum_final_quality(signal)
+            if not valid:
+                self.validation_stats['failed_confidence'] += 1
+                self._log_validator_rejection(signal, f"Final Confidence: {msg}")
+                return False, f"Final Confidence: {msg}"
+
             # 13. ⭐ Claude AI filtering - FINAL VALIDATOR (if enabled) ⭐
             # Claude is the most comprehensive and expensive check, so it runs last
             # Only signals that pass all other filters get validated by Claude
@@ -1582,6 +1589,47 @@ class TradeValidator:
             self.logger.error(f"❌ Error validating signal: {e}")
             self.validation_stats['failed_other'] += 1
             return False, f"Validation error: {str(e)}"
+
+    def _validate_smc_momentum_final_quality(self, signal: Dict) -> Tuple[bool, str]:
+        """Final traded-mode guard for SMC_MOMENTUM after MI modifiers are known."""
+        if (signal.get('strategy') or '').upper() != 'SMC_MOMENTUM':
+            return True, "Not SMC_MOMENTUM"
+        if bool(signal.get('monitor_only', False)) or not bool(signal.get('is_traded', False)):
+            return True, "SMC_MOMENTUM monitor-only signal"
+
+        try:
+            confidence = self._normalize_signal_confidence(float(signal.get('confidence_score', 0.0)))
+        except Exception:
+            return False, f"invalid confidence {signal.get('confidence_score')}"
+
+        try:
+            modifier = float(signal.get('market_intelligence_confidence_modifier', 1.0))
+        except Exception:
+            modifier = 1.0
+
+        adjusted_confidence = confidence * modifier
+        min_final_confidence = 0.60
+        if adjusted_confidence < min_final_confidence:
+            return False, (
+                f"SMC_MOMENTUM adjusted confidence {adjusted_confidence:.1%} below "
+                f"{min_final_confidence:.1%} (raw={confidence:.1%}, modifier={modifier:.1%})"
+            )
+
+        entry = signal.get('entry_price')
+        stop_loss = signal.get('stop_loss')
+        take_profit = signal.get('take_profit')
+        direction = str(signal.get('signal_type', signal.get('signal', ''))).upper()
+        if not all(isinstance(v, (int, float)) and v > 0 for v in (entry, stop_loss, take_profit)):
+            return False, "SMC_MOMENTUM missing positive entry/SL/TP"
+        if direction in {'BUY', 'BULL'} and not (stop_loss < entry < take_profit):
+            return False, f"SMC_MOMENTUM invalid BUY geometry SL={stop_loss} entry={entry} TP={take_profit}"
+        if direction in {'SELL', 'BEAR'} and not (take_profit < entry < stop_loss):
+            return False, f"SMC_MOMENTUM invalid SELL geometry TP={take_profit} entry={entry} SL={stop_loss}"
+
+        return True, (
+            f"SMC_MOMENTUM final confidence {adjusted_confidence:.1%} "
+            f"(raw={confidence:.1%}, modifier={modifier:.1%})"
+        )
     
     def _safe_validate_support_resistance(self, signal: Dict, provided_market_data: Optional[object] = None) -> Tuple[bool, str]:
         """
@@ -2455,9 +2503,19 @@ class TradeValidator:
                 signal_type = signal.get('signal_type', '').upper()
                 
                 if signal_type in ['BUY', 'BULL', 'TEST_BULL']:
+                    if not (stop_loss < entry_price < take_profit):
+                        return False, (
+                            f"Invalid BUY risk geometry: SL {stop_loss} must be below "
+                            f"entry {entry_price}, TP {take_profit} must be above entry"
+                        )
                     risk = abs(entry_price - stop_loss)
                     reward = abs(take_profit - entry_price)
                 elif signal_type in ['SELL', 'BEAR', 'TEST_BEAR']:
+                    if not (take_profit < entry_price < stop_loss):
+                        return False, (
+                            f"Invalid SELL risk geometry: TP {take_profit} must be below "
+                            f"entry {entry_price}, SL {stop_loss} must be above entry"
+                        )
                     risk = abs(stop_loss - entry_price)
                     reward = abs(entry_price - take_profit)
                 else:
