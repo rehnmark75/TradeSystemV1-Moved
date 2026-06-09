@@ -164,6 +164,7 @@ class AlertHistoryManager:
                     signal_type VARCHAR(10) NOT NULL,
                     strategy VARCHAR(50) NOT NULL,
                     confidence_score DECIMAL(5,4) NOT NULL,
+                    original_confidence DECIMAL(5,4),
                     price DECIMAL(10,5) NOT NULL,
                     bid_price DECIMAL(10,5),
                     ask_price DECIMAL(10,5),
@@ -504,7 +505,7 @@ class AlertHistoryManager:
                 insert_query = '''
                     INSERT INTO alert_history (
                         alert_timestamp,
-                        epic, pair, signal_type, strategy, confidence_score, price, bid_price, ask_price,
+                        epic, pair, signal_type, strategy, confidence_score, original_confidence, price, bid_price, ask_price,
                         spread_pips, timeframe, strategy_config, strategy_indicators, strategy_metadata,
                         ema_short, ema_long, ema_trend, macd_line, macd_signal, macd_histogram,
                         adx, adx_plus, adx_minus, rsi, atr,
@@ -545,7 +546,7 @@ class AlertHistoryManager:
                         environment
                     ) VALUES (
                         %(alert_timestamp)s,
-                        %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(price)s, %(bid_price)s, %(ask_price)s,
+                        %(epic)s, %(pair)s, %(signal_type)s, %(strategy)s, %(confidence_score)s, %(original_confidence)s, %(price)s, %(bid_price)s, %(ask_price)s,
                         %(spread_pips)s, %(timeframe)s, %(strategy_config)s, %(strategy_indicators)s, %(strategy_metadata)s,
                         %(ema_short)s, %(ema_long)s, %(ema_trend)s, %(macd_line)s, %(macd_signal)s, %(macd_histogram)s,
                         %(adx)s, %(adx_plus)s, %(adx_minus)s, %(rsi)s, %(atr)s,
@@ -1251,7 +1252,11 @@ class AlertHistoryManager:
             signal_type = str(signal.get('signal_type', 'Unknown'))
             strategy = str(signal.get('strategy', 'unknown_strategy'))
             confidence_score = float(signal.get('confidence_score', signal.get('confidence', 0.0)))
-            
+            # Pre-news-filter signal-quality confidence. TradeValidator sets
+            # signal['original_confidence'] ONLY when the news filter reduces
+            # confidence_score; otherwise the original equals confidence_score.
+            original_confidence = float(signal.get('original_confidence', confidence_score))
+
             # Price data - try multiple field names
             price = float(signal.get('price', signal.get('price_mid', signal.get('execution_price', 0.0))))
             bid_price = signal.get('bid_price', signal.get('price_bid'))
@@ -1446,6 +1451,7 @@ class AlertHistoryManager:
                 'signal_type': signal_type,
                 'strategy': strategy,
                 'confidence_score': confidence_score,
+                'original_confidence': original_confidence,
                 'price': float(price) if price is not None else 0.0,
                 'bid_price': float(bid_price) if bid_price is not None else 0.0,
                 'ask_price': float(ask_price) if ask_price is not None else 0.0,
