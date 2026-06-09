@@ -414,6 +414,26 @@ class TradingOrchestrator:
         except Exception as e:
             self.logger.warning(f"⚠️ RejectionOutcomeAnalyzer initialization failed: {e}")
 
+        # Auto-pause layer (Phase 2): per-(strategy, pair) decay -> monitor-only.
+        # Inert until cells are opted into the auto_pause_eligibility allowlist;
+        # pause-only here (resume is Phase 3). Kill-switch: AUTO_PAUSE_ENABLED=false.
+        self._last_auto_pause_check = None
+        self._auto_pause_interval_hours = 1  # Run hourly
+        self._auto_pause_enabled = os.getenv(
+            "AUTO_PAUSE_ENABLED", "true"
+        ).strip().lower() in {"1", "true", "yes", "on"}
+        self._auto_pause_config_set = os.getenv(
+            "TRADING_CONFIG_SET", os.getenv("TRADING_ENVIRONMENT", "demo")
+        ).strip().lower()
+        # Positive proof at startup that this block ran (a capital-safety hook
+        # that silently failed to initialize would otherwise look identical to a
+        # working-but-inert one — both log nothing).
+        self.logger.info(
+            f"🛡️ Auto-pause armed: enabled={self._auto_pause_enabled}, "
+            f"config_set={self._auto_pause_config_set} "
+            f"(inert until auto_pause_eligibility rows are added)"
+        )
+
         # Initialize SMCRejectionHistoryManager for tracking validation rejections (S/R, etc.)
         self.smc_rejection_manager = None
         try:
@@ -2110,6 +2130,12 @@ class TradingOrchestrator:
             # Don't let maintenance failures disrupt scanning
             self.logger.debug(f"Periodic maintenance error (non-critical): {e}")
 
+        try:
+            self._run_auto_pause_check_if_due()
+        except Exception as e:
+            # Don't let maintenance failures disrupt scanning
+            self.logger.debug(f"Auto-pause maintenance error (non-critical): {e}")
+
     def _run_outcome_analysis_if_due(self):
         """
         Run rejection outcome analysis if enough time has passed since last run.
@@ -2149,6 +2175,138 @@ class TradingOrchestrator:
             # Log at debug level to avoid log spam
             self.logger.debug(f"Outcome analysis skipped: {e}")
             self._last_outcome_analysis = now  # Still update time to avoid retry spam
+
+    def _run_auto_pause_check_if_due(self):
+        """Auto-pause eligible (strategy, pair) cells whose rolling LIVE
+        performance has decayed.
+
+        Phase 2 = PAUSE ONLY (flip monitor_only -> True). Resume is Phase 3.
+        Inert until cells are opted into the auto_pause_eligibility allowlist.
+        Runs hourly; mirrors _run_outcome_analysis_if_due (timestamp-tracked,
+        exception-isolated). Acts only on cells matching this orchestrator's
+        config_set, and only on the active -> paused transition.
+        """
+        # getattr guards: if the __init__ block were ever skipped, fail safe
+        # (disabled) instead of AttributeError-ing into the swallowing handler.
+        if not getattr(self, "_auto_pause_enabled", False):
+            return
+
+        now = datetime.now()
+        if getattr(self, "_last_auto_pause_check", None) is not None:
+            hours_since = (now - self._last_auto_pause_check).total_seconds() / 3600
+            if hours_since < self._auto_pause_interval_hours:
+                return
+
+        try:
+            from forex_scanner.core.trading.auto_pause import (
+                decide_trip,
+                default_params,
+                evaluate_performance,
+                get_adapter,
+                get_monitor_only,
+                load_closed_trades,
+                load_eligible_cells,
+                record_pause,
+                refresh_config_cache,
+                set_monitor_only,
+            )
+
+            params = default_params()
+            config_set = self._auto_pause_config_set
+            cells = [c for c in load_eligible_cells() if c.config_set == config_set]
+            if not cells:
+                self._last_auto_pause_check = now
+                return
+
+            paused = 0
+            for cell in cells:
+                adapter = get_adapter(cell.strategy)
+                if adapter is None:
+                    self.logger.error(
+                        f"🚨 [AutoPause] No adapter for eligible strategy "
+                        f"{cell.strategy} — cannot protect {cell.epic}"
+                    )
+                    continue
+
+                # Already paused (by us, manually, or config): Phase 3 propose-only
+                # resume evaluation instead of a trip check.
+                if get_monitor_only(adapter, cell.epic, config_set) is True:
+                    self._auto_pause_resume_proposal(cell, adapter, config_set, params)
+                    continue
+
+                rows = load_closed_trades(
+                    cell.strategy, cell.epic, config_set, params.rolling_window
+                )
+                stats = evaluate_performance(rows)
+                decision = decide_trip(stats, params)
+                if not decision.should_pause:
+                    continue
+
+                affected = set_monitor_only(adapter, cell.epic, config_set, True)
+                if affected == 0:
+                    # Loud: eligibility says protect this cell but the flip hit no
+                    # rows -> the pause silently did nothing. Must not be missed.
+                    self.logger.error(
+                        f"🚨 [AutoPause] TRIPPED but pause was a NO-OP (0 rows matched) "
+                        f"for {cell.strategy} {cell.epic} ({config_set}). Eligibility row "
+                        f"exists but no matching {adapter.table} row — CELL NOT PAUSED."
+                    )
+                    continue
+
+                refresh_config_cache(cell.strategy)
+                record_pause(cell.strategy, cell.epic, config_set, decision.reason)
+                paused += 1
+                self.logger.warning(
+                    f"⏸️ [AutoPause] PAUSED {cell.strategy} {cell.epic} ({config_set}) "
+                    f"-> monitor_only=true | {decision.reason} "
+                    f"(baseline PF {cell.baseline_pf}, eval n={stats.n})"
+                )
+
+            self._last_auto_pause_check = now
+            if paused:
+                self.logger.warning(
+                    f"⏸️ [AutoPause] paused {paused} cell(s) this cycle ({config_set})"
+                )
+
+        except Exception as e:
+            self.logger.debug(f"Auto-pause check skipped: {e}")
+            self._last_auto_pause_check = now
+
+    def _auto_pause_resume_proposal(self, cell, adapter, config_set, params):
+        """Phase 3 (PROPOSE-ONLY): for a paused cell, reconstruct shadow P&L
+        since it was paused and LOG a resume proposal if R1 is met.
+
+        Does NOT auto-resume — staged rollout (propose -> confirm -> fully-auto).
+        A human clears monitor_only to actually resume.
+        """
+        from forex_scanner.core.trading.auto_pause import (
+            compute_shadow_stats,
+            evaluate_resume,
+            get_pause_state,
+            record_eval,
+        )
+
+        ps = get_pause_state(cell.strategy, cell.epic, config_set)
+        if ps is None:
+            return  # paused manually / not by the auto-pause layer — leave alone
+
+        stats, n_sig, n_res = compute_shadow_stats(
+            adapter, cell.strategy, cell.epic, config_set, ps.paused_at
+        )
+        if stats is None:
+            return  # SL/TP unavailable (e.g. ATR-based) — can't reconstruct yet
+
+        proposal = evaluate_resume(ps.paused_at, stats, n_res, params, datetime.now())
+        record_eval(
+            cell.strategy, cell.epic, config_set, n_res, stats.pf,
+            proposal.should_propose,
+        )
+        if proposal.should_propose:
+            self.logger.warning(
+                f"🔔 [AutoPause] RESUME PROPOSED (Phase A — NOT auto-resumed) "
+                f"{cell.strategy} {cell.epic} ({config_set}): {proposal.reason}. "
+                f"Clear monitor_only manually to resume."
+            )
 
     def stop_scanning(self):
         """Stop continuous scanning"""
