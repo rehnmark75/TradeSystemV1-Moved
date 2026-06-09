@@ -36,6 +36,8 @@ class UltimateMAMTFConfig(ScannerConfig):
     max_price_distance_atr: float = 1.5
     min_ma_slope_atr: float = 0.01
     min_adx: float = 15.0
+    min_rsi: float = 52.5
+    max_rsi: float = 62.5
     min_relative_volume: float = 0.8
     stop_loss_atr_mult: float = 1.5
     take_profit_atr_mult: float = 2.5
@@ -69,6 +71,8 @@ class UltimateMAMTFScanner(BaseScanner):
             max_price_distance_atr=self.config.max_price_distance_atr,
             min_ma_slope_atr=self.config.min_ma_slope_atr,
             min_adx=self.config.min_adx,
+            min_rsi=self.config.min_rsi,
+            max_rsi=self.config.max_rsi,
             min_relative_volume=self.config.min_relative_volume,
             stop_loss_atr_mult=self.config.stop_loss_atr_mult,
             take_profit_atr_mult=self.config.take_profit_atr_mult,
@@ -170,6 +174,7 @@ class UltimateMAMTFScanner(BaseScanner):
             "Close above EMA50 and EMA200",
             f"RS trend {ma_signal.rs_trend}",
             f"ADX {ma_signal.adx}",
+            f"RSI {ma_signal.rsi}",
             f"Relative volume {ma_signal.relative_volume}",
         ]
         if ma_signal.second_ma_type and ma_signal.second_ma_length:
@@ -215,6 +220,8 @@ class UltimateMAMTFScanner(BaseScanner):
                 "price_distance_atr": ma_signal.price_distance_atr,
                 "adx": ma_signal.adx,
                 "rsi": ma_signal.rsi,
+                "min_rsi": self.config.min_rsi,
+                "max_rsi": self.config.max_rsi,
                 "atr": ma_signal.atr,
                 "relative_volume": ma_signal.relative_volume,
                 "rs_percentile": ma_signal.rs_percentile,

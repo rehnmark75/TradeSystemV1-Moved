@@ -78,6 +78,8 @@ class UltimateMAMTFStrategy:
         max_price_distance_atr: float = 1.5,
         min_ma_slope_atr: float = 0.01,
         min_adx: float = 15.0,
+        min_rsi: float = 52.5,
+        max_rsi: float = 62.5,
         min_relative_volume: float = 0.8,
         stop_loss_atr_mult: float = 1.5,
         take_profit_atr_mult: float = 2.5,
@@ -101,6 +103,8 @@ class UltimateMAMTFStrategy:
         self.max_price_distance_atr = max_price_distance_atr
         self.min_ma_slope_atr = min_ma_slope_atr
         self.min_adx = min_adx
+        self.min_rsi = min_rsi
+        self.max_rsi = max_rsi
         self.min_relative_volume = min_relative_volume
         self.stop_loss_atr_mult = stop_loss_atr_mult
         self.take_profit_atr_mult = take_profit_atr_mult
@@ -241,6 +245,10 @@ class UltimateMAMTFStrategy:
         if adx is None or adx < self.min_adx:
             return None
 
+        rsi = float(current["rsi"]) if pd.notna(current.get("rsi")) else None
+        if rsi is None or rsi < self.min_rsi or rsi > self.max_rsi:
+            return None
+
         relative_volume = float(current["relative_volume"]) if pd.notna(current["relative_volume"]) else None
         if relative_volume is not None and relative_volume < self.min_relative_volume:
             return None
@@ -298,7 +306,7 @@ class UltimateMAMTFStrategy:
             second_ma_value=round(ma2, 4) if ma2 is not None else None,
             price_distance_atr=round(price_distance_atr, 4) if price_distance_atr is not None else None,
             adx=round(adx, 2) if adx is not None else None,
-            rsi=round(float(current["rsi"]), 2) if pd.notna(current.get("rsi")) else None,
+            rsi=round(rsi, 2) if rsi is not None else None,
             atr=round(atr, 4),
             relative_volume=round(relative_volume, 2) if relative_volume is not None else None,
             rs_percentile=round(rs_percentile, 2) if rs_percentile is not None else None,
@@ -405,6 +413,8 @@ class UltimateMAMTFStrategy:
             "max_price_distance_atr": self.max_price_distance_atr,
             "min_ma_slope_atr": self.min_ma_slope_atr,
             "min_adx": self.min_adx,
+            "min_rsi": self.min_rsi,
+            "max_rsi": self.max_rsi,
             "min_relative_volume": self.min_relative_volume,
             "stop_loss_atr_mult": self.stop_loss_atr_mult,
             "take_profit_atr_mult": self.take_profit_atr_mult,
