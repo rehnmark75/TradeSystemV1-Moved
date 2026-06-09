@@ -36,7 +36,10 @@ Focus on:
 1. Was the entry setup strong FOR THIS STRATEGY?
 2. Did the trade capture available profit (MFE efficiency)?
 3. Did the trailing stop system behave appropriately?
-4. One concrete config suggestion (or "none" if nothing actionable).
+
+Describe what happened for THIS trade. Do NOT recommend config/parameter changes —
+a single trade is too small a sample to tune the system. Strategy-level tuning is
+done separately from aggregate analysis, not from one post-mortem.
 
 ## Output format — JSON only, no other text
 {
@@ -46,12 +49,6 @@ Focus on:
   "exit_notes": "1-2 sentences",
   "trailing_verdict": "EFFECTIVE" | "PREMATURE" | "MISSED_LOCK" | "NOT_TRIGGERED",
   "trailing_notes": "1-2 sentences",
-  "config_delta": {
-    "suggestion": "none" | "tighten_be" | "loosen_be" | "tighten_stage1" | "loosen_stage1" | "add_partial_tp" | "other",
-    "rationale": "one sentence",
-    "pair": "e.g. EURUSD or 'all'",
-    "suggested_value": null or number
-  },
   "key_lesson": "one sentence",
   "tags": [up to 3 from: "TEXTBOOK_TRADE","PROFITABLE_REVERSAL","FAILED_ENTRY","PREMATURE_BE",
            "MISSED_TP","GOOD_TRAILING","POOR_TIMING","HIGH_MFE_MAE","IMMEDIATE_ADVERSE","HELD_THROUGH_DRAWDOWN"]
@@ -67,14 +64,73 @@ _STRATEGY_CONTEXT = {
         "Good entry = strong HTF EMA alignment, clean swing break, pullback into optimal zone."
     ),
     "RANGE_FADE": (
-        "Fades large impulsive 5m candle bodies (≥2.2×ATR14) in late-US session (20-22 UTC). "
-        "Good entry = price AT or just beyond Bollinger Band, RSI extreme (>70 or <30), "
-        "fade direction aligned with HTF bias, low ADX (<25, ranging market). "
-        "Entry quality is NOT based on trend-following or HTF EMA tiers."
+        "Controlled mean-reversion fade of 5m Bollinger Band touches on FX majors, taken within the "
+        "London/NY window (06-18 UTC). Triggers when price touches a BB edge (lower band = long, upper "
+        "band = short), RSI is past a MODERATE threshold (~40 for longs / ~60 for shorts — NOT an "
+        "extreme >70/<30), the 1H HTF EMA50+slope bias ALIGNS with the fade direction (required and "
+        "strict — it fades the 5m stretch IN THE DIRECTION of the 1H trend, not against it), and ADX is "
+        "low/ranging (an ADX CEILING, not a floor). This is NOT an impulse fade and has NO 20-22 UTC / "
+        "late-US session requirement. Good entry = wick/stall at the band (not an expansion candle or "
+        "band-walk), HTF bias aligned, low ADX. SL/TP are ATR/band-width based. Do NOT penalise a trade "
+        "for session timing, for RSI not being at 70/30 extremes, or for lacking HTF EMA-tier structure."
     ),
     "SMC_MOMENTUM": (
         "Momentum-based SMC strategy using BOS/CHOCH with MACD confirmation. "
         "Good entry = clear BOS/CHOCH, MACD aligned, strong trend context."
+    ),
+    "XAU_GOLD": (
+        "Gold 3-tier SMC, trending regime only: 4H EMA50/200 bias + market structure (HH/HL vs LH/LL) "
+        "→ 1H BOS/CHOCH trigger → 15m OB/FVG (or 50% fib) pullback entry. Good entry = pullback into an "
+        "order block / FVG, HTF-aligned, ADX in the ~25-35 trending zone. Ranging/expansion regimes and "
+        "the 21-22 UTC rollover are blocked by the strategy. Large fixed stop (~80 pips) is by design for "
+        "gold ATR — do NOT flag it. Entry quality is about OB/FVG confluence + trend structure, not RSI."
+    ),
+    "IMPULSE_FADE": (
+        "Fades large impulsive 5m candle bodies (>=2.2x ATR14) during the late-US session (20-22 UTC) — a "
+        "pure behavioural exhaustion edge. NO HTF alignment is required (missing/neutral HTF bias is "
+        "normal — do NOT penalise it). Inverted R:R by design (TP~8 / SL~15) — do NOT flag R:R < 1. Good "
+        "entry = larger body-vs-ATR ratio (stronger exhaustion). Ranging / low-ADX is fine, not a weakness."
+    ),
+    "MEAN_REVERSION": (
+        "Bollinger Band + RSI-extreme reversion; low-ADX / ranging IS the target condition (do NOT "
+        "penalise low ADX or ranging). Two variants — TOUCH entry (price touches the band + RSI extreme in "
+        "a low-vol ATR regime, ~18-22 UTC) and REJECTION entry (prior bar breaches the band + RSI extreme, "
+        "current bar closes back inside; hard ADX ceiling). Good entry = the variant's trigger met at a "
+        "band extreme in a quiet/ranging regime. Elevated ATR or high ADX is the weakness."
+    ),
+    "DONCHIAN_TURTLE": (
+        "20-bar Donchian channel breakout on 1H bars; long-only (SELL disabled). Trend-following — high "
+        "ADX / trending regime IS the edge (do NOT treat a strong trend as 'overextended'). Good entry = a "
+        "clean breakout (close clearly beyond the 20-bar high) with EMA50 > EMA200. Ranging / choppy "
+        "(ADX < 20) is the weak condition. Entry quality is about breakout strength and trend context."
+    ),
+    "INSIDE_DAY": (
+        "Daily inside-day breakout filtered by weekly directional bias. Waits for price to break the "
+        "completed inside-day high/low on 5m; the stop sits beyond the opposite inside-day extreme plus a "
+        "daily ATR buffer (by design). Good entry = breakout direction aligns with weekly_bias and the "
+        "inside-day range is within the configured band (not a tiny-noise or over-wide range). Edge is "
+        "daily compression + weekly bias, NOT intraday SMC swing quality."
+    ),
+    "FA_OR_ATR_TRAIL": (
+        "Two variants — always read the MODEL field. FA (Failed Auction): price swept a prior extreme then "
+        "closed back inside the value area (the rejection IS the signal). OR (Opening Range): break of the "
+        "London/NY opening-range high/low after a lock period. ADX ~18-25 is the sweet spot (range-to-trend "
+        "transition) — do NOT penalise mid ADX. Good entry = directional SLOPE (>=0.3), price well-anchored "
+        "vs 4H EMA50 (HTF margin >= ~1 ATR), ATR-based stops by design. FA + ranging is a valid combination."
+    ),
+    "KAMA_V2": (
+        "5m KAMA(10,2,30) adaptive moving-average crossover. Entry requires price crossing KAMA, the "
+        "efficiency ratio (ER) above the configured threshold, EMA200 alignment, MACD-histogram sign "
+        "confirmation, and RSI not at an exhaustion extreme. Good entry = high ER (strong directional "
+        "efficiency) with EMA200 and MACD aligned. SL/TP ~10/15 (≈1.5R) is by design. ADX is not a default "
+        "gate — do NOT reject on low ADX alone."
+    ),
+    "SMC_SIMPLE_V2": (
+        "Stripped-down SMC_SIMPLE research scalp: 5m structure context + 1m rejection-break entry. The "
+        "validated launch config is narrow (EURUSD, BUY-only, 07-12 UTC, fixed SL/TP ~5/6 pips, "
+        "rejection-break model). Good entry = a clean 1m rejection-break in the direction of 5m structure. "
+        "Confidence is coarse (~0.69) and is NOT a fine-grained quality ranker — do NOT apply SMC_SIMPLE's "
+        "inverse-confidence bands here."
     ),
 }
 

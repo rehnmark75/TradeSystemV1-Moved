@@ -8,12 +8,6 @@ export type PostmortemData = {
   exit_notes: string;
   trailing_notes: string;
   key_lesson: string;
-  config_delta: {
-    suggestion: string;
-    rationale: string;
-    pair: string;
-    suggested_value: number | null;
-  } | null;
   tags: string[];
   generated_at: string | null;
   agent_model: string | null;
@@ -54,9 +48,6 @@ function NoteBlock({ title, text }: { title: string; text: string }) {
 }
 
 export default function PostmortemPanel({ data }: Props) {
-  const hasDelta =
-    data.config_delta && data.config_delta.suggestion !== "none";
-
   return (
     <div className="pm-panel">
       <div className="pm-header">
@@ -91,21 +82,6 @@ export default function PostmortemPanel({ data }: Props) {
         <span className="pm-lesson-icon">💡</span>
         <span>{data.key_lesson}</span>
       </div>
-
-      {/* Config delta — only shown when actionable */}
-      {hasDelta && data.config_delta && (
-        <div className="pm-delta">
-          <div className="pm-delta-title">
-            Config suggestion
-            <span className="pm-delta-pair">{data.config_delta.pair}</span>
-            <span className="pm-delta-action">{data.config_delta.suggestion}</span>
-            {data.config_delta.suggested_value != null && (
-              <span className="pm-delta-value">→ {data.config_delta.suggested_value}</span>
-            )}
-          </div>
-          <div className="pm-delta-rationale">{data.config_delta.rationale}</div>
-        </div>
-      )}
 
       {/* Tags */}
       {data.tags && data.tags.length > 0 && (

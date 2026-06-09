@@ -76,14 +76,14 @@ def _save(db: Session, trade_id: int, environment: str, result: Dict[str, Any]) 
                 trade_id, environment, generated_at,
                 entry_verdict, exit_verdict, trailing_verdict,
                 entry_notes, exit_notes, trailing_notes, key_lesson,
-                config_delta, tags,
+                tags,
                 agent_model, input_tokens, output_tokens,
                 cache_read_tokens, cache_write_tokens
             ) VALUES (
                 :trade_id, :environment, NOW(),
                 :entry_verdict, :exit_verdict, :trailing_verdict,
                 :entry_notes, :exit_notes, :trailing_notes, :key_lesson,
-                :config_delta, :tags,
+                :tags,
                 :agent_model, :input_tokens, :output_tokens,
                 :cache_read_tokens, :cache_write_tokens
             )
@@ -99,7 +99,6 @@ def _save(db: Session, trade_id: int, environment: str, result: Dict[str, Any]) 
             "exit_notes": result.get("exit_notes"),
             "trailing_notes": result.get("trailing_notes"),
             "key_lesson": result.get("key_lesson"),
-            "config_delta": json.dumps(result.get("config_delta") or {}),
             "tags": json.dumps(result.get("tags") or []),
             "agent_model": meta.get("model"),
             "input_tokens": meta.get("input_tokens"),
@@ -121,7 +120,7 @@ def get_postmortem(db: Session, trade_id: int, environment: str) -> Dict[str, An
         text("""
             SELECT entry_verdict, exit_verdict, trailing_verdict,
                    entry_notes, exit_notes, trailing_notes, key_lesson,
-                   config_delta, tags, generated_at,
+                   tags, generated_at,
                    agent_model, input_tokens, output_tokens
             FROM trade_postmortem
             WHERE trade_id = :tid AND environment = :env
@@ -141,12 +140,11 @@ def get_postmortem(db: Session, trade_id: int, environment: str) -> Dict[str, An
         "exit_notes": row[4],
         "trailing_notes": row[5],
         "key_lesson": row[6],
-        "config_delta": row[7],
-        "tags": row[8],
-        "generated_at": str(row[9]) if row[9] else None,
-        "agent_model": row[10],
-        "input_tokens": row[11],
-        "output_tokens": row[12],
+        "tags": row[7],
+        "generated_at": str(row[8]) if row[8] else None,
+        "agent_model": row[9],
+        "input_tokens": row[10],
+        "output_tokens": row[11],
     }
 
 

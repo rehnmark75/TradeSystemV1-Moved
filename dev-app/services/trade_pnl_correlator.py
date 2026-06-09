@@ -463,8 +463,13 @@ class TradePnLCorrelator:
             try:
                 self.db_session.commit()
                 self.logger.info(f"✅ Committed {len(updated_trades)} trade_log updates")
-                # Schedule post-mortem analysis for each newly finalised trade
-                self._schedule_postmortems(updated_trades)
+                # Post-mortems are now ON-DEMAND only — generated lazily via
+                # GET /trade/{id}/postmortem when a trade is actually opened.
+                # Auto-firing one per closed trade was disabled (Jun 9 2026):
+                # single-trade (n=1) critiques produced noisy, ungrounded config
+                # recommendations (e.g. wrong "filter RANGE_FADE to 20-22 UTC").
+                # Strategy/config decisions belong to aggregate, on-demand review.
+                # self._schedule_postmortems(updated_trades)
             except Exception as e:
                 self.db_session.rollback()
                 self.logger.error(f"❌ Error committing updates: {e}")
