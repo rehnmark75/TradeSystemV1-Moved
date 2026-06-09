@@ -113,6 +113,7 @@ class BacktestDataProvider:
 
             # Calculate indicators
             df = self._calculate_indicators(df)
+            df = await self._merge_rs_metrics(ticker, df, end_date)
 
             # Cache the full data
             self._data_cache[cache_key] = df.copy()
@@ -176,6 +177,7 @@ class BacktestDataProvider:
 
         # Calculate indicators
         df = self._calculate_indicators(df)
+        df = await self._merge_rs_metrics(ticker, df, timestamp.date())
 
         return df
 
@@ -264,6 +266,46 @@ class BacktestDataProvider:
 
         df = pd.DataFrame([dict(row) for row in rows])
         return df
+
+    async def _merge_rs_metrics(
+        self,
+        ticker: str,
+        df: pd.DataFrame,
+        end_date: date,
+    ) -> pd.DataFrame:
+        """Merge point-in-time RS metrics onto daily candle rows."""
+        if df.empty or "timestamp" not in df.columns:
+            return df
+
+        query = """
+            SELECT calculation_date, rs_percentile, rs_trend
+            FROM stock_screening_metrics
+            WHERE ticker = $1
+              AND calculation_date <= $2
+              AND (rs_percentile IS NOT NULL OR rs_trend IS NOT NULL)
+            ORDER BY calculation_date ASC
+        """
+        rows = await self.db.fetch(query, ticker, end_date)
+        if not rows:
+            if "rs_percentile" not in df.columns:
+                df["rs_percentile"] = np.nan
+            if "rs_trend" not in df.columns:
+                df["rs_trend"] = None
+            return df
+
+        metrics = pd.DataFrame([dict(row) for row in rows])
+        metrics["calculation_date"] = pd.to_datetime(metrics["calculation_date"]).dt.date
+
+        out = df.copy()
+        out["_calculation_date"] = pd.to_datetime(out["timestamp"]).dt.date
+        out = out.merge(
+            metrics,
+            how="left",
+            left_on="_calculation_date",
+            right_on="calculation_date",
+        )
+        out = out.drop(columns=["_calculation_date", "calculation_date"], errors="ignore")
+        return out
 
     async def _fetch_candles(
         self,

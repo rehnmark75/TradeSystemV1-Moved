@@ -2,9 +2,9 @@
 Ultimate MA MTF strategy for stocks.
 
 Based on ChrisMoody's CM_Ultimate_MA_MTF_V2 idea: configurable moving-average
-type and MA direction coloring. The default scanner rule is deliberately simple:
-BUY when price first closes above a green/rising MA line, SELL when price first
-closes below a red/falling MA line.
+type and MA direction coloring. The default scanner rule is deliberately
+long-only: BUY when price first closes above a green/rising MA line while price
+is above EMA50/EMA200 and relative strength is improving.
 """
 
 import logging
@@ -41,6 +41,8 @@ class UltimateMASignal:
     rsi: Optional[float] = None
     atr: Optional[float] = None
     relative_volume: Optional[float] = None
+    rs_percentile: Optional[float] = None
+    rs_trend: Optional[str] = None
     sector: Optional[str] = None
 
 
@@ -71,6 +73,8 @@ class UltimateMAMTFStrategy:
         trigger_mode: str = "line_color_close",
         require_ma_slope: bool = True,
         require_second_ma_trend: bool = True,
+        require_ema50_ema200: bool = True,
+        require_rs_improving: bool = True,
         max_price_distance_atr: float = 1.5,
         min_ma_slope_atr: float = 0.01,
         min_adx: float = 15.0,
@@ -79,7 +83,7 @@ class UltimateMAMTFStrategy:
         take_profit_atr_mult: float = 2.5,
         min_confidence: float = 0.55,
         min_quality_tier: str = "C",
-        allow_shorts: bool = True,
+        allow_shorts: bool = False,
     ):
         self.ma_type = ma_type
         self.ma_length = ma_length
@@ -92,6 +96,8 @@ class UltimateMAMTFStrategy:
         self.trigger_mode = trigger_mode
         self.require_ma_slope = require_ma_slope
         self.require_second_ma_trend = require_second_ma_trend
+        self.require_ema50_ema200 = require_ema50_ema200
+        self.require_rs_improving = require_rs_improving
         self.max_price_distance_atr = max_price_distance_atr
         self.min_ma_slope_atr = min_ma_slope_atr
         self.min_adx = min_adx
@@ -113,7 +119,7 @@ class UltimateMAMTFStrategy:
         if df.empty or len(df) < min_bars:
             return None
 
-        required = ["open", "high", "low", "close", "volume", "atr", "adx", "relative_volume"]
+        required = ["open", "high", "low", "close", "volume", "atr", "adx", "relative_volume", "ema_50", "ema_200"]
         missing = [col for col in required if col not in df.columns]
         if missing:
             self.logger.warning("%s: Missing columns for ultimate MA strategy: %s", ticker, missing)
@@ -197,6 +203,23 @@ class UltimateMAMTFStrategy:
         if signal_type is None:
             return None
 
+        if self.require_ema50_ema200:
+            ema50 = float(current["ema_50"]) if pd.notna(current.get("ema_50")) else None
+            ema200 = float(current["ema_200"]) if pd.notna(current.get("ema_200")) else None
+            if ema50 is None or ema200 is None:
+                return None
+            if signal_type == "BUY" and (close <= ema50 or close <= ema200):
+                return None
+            if signal_type == "SELL" and (close >= ema50 or close >= ema200):
+                return None
+
+        rs_trend = str(current.get("rs_trend") or "").lower()
+        if self.require_rs_improving:
+            if signal_type == "BUY" and rs_trend != "improving":
+                return None
+            if signal_type == "SELL" and rs_trend != "deteriorating":
+                return None
+
         if self.require_ma_slope:
             if signal_type == "BUY" and ma_slope <= 0:
                 return None
@@ -221,6 +244,7 @@ class UltimateMAMTFStrategy:
         relative_volume = float(current["relative_volume"]) if pd.notna(current["relative_volume"]) else None
         if relative_volume is not None and relative_volume < self.min_relative_volume:
             return None
+        rs_percentile = float(current["rs_percentile"]) if pd.notna(current.get("rs_percentile")) else None
 
         entry_price = close
         if signal_type == "BUY":
@@ -277,6 +301,8 @@ class UltimateMAMTFStrategy:
             rsi=round(float(current["rsi"]), 2) if pd.notna(current.get("rsi")) else None,
             atr=round(atr, 4),
             relative_volume=round(relative_volume, 2) if relative_volume is not None else None,
+            rs_percentile=round(rs_percentile, 2) if rs_percentile is not None else None,
+            rs_trend=rs_trend or None,
             sector=sector,
         )
 
@@ -374,6 +400,8 @@ class UltimateMAMTFStrategy:
             "trigger_mode": self.trigger_mode,
             "require_ma_slope": self.require_ma_slope,
             "require_second_ma_trend": self.require_second_ma_trend,
+            "require_ema50_ema200": self.require_ema50_ema200,
+            "require_rs_improving": self.require_rs_improving,
             "max_price_distance_atr": self.max_price_distance_atr,
             "min_ma_slope_atr": self.min_ma_slope_atr,
             "min_adx": self.min_adx,

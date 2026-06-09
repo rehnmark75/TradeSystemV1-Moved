@@ -8,7 +8,7 @@ INSERT INTO stock_signal_scanners (
     max_signals_per_run
 ) VALUES (
     'ultimate_ma_mtf',
-    'Buy close above green/rising MA, sell close below red/falling MA with ADX, ATR, and volume filters',
+    'Long-only close above green/rising MA with EMA50/EMA200 and improving RS filters',
     55,
     50
 )

@@ -31,6 +31,8 @@ class UltimateMAMTFConfig(ScannerConfig):
     trigger_mode: str = "line_color_close"
     require_ma_slope: bool = True
     require_second_ma_trend: bool = False
+    require_ema50_ema200: bool = True
+    require_rs_improving: bool = True
     max_price_distance_atr: float = 1.5
     min_ma_slope_atr: float = 0.01
     min_adx: float = 15.0
@@ -39,14 +41,14 @@ class UltimateMAMTFConfig(ScannerConfig):
     take_profit_atr_mult: float = 2.5
     min_confidence: float = 0.55
     min_quality_tier: str = "C"
-    allow_shorts: bool = True
+    allow_shorts: bool = False
 
     max_signals_per_run: int = 50
     min_score_threshold: int = 55
 
 
 class UltimateMAMTFScanner(BaseScanner):
-    """Scan active stock universe for green/red MA line close setups."""
+    """Scan active stock universe for long-only green MA closes with RS confirmation."""
 
     def __init__(self, db_manager, config: UltimateMAMTFConfig = None, scorer=None):
         super().__init__(db_manager, config or UltimateMAMTFConfig(), scorer)
@@ -62,6 +64,8 @@ class UltimateMAMTFScanner(BaseScanner):
             trigger_mode=self.config.trigger_mode,
             require_ma_slope=self.config.require_ma_slope,
             require_second_ma_trend=self.config.require_second_ma_trend,
+            require_ema50_ema200=self.config.require_ema50_ema200,
+            require_rs_improving=self.config.require_rs_improving,
             max_price_distance_atr=self.config.max_price_distance_atr,
             min_ma_slope_atr=self.config.min_ma_slope_atr,
             min_adx=self.config.min_adx,
@@ -80,7 +84,7 @@ class UltimateMAMTFScanner(BaseScanner):
 
     @property
     def description(self) -> str:
-        return "Buy close above green/rising MA, sell close below red/falling MA with ADX, ATR, and volume filters"
+        return "Long-only close above green/rising MA with EMA50/EMA200 and improving RS filters"
 
     async def scan(self, calculation_date: datetime = None) -> List[SignalSetup]:
         logger.info("Starting %s scan", self.scanner_name)
@@ -163,6 +167,8 @@ class UltimateMAMTFScanner(BaseScanner):
         factors = [
             f"{ma_signal.trigger} trigger",
             f"{ma_signal.ma_type}{ma_signal.ma_length} slope/ATR {ma_signal.ma_slope_atr:.3f}",
+            "Close above EMA50 and EMA200",
+            f"RS trend {ma_signal.rs_trend}",
             f"ADX {ma_signal.adx}",
             f"Relative volume {ma_signal.relative_volume}",
         ]
@@ -211,6 +217,10 @@ class UltimateMAMTFScanner(BaseScanner):
                 "rsi": ma_signal.rsi,
                 "atr": ma_signal.atr,
                 "relative_volume": ma_signal.relative_volume,
+                "rs_percentile": ma_signal.rs_percentile,
+                "rs_trend": ma_signal.rs_trend,
+                "require_ema50_ema200": self.config.require_ema50_ema200,
+                "require_rs_improving": self.config.require_rs_improving,
             },
         )
 
