@@ -130,7 +130,7 @@ def main():
             # Handle strategy shortcuts
             # NOTE: After January 2026 cleanup, only SMC_SIMPLE is active
             # Other strategies have been archived to forex_scanner/archive/disabled_strategies/
-            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_SIMPLE_V2", "SMCV2", "V2", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF", "FA_OR_ATR_TRAIL", "FAOR", "FA_OR", "ATR_TRAIL", "DONCHIAN_TURTLE", "DONCHIAN", "TURTLE", "KAMA_V2", "KAMA"]:
+            elif arg.upper() in ["SMC", "SMC_SIMPLE", "SMC_SIMPLE_V2", "SMCV2", "V2", "SMC_EMA", "FVG_RETEST", "FVG", "RANGE_FADE", "RF", "XAU_GOLD", "XAU", "GOLD", "MEAN_REVERSION", "MR", "SMC_MOMENTUM", "SWEEP", "IMPULSE_FADE", "IF", "FA_OR_ATR_TRAIL", "FAOR", "FA_OR", "ATR_TRAIL", "DONCHIAN_TURTLE", "DONCHIAN", "TURTLE", "KAMA_V2", "KAMA", "ULTIMATE_MA_MTF_FOREX", "ULTIMATE_MTF", "UMTF"]:
                 strategy_mapping = {
                     "SMC": "SMC_SIMPLE",
                     "SMC_SIMPLE": "SMC_SIMPLE",
@@ -160,6 +160,9 @@ def main():
                     "TURTLE": "DONCHIAN_TURTLE",
                     "KAMA_V2": "KAMA_V2",
                     "KAMA": "KAMA_V2",
+                    "ULTIMATE_MA_MTF_FOREX": "ULTIMATE_MA_MTF_FOREX",
+                    "ULTIMATE_MTF": "ULTIMATE_MA_MTF_FOREX",
+                    "UMTF": "ULTIMATE_MA_MTF_FOREX",
                 }
                 strategy_name = strategy_mapping[arg.upper()]
                 processed_args.extend(["--strategy", strategy_name])
@@ -492,7 +495,7 @@ Supported Pairs:
   EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY
 
 Supported Strategies:
-  SMC_SIMPLE, SMC_SIMPLE_V2, SMC_MOMENTUM, MEAN_REVERSION, IMPULSE_FADE, RANGE_FADE, XAU_GOLD
+  SMC_SIMPLE, SMC_SIMPLE_V2, SMC_MOMENTUM, MEAN_REVERSION, IMPULSE_FADE, RANGE_FADE, XAU_GOLD, ULTIMATE_MA_MTF_FOREX
 
 Additional Options:
   --show-signals     Show detailed signal breakdown
@@ -636,6 +639,7 @@ Available Strategies:
   IMPULSE_FADE    - Impulse fade strategy
   RANGE_FADE      - Range fade strategy
   XAU_GOLD        - Gold strategy
+  ULTIMATE_MTF    - Forex Ultimate MA MTF strategy
 
 Multi-Strategy Examples:
   # Test Ranging Market strategy in ranging conditions

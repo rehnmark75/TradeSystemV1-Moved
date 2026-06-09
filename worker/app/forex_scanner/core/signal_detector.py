@@ -155,6 +155,15 @@ class SignalDetector:
         # force-initialize it regardless of scanner_global_config.
         self.squeeze_momentum_enabled = True
 
+        # ULTIMATE_MA_MTF_FOREX is a forex-only copy/adaptation of the stock
+        # scanner's Ultimate MA MTF logic, using 15m trigger + 1h/4h trend.
+        try:
+            scanner_cfg = get_scanner_config()
+            self.ultimate_ma_mtf_forex_enabled = scanner_cfg.is_strategy_enabled("ULTIMATE_MA_MTF_FOREX")
+        except Exception as e:
+            self.logger.warning(f"⚠️ ULTIMATE_MA_MTF_FOREX config check failed; disabled: {e}")
+            self.ultimate_ma_mtf_forex_enabled = False
+
         # SMC_SIMPLE_V2 is demo-only forward monitoring.
         try:
             config_set = os.getenv("TRADING_CONFIG_SET", "demo")
@@ -236,6 +245,7 @@ class SignalDetector:
                 'DONCHIAN_TURTLE': 'donchian_turtle_strategy',
                 'KAMA_V2': 'kama_v2_strategy',
                 'SQUEEZE_MOMENTUM': 'squeeze_momentum_strategy',
+                'ULTIMATE_MA_MTF_FOREX': 'ultimate_ma_mtf_forex_strategy',
                 'SMC_SIMPLE_V2': 'smc_simple_v2_strategy',
             }
             module_name = module_map.get(key)
@@ -1112,6 +1122,28 @@ class SignalDetector:
                     self.logger.error(f"❌ [SQUEEZE_MOMENTUM] Error for {epic}: {e}")
                     individual_results['squeeze_momentum'] = None
 
+            if self.ultimate_ma_mtf_forex_enabled and not self._is_gold_epic(epic):
+                try:
+                    self.logger.debug(f"🔍 [ULTIMATE_MA_MTF_FOREX] Starting detection for {epic}")
+                    _umtf_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _umtf_ts = _umtf_bt_time if _umtf_bt_time is not None else datetime.now(timezone.utc)
+                    umtf_signal = self.detect_ultimate_ma_mtf_forex_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_umtf_ts
+                    )
+                    individual_results['ultimate_ma_mtf_forex'] = umtf_signal
+                    if umtf_signal:
+                        all_signals.append(umtf_signal)
+                        mode = "MONITOR" if umtf_signal.get("monitor_only") else "ACTIVE"
+                        self.logger.info(
+                            f"✅ [ULTIMATE_MA_MTF_FOREX:{mode}] Signal detected for {epic}: "
+                            f"{umtf_signal.get('signal')} @ {umtf_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [ULTIMATE_MA_MTF_FOREX] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [ULTIMATE_MA_MTF_FOREX] Error for {epic}: {e}")
+                    individual_results['ultimate_ma_mtf_forex'] = None
+
             if self.smc_simple_v2_enabled and not self._is_gold_epic(epic):
                 try:
                     self.logger.debug(f"🔍 [SMC_SIMPLE_V2] Starting detection for {epic}")
@@ -1189,6 +1221,8 @@ class SignalDetector:
         'SQZ': 'SQUEEZE_MOMENTUM',
         'SQUEEZE': 'SQUEEZE_MOMENTUM',
         'SQZMOM': 'SQUEEZE_MOMENTUM',
+        'ULTIMATE_MTF': 'ULTIMATE_MA_MTF_FOREX',
+        'UMTF': 'ULTIMATE_MA_MTF_FOREX',
     }
 
     def _detect_single_strategy(
@@ -1228,6 +1262,8 @@ class SignalDetector:
                 signal = self.detect_kama_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'SQUEEZE_MOMENTUM':
                 signal = self.detect_squeeze_momentum_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'ULTIMATE_MA_MTF_FOREX':
+                signal = self.detect_ultimate_ma_mtf_forex_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'SMC_SIMPLE_V2':
                 signal = self.detect_smc_simple_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'INSIDE_DAY':
@@ -2336,6 +2372,85 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting Squeeze Momentum signals for {epic}: {e}")
+            return None
+
+    def detect_ultimate_ma_mtf_forex_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '15m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using forex Ultimate MA MTF (15m trigger, 1h/4h confirmation)."""
+        try:
+            strategy = self._get_strategy('ULTIMATE_MA_MTF_FOREX')
+            if strategy is None:
+                return None
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_ultimate_ma_mtf_forex_backtest_id', None) != current_id:
+                    self._ultimate_ma_mtf_forex_backtest_id = current_id
+                    strategy.reset_cooldowns()
+
+            df_15m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='15m',
+                lookback_hours=120,
+            )
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=260,
+            )
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='4h',
+                lookback_hours=900,
+            )
+
+            df_15m = self._filter_incomplete_candles(df_15m, '15m')
+            df_1h = self._filter_incomplete_candles(df_1h, '1h')
+            df_4h = self._filter_incomplete_candles(df_4h, '4h')
+
+            if df_15m is None or df_15m.empty:
+                self.logger.debug(f"[ULTIMATE_MA_MTF_FOREX] No 15m data for {epic}")
+                return None
+            if df_1h is None or df_1h.empty:
+                self.logger.debug(f"[ULTIMATE_MA_MTF_FOREX] No 1h data for {epic}")
+                return None
+            if df_4h is None or df_4h.empty:
+                self.logger.debug(f"[ULTIMATE_MA_MTF_FOREX] No 4h data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_15m,
+                df_htf=df_1h,
+                df_macro=df_4h,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_15m)
+
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting Ultimate MA MTF Forex signals for {epic}: {e}")
             return None
 
     def detect_smc_simple_v2_signals(

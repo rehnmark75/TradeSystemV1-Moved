@@ -36,8 +36,8 @@ import psycopg2.extras
 logger = logging.getLogger(__name__)
 
 # Single source of truth for active strategies. When a new strategy is added to
-# signal_detector.py, add its name here — the config service will auto-insert it
-# into scanner_global_config.enabled_strategies for every config_set on startup.
+# signal_detector.py, add its name here; strategies listed in
+# DEMO_ONLY_STRATEGIES are only auto-inserted for config_set='demo'.
 KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
     'SMC_SIMPLE',
     'MEAN_REVERSION',
@@ -49,12 +49,14 @@ KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
     'DONCHIAN_TURTLE',
     'KAMA_V2',
     'SQUEEZE_MOMENTUM',
+    'ULTIMATE_MA_MTF_FOREX',
     'INSIDE_DAY',
     'SMC_SIMPLE_V2',
 })
 
 DEMO_ONLY_STRATEGIES: frozenset = frozenset({
     'SMC_SIMPLE_V2',
+    'ULTIMATE_MA_MTF_FOREX',
 })
 
 
