@@ -137,7 +137,21 @@ type SignalStats = {
   claude_strong_buys: number;
   claude_buys: number;
   awaiting_analysis: number;
-  by_scanner: Array<{ scanner_name: string; signal_count: number; avg_score: number; active_count: number }>;
+  by_scanner: Array<{
+    scanner_name: string;
+    signal_count: number;
+    avg_score: number;
+    active_count: number;
+    broker_trade_count?: number | null;
+    closed_trade_count?: number | null;
+    winning_trades?: number | null;
+    losing_trades?: number | null;
+    win_rate?: number | string | null;
+    net_profit?: number | string | null;
+    gross_profit?: number | string | null;
+    gross_loss?: number | string | null;
+    profit_factor?: number | string | null;
+  }>;
 };
 
 type NoteEntry = {
@@ -451,6 +465,13 @@ export default function SignalsPage() {
       return ["All Scanners"];
     }
     return ["All Scanners", ...stats.by_scanner.map((s) => s.scanner_name)];
+  }, [stats]);
+
+  const brokerScannerLeaders = useMemo(() => {
+    return (stats?.by_scanner ?? [])
+      .filter((scanner) => (numberOrNull(scanner.broker_trade_count) ?? 0) > 0)
+      .sort((a, b) => (numberOrNull(b.net_profit) ?? 0) - (numberOrNull(a.net_profit) ?? 0))
+      .slice(0, 3);
   }, [stats]);
 
   useEffect(() => {
@@ -1293,6 +1314,25 @@ export default function SignalsPage() {
           <div className="summary-card">Strong Buys<strong>{stats?.claude_strong_buys ?? 0}</strong></div>
           <div className="summary-card">Awaiting Analysis<strong>{stats?.awaiting_analysis ?? 0}</strong></div>
         </div>
+
+        {brokerScannerLeaders.length ? (
+          <div className="metrics-grid" style={{ marginTop: 12 }}>
+            {brokerScannerLeaders.map((scanner) => {
+              const pf = numberOrNull(scanner.profit_factor);
+              const wins = numberOrNull(scanner.winning_trades) ?? 0;
+              const losses = numberOrNull(scanner.losing_trades) ?? 0;
+              return (
+                <div className="summary-card" key={scanner.scanner_name}>
+                  <span>{scanner.scanner_name.replaceAll("_", " ")} broker edge</span>
+                  <strong>{formatTradePnl(numberOrNull(scanner.net_profit), null)}</strong>
+                  <small>
+                    {numberOrNull(scanner.closed_trade_count) ?? 0} closed · {wins}W/{losses}L · WR {formatPercent(scanner.win_rate)} · PF {pf === null ? "No losses" : pf.toFixed(2)}
+                  </small>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
 
         <div className="view-toggle" style={{ display: "flex", gap: 8, margin: "4px 0 14px" }}>
           <button className="claude-btn" style={{ opacity: viewMode === "all" ? 1 : 0.5 }} onClick={() => setViewMode("all")}>All Signals</button>

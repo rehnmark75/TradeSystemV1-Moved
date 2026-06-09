@@ -1689,15 +1689,17 @@ Analyze and respond in this exact JSON format:
                 WHERE news_sentiment_score IS NOT NULL
                 ORDER BY ticker, news_analyzed_at DESC
             ),
-            open_trades AS (
-                SELECT DISTINCT
-                    SPLIT_PART(ticker, '.', 1) as ticker,
+            signal_trades AS (
+                SELECT DISTINCT ON (signal_id)
+                    signal_id,
                     side,
                     profit,
                     open_price,
                     current_price
                 FROM broker_trades
                 WHERE status = 'open'
+                  AND signal_id IS NOT NULL
+                ORDER BY signal_id, open_time DESC NULLS LAST
             )
             SELECT
                 s.id, s.signal_timestamp, s.scanner_name, s.ticker, s.signal_type,
@@ -1723,7 +1725,7 @@ Analyze and respond in this exact JSON format:
                 m.avg_daily_change_5d,
                 COALESCE(p.days_active, 1) as days_active,
                 p.first_signal_date,
-                CASE WHEN t.ticker IS NOT NULL THEN true ELSE false END as in_trade,
+                CASE WHEN t.signal_id IS NOT NULL THEN true ELSE false END as in_trade,
                 t.side as trade_side,
                 t.profit as trade_profit,
                 t.open_price as trade_open_price,
@@ -1770,7 +1772,7 @@ Analyze and respond in this exact JSON format:
             LEFT JOIN signal_persistence p ON s.ticker = p.ticker AND s.scanner_name = p.scanner_name
             LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
                 AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
-            LEFT JOIN open_trades t ON s.ticker = t.ticker
+            LEFT JOIN signal_trades t ON s.id = t.signal_id
             LEFT JOIN sector_analysis sa ON i.sector = sa.sector
                 AND sa.calculation_date = (SELECT MAX(calculation_date) FROM sector_analysis)
             LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
@@ -1830,7 +1832,16 @@ Analyze and respond in this exact JSON format:
                         r.scanner_name,
                         COALESCE(s.signal_count, 0) as signal_count,
                         COALESCE(s.avg_score, 0) as avg_score,
-                        COALESCE(s.active_count, 0) as active_count
+                        COALESCE(s.active_count, 0) as active_count,
+                        COALESCE(t.broker_trade_count, 0) as broker_trade_count,
+                        COALESCE(t.closed_trade_count, 0) as closed_trade_count,
+                        COALESCE(t.winning_trades, 0) as winning_trades,
+                        COALESCE(t.losing_trades, 0) as losing_trades,
+                        COALESCE(t.win_rate, 0) as win_rate,
+                        COALESCE(t.net_profit, 0) as net_profit,
+                        COALESCE(t.gross_profit, 0) as gross_profit,
+                        COALESCE(t.gross_loss, 0) as gross_loss,
+                        t.profit_factor
                     FROM stock_signal_scanners r
                     LEFT JOIN (
                         SELECT
@@ -1841,8 +1852,29 @@ Analyze and respond in this exact JSON format:
                         FROM stock_scanner_signals
                         GROUP BY scanner_name
                     ) s ON r.scanner_name = s.scanner_name
+                    LEFT JOIN (
+                        SELECT
+                            s.scanner_name,
+                            COUNT(bt.id) as broker_trade_count,
+                            COUNT(bt.id) FILTER (WHERE bt.status = 'closed') as closed_trade_count,
+                            COUNT(bt.id) FILTER (WHERE bt.status = 'closed' AND bt.profit > 0) as winning_trades,
+                            COUNT(bt.id) FILTER (WHERE bt.status = 'closed' AND bt.profit < 0) as losing_trades,
+                            ROUND(
+                                100.0 * COUNT(bt.id) FILTER (WHERE bt.status = 'closed' AND bt.profit > 0)
+                                / NULLIF(COUNT(bt.id) FILTER (WHERE bt.status = 'closed'), 0),
+                                1
+                            ) as win_rate,
+                            COALESCE(SUM(bt.profit) FILTER (WHERE bt.status = 'closed'), 0) as net_profit,
+                            COALESCE(SUM(bt.profit) FILTER (WHERE bt.status = 'closed' AND bt.profit > 0), 0) as gross_profit,
+                            COALESCE(ABS(SUM(bt.profit) FILTER (WHERE bt.status = 'closed' AND bt.profit < 0)), 0) as gross_loss,
+                            COALESCE(SUM(bt.profit) FILTER (WHERE bt.status = 'closed' AND bt.profit > 0), 0)
+                                / NULLIF(ABS(SUM(bt.profit) FILTER (WHERE bt.status = 'closed' AND bt.profit < 0)), 0) as profit_factor
+                        FROM stock_scanner_signals s
+                        JOIN broker_trades bt ON bt.signal_id = s.id
+                        GROUP BY s.scanner_name
+                    ) t ON r.scanner_name = t.scanner_name
                     WHERE r.is_active = true
-                    ORDER BY COALESCE(s.signal_count, 0) DESC, r.scanner_name
+                    ORDER BY COALESCE(t.net_profit, 0) DESC, COALESCE(s.signal_count, 0) DESC, r.scanner_name
                 """)
                 by_scanner = [dict(r) for r in cursor.fetchall()]
 

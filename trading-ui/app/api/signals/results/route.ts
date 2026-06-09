@@ -220,8 +220,7 @@ export async function GET(request: Request) {
           COUNT(*) FILTER (WHERE status = 'open')::int AS open_trade_count,
           MAX(open_time) FILTER (WHERE status = 'open') AS latest_open_time
         FROM broker_trades bt
-        WHERE bt.ticker = s.ticker
-           OR split_part(bt.ticker, '.', 1) = s.ticker
+        WHERE bt.signal_id = s.id
       ) bt_summary ON TRUE
       LEFT JOIN LATERAL (
         SELECT
@@ -232,8 +231,7 @@ export async function GET(request: Request) {
           bt.profit_pct AS last_trade_profit_pct,
           bt.side AS last_trade_side
         FROM broker_trades bt
-        WHERE bt.ticker = s.ticker
-           OR split_part(bt.ticker, '.', 1) = s.ticker
+        WHERE bt.signal_id = s.id
         ORDER BY bt.open_time DESC NULLS LAST
         LIMIT 1
       ) bt_last ON TRUE
@@ -244,7 +242,7 @@ export async function GET(request: Request) {
           bt.profit_pct AS last_closed_profit_pct,
           bt.side AS last_closed_side
         FROM broker_trades bt
-        WHERE (bt.ticker = s.ticker OR split_part(bt.ticker, '.', 1) = s.ticker)
+        WHERE bt.signal_id = s.id
           AND bt.status = 'closed'
         ORDER BY bt.close_time DESC NULLS LAST
         LIMIT 1

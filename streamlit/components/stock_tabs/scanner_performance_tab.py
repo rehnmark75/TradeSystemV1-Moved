@@ -121,6 +121,37 @@ def render_scanner_performance_tab(service):
             active_pct = (active / total * 100) if total > 0 else 0
             st.metric("Active %", f"{active_pct:.0f}%")
 
+        broker_trades = scanner_stats.get('broker_trade_count', 0) or 0
+        if broker_trades:
+            st.markdown("---")
+            st.caption("Broker outcomes are matched by stock_scanner_signals.id -> broker_trades.signal_id.")
+            bcol1, bcol2, bcol3, bcol4 = st.columns(4)
+
+            with bcol1:
+                st.metric("Broker Trades", broker_trades)
+            with bcol2:
+                closed = scanner_stats.get('closed_trade_count', 0) or 0
+                wins = scanner_stats.get('winning_trades', 0) or 0
+                losses = scanner_stats.get('losing_trades', 0) or 0
+                st.metric("Closed W/L", f"{closed}", delta=f"{wins}W / {losses}L")
+            with bcol3:
+                win_rate = scanner_stats.get('win_rate', 0) or 0
+                st.metric("Broker Win Rate", f"{float(win_rate):.1f}%")
+            with bcol4:
+                profit_factor = scanner_stats.get('profit_factor')
+                st.metric(
+                    "Profit Factor",
+                    f"{float(profit_factor):.2f}" if profit_factor is not None else "No losses"
+                )
+
+            pcol1, pcol2, pcol3 = st.columns(3)
+            with pcol1:
+                st.metric("Net Profit", f"${float(scanner_stats.get('net_profit', 0) or 0):,.2f}")
+            with pcol2:
+                st.metric("Gross Profit", f"${float(scanner_stats.get('gross_profit', 0) or 0):,.2f}")
+            with pcol3:
+                st.metric("Gross Loss", f"${float(scanner_stats.get('gross_loss', 0) or 0):,.2f}")
+
         st.markdown("---")
 
         # Get signals for this scanner with date filter
