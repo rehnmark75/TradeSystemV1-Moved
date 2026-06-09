@@ -27,6 +27,7 @@ class EligibilityRecord:
     baseline_pf: Optional[float]
     baseline_n: Optional[int]
     monthly_trade_rate: Optional[float]
+    auto_resume: bool = False  # True -> fully auto-resume; False -> propose-only
 
 
 def load_eligible_cells(
@@ -34,7 +35,8 @@ def load_eligible_cells(
 ) -> List[EligibilityRecord]:
     """Return all cells flagged eligible=TRUE."""
     query = """
-        SELECT strategy, epic, config_set, baseline_pf, baseline_n, monthly_trade_rate
+        SELECT strategy, epic, config_set, baseline_pf, baseline_n,
+               monthly_trade_rate, auto_resume
         FROM auto_pause_eligibility
         WHERE eligible = TRUE
         ORDER BY strategy, epic, config_set
@@ -67,6 +69,7 @@ def load_eligible_cells(
                     if r["monthly_trade_rate"] is not None
                     else None
                 ),
+                auto_resume=bool(r["auto_resume"]),
             )
         )
     return out

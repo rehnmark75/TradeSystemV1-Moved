@@ -131,18 +131,28 @@ the stop). Pause lifecycle (when paused, eval/proposal tracking) lives in
 Resume rule R1 (`auto_pause/resume.py`): ≥ 15 fresh reconstructed outcomes,
 shadow PF > 1.1 (hysteresis gap above the 0.8 trip), ≥ 10-day cooldown.
 
-**Rollout is staged** (there is no observed auto-resume evidence on an eligible
-cell yet):
+**Rollout is per-cell**, controlled by the `auto_resume` flag on the cell's
+`auto_pause_eligibility` row:
 
-1. **Phase A (implemented):** auto-pause fully automatic; resume is
-   **propose/log-only** — a met R1 logs `🔔 RESUME PROPOSED` and records it in
-   `auto_pause_state`, but does NOT re-enable. A human clears `monitor_only`.
-2. **Phase B:** resume requires one-click confirm.
-3. **Phase C:** fully-auto resume, once proposals are proven correct on eligible
-   cells.
+1. **Propose-only** (`auto_resume = FALSE`, default): a met R1 logs
+   `🔔 RESUME PROPOSED` and records it in `auto_pause_state`, but does NOT
+   re-enable — a human clears `monitor_only`.
+2. **Fully-auto** (`auto_resume = TRUE`): a met R1 flips `monitor_only` back off
+   itself, refreshes the cache, and records `state='resumed'` + `resumed_at`
+   (logs `✅ AUTO-RESUMED`). Enable per-cell once its proposals are trusted —
+   **start on demo.** (The one-click-confirm middle step was skipped per request.)
+
+```sql
+-- graduate a cell to fully-auto resume
+UPDATE auto_pause_eligibility SET auto_resume = TRUE
+WHERE strategy='RANGE_FADE' AND epic='CS.D.EURUSD.CEEM.IP' AND config_set='demo';
+```
 
 Auto-pause moves *toward* safety (monitor-only, no capital at risk) → fully-auto
-from day one. Resume moves *toward* risk → it earns autonomy on real data.
+from day one. Resume moves *toward* risk → `auto_resume` is opt-in per cell.
+**Even with `auto_resume=TRUE`, R1's reconstruction-fidelity caveats below still
+apply** — the metric is conservative/approximate, so treat demo auto-resume as a
+validation of the loop, not yet a trusted live mechanism.
 
 ### Reconstruction fidelity — known limitations (must close before Phase C)
 
@@ -169,8 +179,9 @@ resume is trusted.
 |-------|-------|--------|
 | 1 | Eligibility table + migration, adapter registry, PF/streak evaluator + trip rule, eligibility loader, tests, docs | **Done** |
 | 2 | Orchestrator maintenance hook: evaluate eligible cells → flip `monitor_only` → in-process cache refresh (pause-only) | **Done** (needs `docker restart task-worker` to load) |
-| 3 | Shadow-P&L reconstruction + resume proposals (Phase A, propose-only) | **Done** (needs `docker restart task-worker` to load) |
-| B/C | Resume → one-click confirm → fully-auto; reconstruction fidelity validation | Deferred |
+| 3 | Shadow-P&L reconstruction + resume proposals (propose-only) | **Done** |
+| C | Fully-auto resume (per-cell `auto_resume` flag) | **Done** (one-click-confirm step skipped) |
+| — | Reconstruction-fidelity validation (signals-vs-trades, fixed-vs-trailing SL/TP) | Deferred — required before trusting fully-auto beyond demo |
 
 ## Tests
 

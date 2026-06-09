@@ -2273,17 +2273,21 @@ class TradingOrchestrator:
             self._last_auto_pause_check = now
 
     def _auto_pause_resume_proposal(self, cell, adapter, config_set, params):
-        """Phase 3 (PROPOSE-ONLY): for a paused cell, reconstruct shadow P&L
-        since it was paused and LOG a resume proposal if R1 is met.
+        """For a paused cell, reconstruct shadow P&L since it was paused and, if
+        resume rule R1 is met, either FULLY auto-resume (when the cell's
+        eligibility row has auto_resume=TRUE) or log a propose-only proposal.
 
-        Does NOT auto-resume — staged rollout (propose -> confirm -> fully-auto).
-        A human clears monitor_only to actually resume.
+        auto_resume is per-cell so a cell graduates propose-only -> fully-auto
+        individually once its proposals are trusted.
         """
         from forex_scanner.core.trading.auto_pause import (
             compute_shadow_stats,
             evaluate_resume,
             get_pause_state,
             record_eval,
+            record_resume,
+            refresh_config_cache,
+            set_monitor_only,
         )
 
         ps = get_pause_state(cell.strategy, cell.epic, config_set)
@@ -2297,15 +2301,34 @@ class TradingOrchestrator:
             return  # SL/TP unavailable (e.g. ATR-based) — can't reconstruct yet
 
         proposal = evaluate_resume(ps.paused_at, stats, n_res, params, datetime.now())
-        record_eval(
-            cell.strategy, cell.epic, config_set, n_res, stats.pf,
-            proposal.should_propose,
-        )
-        if proposal.should_propose:
+        if not proposal.should_propose:
+            record_eval(cell.strategy, cell.epic, config_set, n_res, stats.pf, False)
+            return
+
+        # R1 met.
+        if getattr(cell, "auto_resume", False):
+            # Fully auto-resume: flip monitor_only back off.
+            affected = set_monitor_only(adapter, cell.epic, config_set, False)
+            if affected == 0:
+                self.logger.error(
+                    f"🚨 [AutoPause] AUTO-RESUME was a NO-OP (0 rows matched) for "
+                    f"{cell.strategy} {cell.epic} ({config_set}) — CELL NOT RESUMED."
+                )
+                record_eval(cell.strategy, cell.epic, config_set, n_res, stats.pf, True)
+                return
+            refresh_config_cache(cell.strategy)
+            record_resume(cell.strategy, cell.epic, config_set, n_res, stats.pf)
             self.logger.warning(
-                f"🔔 [AutoPause] RESUME PROPOSED (Phase A — NOT auto-resumed) "
+                f"✅ [AutoPause] AUTO-RESUMED {cell.strategy} {cell.epic} ({config_set}) "
+                f"-> monitor_only=false | {proposal.reason}"
+            )
+        else:
+            # Propose-only: log + record, a human re-enables.
+            record_eval(cell.strategy, cell.epic, config_set, n_res, stats.pf, True)
+            self.logger.warning(
+                f"🔔 [AutoPause] RESUME PROPOSED (propose-only) "
                 f"{cell.strategy} {cell.epic} ({config_set}): {proposal.reason}. "
-                f"Clear monitor_only manually to resume."
+                f"Clear monitor_only manually to resume (or set auto_resume=TRUE)."
             )
 
     def stop_scanning(self):

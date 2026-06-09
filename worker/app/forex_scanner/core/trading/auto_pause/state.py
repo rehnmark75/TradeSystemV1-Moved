@@ -111,3 +111,21 @@ def record_eval(
             WHERE strategy = %s AND epic = %s AND config_set = %s
         """
     _run(query, [shadow_n, shadow_pf, strategy, epic, config_set], False, dsn, conn)
+
+
+def record_resume(
+    strategy: str, epic: str, config_set: str,
+    shadow_n: Optional[int], shadow_pf: Optional[float],
+    *, dsn: Optional[str] = None, conn: Any = None,
+) -> None:
+    """Mark a cell auto-resumed (state -> 'resumed', stamp resumed_at)."""
+    query = """
+        UPDATE auto_pause_state
+        SET state = 'resumed', resumed_at = now(), last_eval_at = now(),
+            shadow_n = %s, shadow_pf = %s,
+            resume_proposed_at = now(),
+            resume_proposal_count = resume_proposal_count + 1,
+            updated_at = now()
+        WHERE strategy = %s AND epic = %s AND config_set = %s
+    """
+    _run(query, [shadow_n, shadow_pf, strategy, epic, config_set], False, dsn, conn)

@@ -46,6 +46,7 @@ from .state import (
     get_pause_state,
     record_eval,
     record_pause,
+    record_resume,
 )
 from .shadow import (
     compute_shadow_stats,
@@ -82,6 +83,7 @@ __all__ = [
     "get_pause_state",
     "record_eval",
     "record_pause",
+    "record_resume",
     "compute_shadow_stats",
     "get_cell_sl_tp",
     "is_long",
