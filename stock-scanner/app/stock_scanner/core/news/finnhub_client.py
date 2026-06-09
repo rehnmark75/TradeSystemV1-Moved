@@ -264,13 +264,13 @@ class FinnhubClient:
 
                 return data
 
-        except aiohttp.ClientError as e:
+        except (aiohttp.ClientError, asyncio.TimeoutError) as e:
             if retry_count < self.max_retries:
                 wait_time = 2 ** retry_count  # Exponential backoff
-                logger.warning(f"Connection error, retrying in {wait_time}s: {e}")
+                logger.warning(f"Connection/timeout error, retrying in {wait_time}s: {e}")
                 await asyncio.sleep(wait_time)
                 return await self._request(endpoint, params, retry_count + 1, use_cache)
-            raise FinnhubError(f"Connection error after retries: {str(e)}")
+            raise FinnhubError(f"Connection/timeout error after retries: {str(e)}")
 
     async def get_company_news(
         self,

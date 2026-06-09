@@ -429,8 +429,11 @@ class PreMarketService:
                 if articles:
                     news_by_ticker[ticker] = articles
                 await asyncio.sleep(0.3)  # Rate limiting
-            except FinnhubError as e:
+            except (FinnhubError, asyncio.TimeoutError) as e:
                 logger.warning(f"Could not fetch news for {ticker}: {e}")
+                continue
+            except Exception as e:
+                logger.warning(f"Unexpected news fetch error for {ticker}: {e}")
                 continue
 
         return news_by_ticker

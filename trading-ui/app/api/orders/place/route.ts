@@ -7,6 +7,7 @@ const API_KEY = process.env.ROBOMARKETS_API_KEY || "";
 const ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
 const API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com/api/v1";
 const PRICE_STEP_ATTEMPTS = [0.01, 0.05, 0.1];
+const LIMIT_PRICE_OFFSET_ATTEMPTS_PCT = [0, 0.1, 0.25];
 const MAX_LEVEL_ATTEMPTS = 3; // Initial broker-rounded level + max two retries.
 
 interface PlaceOrderBody {
@@ -30,6 +31,7 @@ type BrokerLevelAttempt = {
   takeProfit?: number;
   step: number;
   widenSteps: number;
+  priceOffsetPct: number;
   label: string;
 };
 
@@ -91,14 +93,26 @@ const buildLevelAttempts = (
   const slDirection = side === "buy" ? "down" : "up";
   const tpDirection = side === "buy" ? "up" : "down";
 
-  for (const step of PRICE_STEP_ATTEMPTS) {
+  for (let i = 0; i < PRICE_STEP_ATTEMPTS.length; i += 1) {
+    const step = PRICE_STEP_ATTEMPTS[i];
+    const priceOffsetPct = orderType === "limit" ? (LIMIT_PRICE_OFFSET_ATTEMPTS_PCT[i] ?? 0) : 0;
+    const adjustedPrice =
+      orderType === "limit" && price
+        ? price * (side === "buy" ? 1 - priceOffsetPct / 100 : 1 + priceOffsetPct / 100)
+        : undefined;
+    const roundedPrice = adjustedPrice
+      ? roundToStep(adjustedPrice, step, side === "buy" ? "down" : "up")
+      : undefined;
     const attempt: BrokerLevelAttempt = {
-      price: orderType === "limit" && price ? formatLevel(price) : undefined,
+      price: roundedPrice ? formatLevel(roundedPrice) : undefined,
       stopLoss: roundToStep(stopLoss, step, slDirection),
       takeProfit: takeProfit && takeProfit > 0 ? roundToStep(takeProfit, step, tpDirection) : undefined,
       step,
       widenSteps: 0,
-      label: `${step.toFixed(2)} rounded`,
+      priceOffsetPct,
+      label: priceOffsetPct > 0
+        ? `${step.toFixed(2)} rounded, limit ${priceOffsetPct.toFixed(2)}% ${side === "buy" ? "below" : "above"} request`
+        : `${step.toFixed(2)} rounded`,
     };
 
     if (attempt.stopLoss <= 0 || (attempt.takeProfit !== undefined && attempt.takeProfit <= 0)) {
