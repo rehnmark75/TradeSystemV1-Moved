@@ -13,6 +13,7 @@ const EDGE_WINDOW_DAYS = 60; // trailing window for scanner edge (larger = more 
 const EDGE_PF_FLOOR = 1.0; // drop a scanner below this PF...
 const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
 const EDGE_NO_LOSS_PF_CAP = 3.0; // score cap for closed wins with zero closed losses
+const DAYTRADE_SIGNAL_DATE_COUNT = 2; // include today's partial scan plus latest complete batch
 const ROBOMARKETS_API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com/api/v1";
 const ROBOMARKETS_API_KEY = process.env.ROBOMARKETS_API_KEY || "";
 const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
@@ -341,7 +342,22 @@ export async function GET(request: Request) {
       latest_batch AS (
         SELECT DISTINCT ON (ticker, scanner_name) *
         FROM stock_scanner_signals
-        WHERE signal_date = (SELECT max(signal_date) FROM stock_scanner_signals)
+        WHERE ${
+          mode === "daytrades"
+            ? `
+          signal_type = 'BUY'
+          AND signal_date IN (
+            SELECT signal_date
+            FROM (
+              SELECT DISTINCT signal_date
+              FROM stock_scanner_signals
+              ORDER BY signal_date DESC
+              LIMIT ${DAYTRADE_SIGNAL_DATE_COUNT}
+            ) recent_signal_dates
+          )
+        `
+            : "signal_date = (SELECT max(signal_date) FROM stock_scanner_signals)"
+        }
         ORDER BY ticker, scanner_name, signal_timestamp DESC
       ),
       enriched AS (
@@ -819,6 +835,7 @@ export async function GET(request: Request) {
         edge_min_closed: EDGE_MIN_CLOSED,
         edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
         max_per_scanner: maxPerScanner,
+        daytrade_signal_date_count: mode === "daytrades" ? DAYTRADE_SIGNAL_DATE_COUNT : null,
         daytrade_pool_size: mode === "daytrades" ? result.rows.length : null,
         daytrade_tradable_count: daytradeTradableCount,
         daytrade_live_candle_count: daytradeLiveCandleCount,
