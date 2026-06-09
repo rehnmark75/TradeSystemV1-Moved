@@ -64,6 +64,7 @@ try:
 
     # Import RejectionOutcomeAnalyzer for automatic outcome analysis
     from monitoring.rejection_outcome_analyzer import RejectionOutcomeAnalyzer
+    from monitoring.monitor_outcome_analyzer import MonitorOutcomeAnalyzer
 
     # Import SMCRejectionHistoryManager for tracking validation rejections
     try:
@@ -112,6 +113,13 @@ except ImportError:
     except ImportError as e:
         print(f"⚠️ RejectionOutcomeAnalyzer not available: {e}")
         RejectionOutcomeAnalyzer = None
+
+    # Import MonitorOutcomeAnalyzer for monitor-only forward outcomes
+    try:
+        from forex_scanner.monitoring.monitor_outcome_analyzer import MonitorOutcomeAnalyzer
+    except ImportError as e:
+        print(f"⚠️ MonitorOutcomeAnalyzer not available: {e}")
+        MonitorOutcomeAnalyzer = None
 
     # Import SMCRejectionHistoryManager for tracking validation rejections
     try:
@@ -413,6 +421,20 @@ class TradingOrchestrator:
                 self.logger.warning("⚠️ RejectionOutcomeAnalyzer not available")
         except Exception as e:
             self.logger.warning(f"⚠️ RejectionOutcomeAnalyzer initialization failed: {e}")
+
+        # Initialize MonitorOutcomeAnalyzer for monitor-only forward outcomes.
+        # Runs once/24h (monitor signals are evaluated over a 24h horizon).
+        self.monitor_outcome_analyzer = None
+        self._last_monitor_outcome_analysis = None
+        self._monitor_outcome_interval_hours = 24
+        try:
+            if MonitorOutcomeAnalyzer is not None:
+                self.monitor_outcome_analyzer = MonitorOutcomeAnalyzer()
+                self.logger.info("✅ MonitorOutcomeAnalyzer initialized for monitor-only outcome tracking")
+            else:
+                self.logger.warning("⚠️ MonitorOutcomeAnalyzer not available")
+        except Exception as e:
+            self.logger.warning(f"⚠️ MonitorOutcomeAnalyzer initialization failed: {e}")
 
         # Auto-pause layer (Phase 2): per-(strategy, pair) decay -> monitor-only.
         # Inert until cells are opted into the auto_pause_eligibility allowlist;
@@ -2131,6 +2153,11 @@ class TradingOrchestrator:
             self.logger.debug(f"Periodic maintenance error (non-critical): {e}")
 
         try:
+            self._run_monitor_outcome_analysis_if_due()
+        except Exception as e:
+            self.logger.debug(f"Monitor-outcome maintenance error (non-critical): {e}")
+
+        try:
             self._run_auto_pause_check_if_due()
         except Exception as e:
             # Don't let maintenance failures disrupt scanning
@@ -2175,6 +2202,38 @@ class TradingOrchestrator:
             # Log at debug level to avoid log spam
             self.logger.debug(f"Outcome analysis skipped: {e}")
             self._last_outcome_analysis = now  # Still update time to avoid retry spam
+
+    def _run_monitor_outcome_analysis_if_due(self):
+        """Simulate forward outcomes (MFE/MAE) for monitor-only signals, once/24h.
+
+        Walks ig_candles forward from each logged-but-not-executed signal and
+        upserts into monitor_only_outcomes. OPEN rows (younger than the 24h
+        horizon) are re-evaluated on later runs until their window completes.
+        """
+        if not getattr(self, "monitor_outcome_analyzer", None):
+            return
+
+        now = datetime.now()
+        if self._last_monitor_outcome_analysis is not None:
+            hours_since_last = (now - self._last_monitor_outcome_analysis).total_seconds() / 3600
+            if hours_since_last < self._monitor_outcome_interval_hours:
+                return
+
+        try:
+            self.logger.info("📈 Running monitor-only outcome analysis...")
+            # 3-day lookback covers fresh signals + re-evaluation of still-OPEN rows.
+            stats = self.monitor_outcome_analyzer.run(days_back=3, dry_run=False)
+            self._last_monitor_outcome_analysis = now
+            if stats.get('analyzed', 0) > 0:
+                self.logger.info(
+                    f"📈 Monitor-outcome analysis complete: {stats['analyzed']} signals "
+                    f"({stats.get('resolved', 0)} resolved, {stats.get('open', 0)} open)"
+                )
+            else:
+                self.logger.debug("📈 Monitor-outcome analysis: no new signals")
+        except Exception as e:
+            self.logger.debug(f"Monitor-outcome analysis skipped: {e}")
+            self._last_monitor_outcome_analysis = now  # avoid retry spam
 
     def _run_auto_pause_check_if_due(self):
         """Auto-pause eligible (strategy, pair) cells whose rolling LIVE
