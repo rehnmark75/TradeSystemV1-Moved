@@ -134,6 +134,7 @@ class ScannerManager:
         'premarket_catalyst',
         'gap_and_go',
         'squeeze_momentum',
+        'ultimate_ma_mtf',
     ]
 
     def __init__(
