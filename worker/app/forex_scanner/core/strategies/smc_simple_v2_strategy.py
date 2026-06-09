@@ -9,6 +9,8 @@ edge before adding direction, session, regime, indicator, or pair filters.
 from __future__ import annotations
 
 import logging
+import os
+from copy import deepcopy
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional, Tuple
@@ -18,6 +20,22 @@ import pandas as pd
 from .strategy_registry import StrategyInterface, register_strategy
 
 logger = logging.getLogger(__name__)
+
+try:
+    from forex_scanner.services.smc_simple_v2_config_service import get_smc_simple_v2_config_service
+except ImportError:
+    try:
+        from services.smc_simple_v2_config_service import get_smc_simple_v2_config_service
+    except ImportError:
+        get_smc_simple_v2_config_service = None  # type: ignore[assignment]
+
+try:
+    from forex_scanner.alerts.strategy_rejection_manager import StrategyRejectionManager
+except ImportError:
+    try:
+        from alerts.strategy_rejection_manager import StrategyRejectionManager
+    except ImportError:
+        StrategyRejectionManager = None  # type: ignore[assignment]
 
 
 @dataclass
@@ -68,6 +86,17 @@ class SMCSimpleV2Strategy(StrategyInterface):
         self.config = SMCSimpleV2Config()
         self._last_signal_time: Dict[str, datetime] = {}
         self._apply_overrides()
+        self._base_config = deepcopy(self.config)
+        self._config_set = os.getenv("TRADING_CONFIG_SET", "demo")
+        self._config_service = get_smc_simple_v2_config_service() if get_smc_simple_v2_config_service else None
+        self._current_timestamp: Optional[datetime] = None
+
+        self._rej_mgr = None
+        if db_manager is not None and StrategyRejectionManager is not None:
+            try:
+                self._rej_mgr = StrategyRejectionManager("SMC_SIMPLE_V2", db_manager)
+            except Exception:
+                self._rej_mgr = None
 
     @property
     def strategy_name(self) -> str:
@@ -80,7 +109,101 @@ class SMCSimpleV2Strategy(StrategyInterface):
         return None
 
     def flush_rejections(self) -> None:
-        return None
+        if self._rej_mgr is not None:
+            self._rej_mgr.flush()
+
+    def _reject(
+        self,
+        stage: str,
+        reason: str,
+        epic: str,
+        pair: str,
+        direction: Optional[str] = None,
+        details: Optional[Dict[str, Any]] = None,
+    ) -> None:
+        self.logger.debug("[SMC_SIMPLE_V2] %s ❌ %s: %s", pair or epic, stage, reason)
+        if self._rej_mgr is not None:
+            hour_utc = None
+            ts = self._current_timestamp
+            if ts is not None:
+                if ts.tzinfo is None:
+                    ts = ts.replace(tzinfo=timezone.utc)
+                hour_utc = ts.hour
+            self._rej_mgr.reject(
+                stage=stage,
+                reason=reason,
+                epic=epic,
+                pair=pair,
+                direction=direction,
+                hour_utc=hour_utc,
+                scan_timestamp=self._current_timestamp,
+                details=details,
+            )
+
+    def _apply_pair_row(self, epic: str, pair: str) -> bool:
+        """Reset to base config, then apply DB pair row for this scan."""
+        self.config = deepcopy(self._base_config)
+        if self._config_service is None:
+            return self._is_epic_enabled(epic)
+
+        row = self._config_service.get_pair_config(epic, self._config_set)
+        if not row:
+            self._reject("PAIR_CONFIG", "no SMC_SIMPLE_V2 pair row", epic, pair)
+            return False
+        if not bool(row.get("is_enabled", False)):
+            self._reject("PAIR_DISABLED", "pair disabled", epic, pair)
+            return False
+
+        mapping = {
+            "structure_lookback_bars": ("structure_lookback_bars", int),
+            "entry_lookback_bars": ("entry_lookback_bars", int),
+            "retest_tolerance_pips": ("retest_tolerance_pips", float),
+            "sweep_tolerance_pips": ("sweep_tolerance_pips", float),
+            "min_break_pips": ("min_break_pips", float),
+            "min_rejection_wick_ratio": ("min_rejection_wick_ratio", float),
+            "max_rejection_body_ratio": ("max_rejection_body_ratio", float),
+            "min_confirm_body_ratio": ("min_confirm_body_ratio", float),
+            "fixed_stop_loss_pips": ("sl_pips", float),
+            "fixed_take_profit_pips": ("tp_pips", float),
+            "directions": ("directions", str),
+            "entry_models": ("entry_models", str),
+            "min_signal_gap_minutes": ("min_signal_gap_minutes", int),
+            "adx_min": ("adx_min", float),
+            "adx_max": ("adx_max", float),
+            "atr_percentile_min": ("atr_percentile_min", float),
+            "atr_percentile_max": ("atr_percentile_max", float),
+            "bb_width_percentile_min": ("bb_width_percentile_min", float),
+            "bb_width_percentile_max": ("bb_width_percentile_max", float),
+            "efficiency_ratio_min": ("efficiency_ratio_min", float),
+            "ema200_mode": ("ema200_mode", str),
+            "macd_mode": ("macd_mode", str),
+            "allowed_hours_utc": ("allowed_hours_utc", str),
+            "base_confidence": ("base_confidence", float),
+            "monitor_only": ("monitor_only", bool),
+        }
+        values: Dict[str, Any] = dict(row)
+        bag = values.get("parameter_overrides") or {}
+        if isinstance(bag, dict):
+            values.update({k: v for k, v in bag.items() if v is not None})
+
+        for key, (attr, caster) in mapping.items():
+            value = values.get(key)
+            if value is None:
+                continue
+            try:
+                if caster is bool:
+                    if isinstance(value, str):
+                        value = value.strip().lower() in {"1", "true", "yes", "on", "t"}
+                    else:
+                        value = bool(value)
+                else:
+                    value = caster(value)
+                setattr(self.config, attr, value)
+            except Exception:
+                self.logger.warning("[SMC_SIMPLE_V2] ignored invalid %s=%r for %s", key, value, epic)
+
+        self.config.enabled_epics = epic
+        return True
 
     def _apply_overrides(self) -> None:
         mapping = {
@@ -139,38 +262,79 @@ class SMCSimpleV2Strategy(StrategyInterface):
         current_timestamp: Optional[datetime] = None,
         **_: Any,
     ) -> Optional[Dict[str, Any]]:
+        self._current_timestamp = current_timestamp
+        if not self._apply_pair_row(epic, pair):
+            return None
+
         if df_trigger is None or df_entry is None or len(df_trigger) < 20 or len(df_entry) < 8:
+            self._reject(
+                "INSUFFICIENT_DATA",
+                "need >=20 5m bars and >=8 1m bars",
+                epic,
+                pair,
+                details={"trigger_rows": 0 if df_trigger is None else len(df_trigger),
+                         "entry_rows": 0 if df_entry is None else len(df_entry)},
+            )
             return None
         if not self._is_epic_enabled(epic):
+            self._reject("PAIR_DISABLED", "epic not in enabled_epics", epic, pair)
             return None
 
         trigger = self._normalise(df_trigger)
         entry = self._normalise(df_entry)
         if trigger is None or entry is None:
+            self._reject("BAD_DATA", "missing OHLC data after normalization", epic, pair)
             return None
 
         context = self._detect_structure_context(trigger)
         if context is None:
+            self._reject("NO_STRUCTURE_BREAK", "no 5m structure break", epic, pair)
             return None
 
         direction, structure_level, break_pips = context
         allowed = {d.strip().upper() for d in self.config.directions.split(",") if d.strip()}
         if direction not in allowed:
+            self._reject(
+                "DIRECTION_BLOCKED",
+                f"{direction} not allowed",
+                epic,
+                pair,
+                direction=direction,
+                details={"allowed": sorted(allowed)},
+            )
             return None
 
         filter_context = self._extract_filter_context(trigger, direction)
         if not self._passes_filters(filter_context):
+            self._reject("FILTERS", "indicator filter failed", epic, pair, direction=direction, details=filter_context)
             return None
 
         last = entry.iloc[-1]
         timestamp = self._timestamp_from_row(last, current_timestamp)
         if not self._passes_hour_filter(timestamp):
+            self._reject(
+                "SESSION",
+                f"hour={timestamp.hour} outside {self.config.allowed_hours_utc}",
+                epic,
+                pair,
+                direction=direction,
+                details={"hour": timestamp.hour, "allowed_hours_utc": self.config.allowed_hours_utc},
+            )
             return None
         if self._is_in_signal_gap(epic, direction, timestamp):
+            self._reject("COOLDOWN", "signal gap active", epic, pair, direction=direction)
             return None
 
         entry_model = self._detect_entry_model(entry, direction, structure_level)
         if entry_model is None:
+            self._reject(
+                "NO_ENTRY_MODEL",
+                "no 1m entry model matched",
+                epic,
+                pair,
+                direction=direction,
+                details={"entry_models": self.config.entry_models},
+            )
             return None
 
         entry_type, confidence_boost = entry_model

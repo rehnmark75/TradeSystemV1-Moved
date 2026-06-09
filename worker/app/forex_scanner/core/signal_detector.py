@@ -10,6 +10,7 @@ Legacy strategies have been archived to forex_scanner/archive/disabled_strategie
 import pandas as pd
 import numpy as np
 import logging
+import os
 from typing import Any, Dict, List, Optional, Union, Tuple
 from datetime import datetime, timedelta, timezone
 
@@ -154,11 +155,14 @@ class SignalDetector:
         # force-initialize it regardless of scanner_global_config.
         self.squeeze_momentum_enabled = True
 
-        # SMC_SIMPLE_V2 runs concurrently for forward testing. The strategy itself
-        # is scoped to its validated epics (currently EURUSD only).
+        # SMC_SIMPLE_V2 is demo-only forward monitoring.
         try:
-            scanner_cfg = get_scanner_config()
-            self.smc_simple_v2_enabled = scanner_cfg.is_strategy_enabled("SMC_SIMPLE_V2")
+            config_set = os.getenv("TRADING_CONFIG_SET", "demo")
+            if config_set == "demo":
+                scanner_cfg = get_scanner_config()
+                self.smc_simple_v2_enabled = scanner_cfg.is_strategy_enabled("SMC_SIMPLE_V2")
+            else:
+                self.smc_simple_v2_enabled = False
         except Exception as e:
             self.logger.warning(f"⚠️ SMC_SIMPLE_V2 config check failed; disabled: {e}")
             self.smc_simple_v2_enabled = False
@@ -1928,6 +1932,7 @@ class SignalDetector:
                 timeframe=primary_tf,
                 lookback_hours=48,
             )
+            df_trigger = self._filter_incomplete_candles(df_trigger, primary_tf)
             if df_trigger is None or df_trigger.empty:
                 self.logger.debug(f"[MEAN_REVERSION] No {timeframe} data for {epic}")
                 return None
@@ -1938,6 +1943,7 @@ class SignalDetector:
                 timeframe='1h',
                 lookback_hours=72,
             )
+            df_4h = self._filter_incomplete_candles(df_4h, '1h')
 
             signal = mean_reversion_strategy.detect_signal(
                 df_trigger=df_trigger,

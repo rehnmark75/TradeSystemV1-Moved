@@ -53,6 +53,10 @@ KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
     'SMC_SIMPLE_V2',
 })
 
+DEMO_ONLY_STRATEGIES: frozenset = frozenset({
+    'SMC_SIMPLE_V2',
+})
+
 
 @dataclass
 class ScannerConfig:
@@ -594,7 +598,11 @@ class ScannerConfigService:
                 # the DB row gets added here and persisted, so developers only need
                 # to update KNOWN_ACTIVE_STRATEGIES when wiring a new strategy.
                 current = set(config.enabled_strategies or [])
-                missing = KNOWN_ACTIVE_STRATEGIES - current
+                active_strategies = set(KNOWN_ACTIVE_STRATEGIES)
+                if self.config_set != 'demo':
+                    active_strategies -= DEMO_ONLY_STRATEGIES
+
+                missing = active_strategies - current
                 if missing:
                     logger.warning(
                         "[CONFIG:DB] Strategies missing from enabled_strategies "
