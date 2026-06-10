@@ -99,6 +99,80 @@ def compute_atr14(daily_df: pd.DataFrame) -> pd.Series:
 
 
 # ---------------------------------------------------------------------------
+# Candle index builders + no-look-ahead accessors (module level so the
+# walk-forward replay harness imports the SAME validated code, not a copy).
+# ---------------------------------------------------------------------------
+
+def build_candle_index(conn) -> dict:
+    """Pre-load all 1h candles into {ticker: DataFrame} (sorted asc, UTC-naive)."""
+    all_candles = fetch_df(conn, """
+        SELECT ticker, timestamp, open, high, low, close
+        FROM stock_candles WHERE timeframe = '1h' ORDER BY ticker, timestamp
+    """)
+    if all_candles.empty:
+        return {}
+    all_candles["timestamp"] = pd.to_datetime(all_candles["timestamp"])
+    return {str(t): g.reset_index(drop=True) for t, g in all_candles.groupby("ticker")}
+
+
+def build_daily_index(conn) -> dict:
+    """Pre-load 1d synthesized candles into {ticker: DataFrame} with an atr14 column."""
+    all_daily = fetch_df(conn, """
+        SELECT ticker, timestamp, open, high, low, close
+        FROM stock_candles_synthesized WHERE timeframe = '1d' ORDER BY ticker, timestamp
+    """)
+    if all_daily.empty:
+        return {}
+    all_daily["timestamp"] = pd.to_datetime(all_daily["timestamp"])
+    out: dict = {}
+    for t, g in all_daily.groupby("ticker"):
+        dgrp = g.reset_index(drop=True).copy()
+        dgrp["atr14"] = compute_atr14(dgrp)
+        out[str(t)] = dgrp
+    return out
+
+
+def atr_pct_before(daily_by_ticker: dict, base_ticker: str, signal_time) -> Optional[float]:
+    """ATR% from the last daily bar strictly BEFORE signal_date (no look-ahead)."""
+    daily = daily_by_ticker.get(base_ticker)
+    if daily is None or daily.empty:
+        return None
+    if isinstance(signal_time, str):
+        signal_time = pd.Timestamp(signal_time)
+    if hasattr(signal_time, "tzinfo") and signal_time.tzinfo is not None:
+        signal_time = pd.Timestamp(signal_time.replace(tzinfo=None))
+    sig_date = pd.Timestamp(signal_time.date())
+    sub = daily[daily["timestamp"] < sig_date]
+    if sub.empty or sub["atr14"].isna().all():
+        return None
+    row = sub.iloc[-1]
+    if pd.isna(row["atr14"]) or float(row["close"]) == 0:
+        return None
+    return float(row["atr14"]) / float(row["close"]) * 100
+
+
+def bars_after(candles_by_ticker: dict, base_ticker: str, ref_time_utc):
+    """Return (bars_df, entry_price) starting at the FIRST bar STRICTLY AFTER ref_time_utc.
+    entry = that bar's open. Same convention the validated sim uses for signal entries."""
+    candles = candles_by_ticker.get(base_ticker)
+    if candles is None or candles.empty:
+        return pd.DataFrame(), 0.0
+    if isinstance(ref_time_utc, str):
+        ref_time_utc = pd.Timestamp(ref_time_utc)
+    if hasattr(ref_time_utc, "tzinfo") and ref_time_utc.tzinfo is not None:
+        ref_dt = pd.Timestamp(ref_time_utc.replace(tzinfo=None))
+    else:
+        ref_dt = pd.Timestamp(ref_time_utc)
+    mask = candles["timestamp"] > ref_dt
+    if not mask.any():
+        return pd.DataFrame(), 0.0
+    idx_start = candles[mask].index[0]
+    bars = candles.iloc[idx_start:].reset_index(drop=True)
+    entry = float(bars.iloc[0]["open"]) if not bars.empty else 0.0
+    return bars, entry
+
+
+# ---------------------------------------------------------------------------
 # Bracket computation (mirrors _build_order_plan)
 # ---------------------------------------------------------------------------
 
@@ -370,88 +444,22 @@ def run_simulation(conn):
     print(f"  Without bracket (NULL SL or TP): {n_total_closed - n_with_both}")
     print(f"  NOTE: Engine validation proceeds on the {n_with_both} bracketed trades.")
 
-    # Pre-load ALL 1h candle data once into a dict keyed by ticker
+    # Pre-load candles via the shared module-level builders, then bind thin
+    # local wrappers so the existing call sites below stay unchanged.
     print("\nPre-loading 1h candles...")
-    candle_sql = """
-        SELECT ticker, timestamp, open, high, low, close
-        FROM stock_candles
-        WHERE timeframe = '1h'
-        ORDER BY ticker, timestamp
-    """
-    all_candles = fetch_df(conn, candle_sql)
-    all_candles["timestamp"] = pd.to_datetime(all_candles["timestamp"])
-    candles_by_ticker: dict[str, pd.DataFrame] = {}
-    for ticker_raw, grp in all_candles.groupby("ticker"):
-        candles_by_ticker[str(ticker_raw)] = grp.reset_index(drop=True)
-    print(f"  Loaded {len(all_candles):,} 1h bars for {len(candles_by_ticker)} tickers.")
-
-    # Pre-load daily candles for ATR computation
+    candles_by_ticker = build_candle_index(conn)
+    print(f"  Loaded {sum(len(v) for v in candles_by_ticker.values()):,} 1h bars "
+          f"for {len(candles_by_ticker)} tickers.")
     print("Pre-loading 1d synthesized candles for ATR...")
-    daily_sql = """
-        SELECT ticker, timestamp, open, high, low, close
-        FROM stock_candles_synthesized
-        WHERE timeframe = '1d'
-        ORDER BY ticker, timestamp
-    """
-    all_daily = fetch_df(conn, daily_sql)
-    all_daily["timestamp"] = pd.to_datetime(all_daily["timestamp"])
-    daily_by_ticker: dict[str, pd.DataFrame] = {}
-    for ticker_raw, grp in all_daily.groupby("ticker"):
-        dgrp = grp.reset_index(drop=True).copy()
-        dgrp["atr14"] = compute_atr14(dgrp)
-        daily_by_ticker[str(ticker_raw)] = dgrp
-    print(f"  Loaded {len(all_daily):,} daily bars for {len(daily_by_ticker)} tickers.")
+    daily_by_ticker = build_daily_index(conn)
+    print(f"  Loaded {sum(len(v) for v in daily_by_ticker.values()):,} daily bars "
+          f"for {len(daily_by_ticker)} tickers.")
 
     def get_atr_pct(base_ticker: str, signal_time) -> Optional[float]:
-        """ATR% strictly BEFORE signal_date (no look-ahead)."""
-        daily = daily_by_ticker.get(base_ticker)
-        if daily is None or daily.empty:
-            return None
-        if isinstance(signal_time, str):
-            signal_time = pd.Timestamp(signal_time)
-        if hasattr(signal_time, "tzinfo") and signal_time.tzinfo is not None:
-            signal_time = pd.Timestamp(signal_time.replace(tzinfo=None))
-        sig_date = pd.Timestamp(signal_time.date())
-        mask = daily["timestamp"] < sig_date
-        sub = daily[mask]
-        if sub.empty or sub["atr14"].isna().all():
-            return None
-        row = sub.iloc[-1]
-        if pd.isna(row["atr14"]) or float(row["close"]) == 0:
-            return None
-        return float(row["atr14"]) / float(row["close"]) * 100
+        return atr_pct_before(daily_by_ticker, base_ticker, signal_time)
 
-    def get_bars_after(base_ticker: str, ref_time_utc) -> tuple[pd.DataFrame, float]:
-        """
-        Return (bars_df, entry_price) where bars start at the FIRST bar
-        STRICTLY AFTER ref_time_utc.
-
-        This is the correct convention because:
-        - Signal ref_time = batch generation time (overnight). The first
-          bar after the signal is the next-session market open.
-        - Broker open_time = mid-session fill. Using NEXT bar avoids
-          walking on OHLC data from before the actual fill.
-
-        Returns bars from that first bar onward, and entry = that bar's open.
-        """
-        candles = candles_by_ticker.get(base_ticker)
-        if candles is None or candles.empty:
-            return pd.DataFrame(), 0.0
-        # Normalise to UTC-naive
-        if isinstance(ref_time_utc, str):
-            ref_time_utc = pd.Timestamp(ref_time_utc)
-        if hasattr(ref_time_utc, "tzinfo") and ref_time_utc.tzinfo is not None:
-            ref_dt = pd.Timestamp(ref_time_utc.replace(tzinfo=None))
-        else:
-            ref_dt = pd.Timestamp(ref_time_utc)
-        # First bar STRICTLY AFTER ref_time
-        mask = candles["timestamp"] > ref_dt
-        if not mask.any():
-            return pd.DataFrame(), 0.0
-        idx_start = candles[mask].index[0]
-        bars = candles.iloc[idx_start:].reset_index(drop=True)
-        entry = float(bars.iloc[0]["open"]) if not bars.empty else 0.0
-        return bars, entry
+    def get_bars_after(base_ticker: str, ref_time_utc):
+        return bars_after(candles_by_ticker, base_ticker, ref_time_utc)
 
     # Engine validation on bracketed broker trades
     # CRITICAL DEPLOYMENT CONTEXT:
