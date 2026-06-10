@@ -61,6 +61,11 @@ EARLY_WINDOW_MINUTES = 15       # window for early_mae_pips ("losers die on arri
 # to reconstruct an entry from it (avoids misanchoring across a weekend/session
 # gap, where the next candle could be hours/days later).
 MAX_ENTRY_RECONSTRUCT_GAP_MINUTES = 10
+# Don't evaluate a signal until it's at least this old, so a forward candle
+# exists. Without this, a run firing seconds after a signal (e.g. right after a
+# container restart, which re-arms the 24h hook) evaluates it to a premature
+# NO_DATA. Must be >= the 1m candle cadence.
+MIN_SIGNAL_AGE_MINUTES = 3
 
 # Reference SL/TP grid (pips). A comparable diagnostic anchor for exact win-rate,
 # scaled by instrument so it is meaningful for gold vs FX. NOT a native stop.
@@ -112,10 +117,12 @@ class MonitorOutcomeAnalyzer:
     def get_candidate_signals(self, start_date, end_date) -> pd.DataFrame:
         """Monitor-only (logged-but-not-executed) alert_history rows to evaluate.
 
-        A signal qualifies if it has no trade_log execution. Rows with no outcome
-        yet OR an existing OPEN outcome are included (the latter are re-evaluated
-        until their horizon completes). Archived strategies are skipped.
+        A signal qualifies if it has no trade_log execution and is old enough to
+        have a forward candle. Rows with no outcome yet, an OPEN outcome, or a
+        NO_DATA outcome are included (re-evaluated until their horizon completes
+        or candles finally arrive). Archived strategies are skipped.
         """
+        max_signal_time = end_date - timedelta(minutes=MIN_SIGNAL_AGE_MINUTES)
         q = """
             SELECT a.id AS alert_id, a.strategy, a.epic, a.pair, a.environment,
                    a.signal_type, a.alert_timestamp, a.price, a.bid_price, a.ask_price
@@ -124,6 +131,9 @@ class MonitorOutcomeAnalyzer:
             LEFT JOIN monitor_only_outcomes o ON o.alert_id = a.id
             WHERE a.alert_timestamp >= :start_date
               AND a.alert_timestamp <  :end_date
+              -- Skip signals too fresh to have a forward 1m candle yet, else they
+              -- evaluate to a premature NO_DATA.
+              AND a.alert_timestamp <= :max_signal_time
               AND a.strategy IS NOT NULL
               AND NOT (a.strategy = ANY(:dead))
               -- NOTE: zero/NULL price is NOT excluded. raw_monitor_signal rows
@@ -133,14 +143,19 @@ class MonitorOutcomeAnalyzer:
               -- ~160 monitor-only signals (notably RANGE_FADE / FA_OR_ATR_TRAIL /
               -- SMC_MOMENTUM) from outcome analysis entirely.
               AND t.alert_id IS NULL
-              AND (o.id IS NULL OR o.status = 'OPEN')
+              -- Re-select OPEN (horizon incomplete) and NO_DATA (candles may have
+              -- arrived since the first attempt); only finished RESOLVED is skipped.
+              AND (o.id IS NULL OR o.status IN ('OPEN', 'NO_DATA'))
             ORDER BY a.alert_timestamp ASC
         """
         with self.forex.connect() as conn:
             df = pd.DataFrame(
                 conn.execute(
                     text(q),
-                    {"start_date": start_date, "end_date": end_date, "dead": list(DEAD_STRATEGIES)},
+                    {
+                        "start_date": start_date, "end_date": end_date,
+                        "max_signal_time": max_signal_time, "dead": list(DEAD_STRATEGIES),
+                    },
                 ).mappings().all()
             )
         return df
@@ -331,6 +346,9 @@ class MonitorOutcomeAnalyzer:
             :candles_evaluated, :status, :evaluated_until, now()
         )
         ON CONFLICT (alert_id) DO UPDATE SET
+            -- entry_price can go NULL -> reconstructed when a row that first
+            -- evaluated to NO_DATA (no candles yet) is later re-evaluated.
+            entry_price = EXCLUDED.entry_price,
             mfe_pips = EXCLUDED.mfe_pips, mae_pips = EXCLUDED.mae_pips,
             early_mae_pips = EXCLUDED.early_mae_pips,
             time_to_mfe_minutes = EXCLUDED.time_to_mfe_minutes,
