@@ -57,6 +57,10 @@ DEAD_STRATEGIES = {"RANGING_MARKET", "RANGE_STRUCTURE"}
 HORIZON_MINUTES = 1440          # 24h forward evaluation window
 SNAPSHOT_HORIZONS = [60, 240, 1440]
 EARLY_WINDOW_MINUTES = 15       # window for early_mae_pips ("losers die on arrival")
+# Max minutes the first post-signal candle may lag the signal before we refuse
+# to reconstruct an entry from it (avoids misanchoring across a weekend/session
+# gap, where the next candle could be hours/days later).
+MAX_ENTRY_RECONSTRUCT_GAP_MINUTES = 10
 
 # Reference SL/TP grid (pips). A comparable diagnostic anchor for exact win-rate,
 # scaled by instrument so it is meaningful for gold vs FX. NOT a native stop.
@@ -122,7 +126,12 @@ class MonitorOutcomeAnalyzer:
               AND a.alert_timestamp <  :end_date
               AND a.strategy IS NOT NULL
               AND NOT (a.strategy = ANY(:dead))
-              AND a.price IS NOT NULL AND a.price != 0
+              -- NOTE: zero/NULL price is NOT excluded. raw_monitor_signal rows
+              -- persist with price=0 (and bid/ask = ±half-spread around 0, so the
+              -- mid is also 0); their true entry is reconstructed from the first
+              -- post-signal candle open in simulate(). Excluding them here dropped
+              -- ~160 monitor-only signals (notably RANGE_FADE / FA_OR_ATR_TRAIL /
+              -- SMC_MOMENTUM) from outcome analysis entirely.
               AND t.alert_id IS NULL
               AND (o.id IS NULL OR o.status = 'OPEN')
             ORDER BY a.alert_timestamp ASC
@@ -160,11 +169,18 @@ class MonitorOutcomeAnalyzer:
         ref_sl_pips, ref_tp_pips = ref_grid(epic)
 
         # Entry: BUY fills at ask, SELL at bid; fall back to mid (price).
-        price = float(sig["price"])
+        # raw_monitor_signal rows carry price=0 with bid/ask = ±half-spread
+        # around 0 (mid==0), so none of these columns give a usable entry. In
+        # that case leave entry=None and reconstruct it from the first
+        # post-signal candle open once candles are fetched (below).
+        price = float(sig["price"]) if sig.get("price") else 0.0
         ask = float(sig["ask_price"]) if sig.get("ask_price") else None
         bid = float(sig["bid_price"]) if sig.get("bid_price") else None
-        entry = (ask if (direction == "BUY" and ask) else
-                 bid if (direction == "SELL" and bid) else price)
+        if price > 0:
+            entry = (ask if (direction == "BUY" and ask) else
+                     bid if (direction == "SELL" and bid) else price)
+        else:
+            entry = None  # reconstructed from candles after fetch
 
         out = {
             "alert_id": sig["alert_id"], "strategy": sig["strategy"], "epic": epic,
@@ -191,6 +207,20 @@ class MonitorOutcomeAnalyzer:
         candles = self.fetch_candles(epic, signal_ts, fetch_end)
         if candles.empty:
             return out
+
+        # Reconstruct entry for rows with no usable stored price (price=0
+        # monitor-only signals): realistic next-bar fill at the first
+        # post-signal candle open.
+        if entry is None:
+            first_ts = pd.to_datetime(candles.iloc[0]["timestamp"]).to_pydatetime()
+            gap_min = (first_ts - signal_ts).total_seconds() / 60.0
+            if gap_min > MAX_ENTRY_RECONSTRUCT_GAP_MINUTES:
+                # First candle lags the signal too far (weekend/session gap) to
+                # trust as the entry fill; don't fabricate a misanchored entry.
+                out["status"] = "NO_DATA"
+                return out
+            entry = float(candles.iloc[0]["open"])
+            out["entry_price"] = entry
 
         pip = 1.0 / mult
         sl_price = entry - ref_sl_pips * pip if direction == "BUY" else entry + ref_sl_pips * pip

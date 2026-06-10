@@ -1257,8 +1257,19 @@ class AlertHistoryManager:
             # confidence_score; otherwise the original equals confidence_score.
             original_confidence = float(signal.get('original_confidence', confidence_score))
 
-            # Price data - try multiple field names
-            price = float(signal.get('price', signal.get('price_mid', signal.get('execution_price', 0.0))))
+            # Price data - try multiple field names. `entry_price` is the canonical
+            # field monitor-only strategies emit (their close at signal time); without
+            # it those rows persisted with price=0 (and bid/ask = ±half-spread around 0),
+            # which silently excluded them from monitor-outcome analysis.
+            # `or`-chaining (not nested .get) so a present-but-zero `price` also falls
+            # through — no forex instrument legitimately trades at 0.
+            price = float(
+                signal.get('price')
+                or signal.get('price_mid')
+                or signal.get('execution_price')
+                or signal.get('entry_price')
+                or 0.0
+            )
             bid_price = signal.get('bid_price', signal.get('price_bid'))
             ask_price = signal.get('ask_price', signal.get('price_ask'))
             
@@ -1384,9 +1395,12 @@ class AlertHistoryManager:
             strategy_indicators = signal.get('strategy_indicators', {})
             strategy_metadata = signal.get('strategy_metadata', {})
 
-            # FIXED: Ensure bid_price and ask_price are always provided
+            # FIXED: Ensure bid_price and ask_price are always provided.
+            # Use the already-resolved `price` (entry_price-aware) rather than
+            # re-reading signal['price'], so monitor-only rows get real bid/ask
+            # instead of ±half-spread around 0.
             if bid_price is None or ask_price is None:
-                current_price = signal.get('price', 0)
+                current_price = price
                 spread_pips_val = signal.get('spread_pips', 1.5)
                 
                 # Get pip_size for correct calculation
