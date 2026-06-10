@@ -481,6 +481,39 @@ class AutoOpenTrader:
                     stop_loss=stop,
                     take_profit=target,
                 )
+                if response.get("status") != "submitted" and self._is_price_too_close_response(response):
+                    original_response = response
+                    fallback_entry = self._price_too_close_fallback_entry(row, entry)
+                    if fallback_entry and fallback_entry < entry:
+                        fallback_plan = self._build_order_plan(fallback_entry, self._num(row.get("atr_percent")))
+                        if not fallback_plan.get("reject_reason"):
+                            entry = fallback_entry
+                            plan = fallback_plan
+                            quantity = plan["quantity"]
+                            stop = plan["stop_loss"]
+                            target = plan["take_profit"]
+                            risk_amount = plan["risk_amount"]
+                            risk_pct = plan["risk_pct"]
+                            stop_distance_pct = plan["stop_distance_pct"]
+                            mode = f"{plan.get('mode', 'fixed')}+quote_pullback_retry"
+
+                            await self.db.execute("""
+                                UPDATE stock_auto_trade_candidates
+                                SET planned_entry = $2, planned_stop_loss = $3, planned_take_profit = $4,
+                                    planned_quantity = $5, updated_at = NOW()
+                                WHERE id = $1
+                            """, row["id"], entry, stop, target, quantity)
+
+                            response = await self._place_order_api(
+                                ticker=row["ticker"],
+                                quantity=quantity,
+                                price=entry,
+                                stop_loss=stop,
+                                take_profit=target,
+                            )
+                            response["fallback_reason"] = "price_too_close_to_quote"
+                            response["initial_order_response"] = original_response
+
                 status = "order_submitted" if response.get("status") == "submitted" else "failed"
                 await self.db.execute("""
                     UPDATE stock_auto_trade_candidates
@@ -711,6 +744,24 @@ class AutoOpenTrader:
         if bias == "Use PM levels" and planned and ask:
             return round(min(planned, ask), 2)
         return ask or last or planned
+
+    def _price_too_close_fallback_entry(self, row, current_entry: float) -> Optional[float]:
+        ask = self._num(row.get("broker_ask"))
+        base = ask or current_entry
+        offset_pct = max(0.0, self.pullback_limit_offset_pct)
+        if not base or base <= 0 or offset_pct <= 0:
+            return None
+        fallback = round(base * (1 - offset_pct / 100), 2)
+        if current_entry and fallback >= current_entry:
+            fallback = round(current_entry * (1 - offset_pct / 100), 2)
+        return fallback if fallback > 0 else None
+
+    def _is_price_too_close_response(self, response: Dict[str, Any]) -> bool:
+        messages = [str(response.get("error") or "")]
+        attempts = response.get("level_adjustment_attempts") or []
+        if isinstance(attempts, list):
+            messages.extend(str(attempt.get("error") or "") for attempt in attempts if isinstance(attempt, dict))
+        return any("price too close to quote" in message.lower() for message in messages)
 
     async def _update_candidate_status(self, candidate_id: int, status: str, reason: str):
         await self.db.execute("""

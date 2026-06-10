@@ -1032,21 +1032,38 @@ class StockScheduler:
             original_watchlist_limit = self.premarket_service.watchlist_limit
             original_news_limit = self.premarket_service.news_limit
 
-            if late_run:
-                tickers = await self._fetch_late_premarket_tickers()
-                self.premarket_service.watchlist_limit = max(
-                    1,
-                    int(os.getenv("PREMARKET_PRICING_LATE_TICKER_LIMIT", "50"))
-                )
-                self.premarket_service.news_limit = max(
-                    0,
-                    int(os.getenv("PREMARKET_PRICING_LATE_NEWS_LIMIT", "10"))
-                )
-                logger.info(
-                    "Late PM refresh limits: tickers=%s, news=%s",
-                    len(tickers) if tickers else self.premarket_service.watchlist_limit,
-                    self.premarket_service.news_limit,
-                )
+            tickers = await self._fetch_daytrades_premarket_tickers(late_run=late_run)
+            if not tickers:
+                return {
+                    'skipped': True,
+                    'reason': 'daytrades_top50_unavailable',
+                    'late_run': late_run,
+                }
+
+            ticker_limit_env = (
+                "PREMARKET_PRICING_LATE_TICKER_LIMIT"
+                if late_run
+                else "PREMARKET_PRICING_TICKER_LIMIT"
+            )
+            news_limit_env = (
+                "PREMARKET_PRICING_LATE_NEWS_LIMIT"
+                if late_run
+                else "PREMARKET_PRICING_NEWS_LIMIT"
+            )
+            self.premarket_service.watchlist_limit = max(
+                len(tickers),
+                int(os.getenv(ticker_limit_env, "50"))
+            )
+            self.premarket_service.news_limit = max(
+                0,
+                int(os.getenv(news_limit_env, "10" if late_run else "25"))
+            )
+            logger.info(
+                "%s limits: tickers=%s, news=%s",
+                "Late PM refresh" if late_run else "Pre-market pricing",
+                len(tickers),
+                self.premarket_service.news_limit,
+            )
 
             try:
                 # Run the pre-market scan via PreMarketService
@@ -1055,9 +1072,8 @@ class StockScheduler:
                     force_run=False  # Only run if actually in pre-market session
                 )
             finally:
-                if late_run:
-                    self.premarket_service.watchlist_limit = original_watchlist_limit
-                    self.premarket_service.news_limit = original_news_limit
+                self.premarket_service.watchlist_limit = original_watchlist_limit
+                self.premarket_service.news_limit = original_news_limit
 
             results = {
                 'is_premarket': scan_result.is_pre_market,
@@ -1111,13 +1127,12 @@ class StockScheduler:
         )
         return results
 
-    async def _fetch_late_premarket_tickers(self) -> Optional[list[str]]:
-        """Fetch the Day Trades candidate pool for the late PM refresh.
+    async def _fetch_daytrades_premarket_tickers(self, late_run: bool = False) -> Optional[list[str]]:
+        """Fetch the Day Trades candidate pool for pre-market pricing.
 
         Sized to the auto-trader's candidate pool (50) so every name the trader
-        may fall back to has fresh current-session PM data -- pm_status /
-        pm_direction are fail-closed gates in the auto-trader, so an unrefreshed
-        backup would be auto-rejected ('No PM data' / 'Stale PM').
+        may act on has fresh current-session PM data -- pm_status / pm_direction
+        are fail-closed gates in the auto-trader.
         """
         url = f"{self.trading_ui_url}/api/signals/top?limit=50&mode=daytrades"
         timeout = aiohttp.ClientTimeout(total=30)
@@ -1129,7 +1144,7 @@ class StockScheduler:
                     if response.status >= 400:
                         raise RuntimeError(f"Top day trades API returned {response.status}: {payload}")
         except Exception as e:
-            logger.warning("Could not fetch Day Trades pool for late PM refresh: %s", e)
+            logger.warning("Could not fetch Day Trades pool for pre-market pricing: %s", e)
             return None
 
         tickers: list[str] = []
@@ -1141,10 +1156,15 @@ class StockScheduler:
                 tickers.append(ticker)
 
         if not tickers:
-            logger.warning("Day Trades pool returned no tickers for late PM refresh")
+            logger.warning("Day Trades pool returned no tickers for pre-market pricing")
             return None
 
-        logger.info("Late PM refresh targeting %d Day Trades tickers: %s", len(tickers), ", ".join(tickers))
+        logger.info(
+            "%s targeting %d Day Trades tickers: %s",
+            "Late PM refresh" if late_run else "Pre-market pricing",
+            len(tickers),
+            ", ".join(tickers),
+        )
         return tickers
 
     async def run_intraday_scan(self):
