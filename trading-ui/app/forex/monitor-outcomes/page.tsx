@@ -2,22 +2,36 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 import ForexNav from "../_components/ForexNav";
 import { useEnvironment } from "../../../lib/environment";
 import EnvironmentToggle from "../../../components/EnvironmentToggle";
 
-type StrategySummary = {
+type SweepCell = { sl: number; tp: number; pf: number | null; exp: number | null; wr: number | null };
+type Sweep = { sl_values: number[]; tp_values: number[]; grid: SweepCell[][]; best: SweepCell };
+
+type Candidate = {
   strategy: string;
+  epic: string;
+  pair: string;
   n: number;
+  tp_hits: number;
+  sl_hits: number;
+  timeouts: number;
+  wr: number | null;
+  pf: number | null;
+  expectancy: number | null;
+  expectancy_r: number | null;
   avg_mfe: number | null;
   avg_mae: number | null;
   avg_early_mae: number | null;
-  avg_pnl_1440m: number | null;
-  tp: number;
-  sl: number;
-  ref_wr: number | null;
-  avg_ref_pnl: number | null;
+  dead_on_arrival_pct: number | null;
+  median_mfe_losers: number | null;
+  ref_sl: number | null;
+  ref_tp: number | null;
+  per_month: number | null;
+  thin: boolean;
+  sweep: Sweep;
 };
 
 type OutcomeRow = {
@@ -43,7 +57,7 @@ type OutcomeRow = {
   candles_evaluated: number | null;
 };
 
-type Payload = { summary: StrategySummary[]; rows: OutcomeRow[] };
+type Payload = { candidates: Candidate[]; rows: OutcomeRow[] };
 
 const DAY_OPTIONS = [7, 14, 30, 60, 90];
 
@@ -55,10 +69,34 @@ const signed = (v: number | null) => {
   return `${v > 0 ? "+" : ""}${v.toFixed(1)}`;
 };
 
+const pf = (v: number | null) => (v == null ? "∞" : v.toFixed(2));
+
 const fmtTime = (iso: string) => {
   const d = new Date(iso);
   return Number.isNaN(d.getTime()) ? iso : d.toISOString().slice(0, 16).replace("T", " ");
 };
+
+// Green (positive) / red (negative) tint, normalized per heatmap so both tight FX
+// cells and large-pip gold cells stay readable (scale relative to the cell's own
+// max |expectancy| rather than a fixed pip divisor).
+const expBg = (v: number | null, maxAbs: number) => {
+  if (v == null || !Number.isFinite(v)) return "transparent";
+  const a = maxAbs > 0 ? Math.min(0.85, (Math.abs(v) / maxAbs) * 0.85) : 0;
+  return v >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
+};
+
+type SortKey = "expectancy_r" | "expectancy" | "pf" | "wr" | "n" | "per_month";
+const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "expectancy_r", label: "R-multiple (exp ÷ SL)" },
+  { key: "expectancy", label: "Expectancy (pips)" },
+  { key: "pf", label: "Profit factor" },
+  { key: "wr", label: "Win rate" },
+  { key: "n", label: "Sample size (n)" },
+  { key: "per_month", label: "Frequency (~/mo)" },
+];
+// null PF means no losses (∞) — sort it to the top.
+const sortVal = (c: Candidate, key: SortKey) =>
+  key === "pf" ? (c.pf == null ? Infinity : c.pf) : (c[key] ?? -Infinity);
 
 export default function ForexMonitorOutcomesPage() {
   const { environment } = useEnvironment();
@@ -67,6 +105,8 @@ export default function ForexMonitorOutcomesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [strategyFilter, setStrategyFilter] = useState<string>("ALL");
+  const [sortKey, setSortKey] = useState<SortKey>("expectancy_r");
+  const [expanded, setExpanded] = useState<string | null>(null);
 
   const load = () => {
     setLoading(true);
@@ -85,7 +125,7 @@ export default function ForexMonitorOutcomesPage() {
     load();
   }, [days, environment]);
 
-  const summary = payload?.summary ?? [];
+  const candidates = payload?.candidates ?? [];
   const rows = payload?.rows ?? [];
 
   const strategies = useMemo(
@@ -93,15 +133,89 @@ export default function ForexMonitorOutcomesPage() {
     [rows]
   );
 
+  const visibleCandidates = useMemo(() => {
+    const base =
+      strategyFilter === "ALL" ? candidates : candidates.filter((c) => c.strategy === strategyFilter);
+    // Sort by chosen metric; thin cells (n<20) always sink below non-thin ones.
+    return [...base].sort((a, b) => {
+      if (a.thin !== b.thin) return a.thin ? 1 : -1;
+      return sortVal(b, sortKey) - sortVal(a, sortKey);
+    });
+  }, [candidates, strategyFilter, sortKey]);
+
   const filteredRows = useMemo(
     () => (strategyFilter === "ALL" ? rows : rows.filter((r) => r.strategy === strategyFilter)),
     [rows, strategyFilter]
   );
 
-  const totalSignals = summary.reduce((acc, s) => acc + s.n, 0);
+  const totalDecided = candidates.reduce((acc, c) => acc + c.n, 0);
 
   const outcomeClass = (o: string | null) =>
     o === "HIT_TP" ? "positive" : o === "HIT_SL" ? "negative" : "";
+
+  const renderSweep = (c: Candidate) => {
+    const { sl_values, tp_values, grid, best } = c.sweep;
+    const maxAbs = Math.max(
+      0,
+      ...grid.flat().map((cell) => (cell.exp == null || !Number.isFinite(cell.exp) ? 0 : Math.abs(cell.exp)))
+    );
+    return (
+      <tr>
+        <td colSpan={13} style={{ background: "rgba(255,255,255,0.02)", padding: "12px 16px" }}>
+          <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
+            <strong>SL/TP sweep</strong> — expectancy (pips/trade) re-derived from this cell&apos;s MFE/MAE
+            distribution. Approximate (max-excursion timing, pessimistic ties); a screen, not a backtest.
+            Current bracket outlined, best-expectancy bracket ★.
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table className="forex-table" style={{ fontSize: 11, minWidth: 480 }}>
+              <thead>
+                <tr>
+                  <th style={{ textAlign: "right" }}>SL ↓ / TP →</th>
+                  {tp_values.map((tp) => (
+                    <th key={tp} style={{ textAlign: "center" }}>
+                      {tp}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {grid.map((rowg, i) => (
+                  <tr key={sl_values[i]}>
+                    <td style={{ textAlign: "right", fontWeight: 600 }}>{sl_values[i]}</td>
+                    {rowg.map((cell) => {
+                      const isBest = cell.sl === best.sl && cell.tp === best.tp;
+                      const isRef = cell.sl === c.ref_sl && cell.tp === c.ref_tp;
+                      return (
+                        <td
+                          key={cell.tp}
+                          title={`SL ${cell.sl} / TP ${cell.tp} · PF ${pf(cell.pf)} · WR ${fmt(cell.wr, 0)}% · exp ${signed(cell.exp)}`}
+                          style={{
+                            textAlign: "center",
+                            background: expBg(cell.exp, maxAbs),
+                            outline: isRef ? "2px solid rgba(255,255,255,0.6)" : undefined,
+                            fontWeight: isBest ? 700 : 400,
+                          }}
+                        >
+                          {isBest ? "★ " : ""}
+                          {signed(cell.exp)}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+          <div style={{ fontSize: 12, marginTop: 8 }}>
+            Best bracket: <strong>SL {best.sl} / TP {best.tp}</strong> → exp {signed(best.exp)} pips · PF{" "}
+            {pf(best.pf)} · WR {fmt(best.wr, 0)}% &nbsp;|&nbsp; Current: SL {c.ref_sl} / TP {c.ref_tp} → exp{" "}
+            {signed(c.expectancy)} · PF {pf(c.pf)}
+          </div>
+        </td>
+      </tr>
+    );
+  };
 
   return (
     <div className="page">
@@ -122,11 +236,13 @@ export default function ForexMonitorOutcomesPage() {
 
       <div className="header">
         <div>
-          <h1>Monitor Outcomes</h1>
+          <h1>Monitor Outcomes — Candidate Edge</h1>
           <p>
-            Counterfactual forward outcomes (MFE/MAE) for monitor-only signals — what every
-            logged-but-not-executed signal would have done over 24h. Reference SL/TP grid is a
-            comparable win-rate anchor, not each strategy&apos;s native stop.
+            Per-(strategy · pair) directional edge for monitor-only signals, simulated against a fixed
+            reference SL/TP bracket over 24h. This is a <strong>raw-edge screen to pick demo forward-test
+            candidates — not a promotion verdict.</strong> Live execution uses progressive trailing/break-even
+            stops that materially change P&amp;L, so a strong cell here means &ldquo;worth forward-testing&rdquo;,
+            not &ldquo;ready to trade&rdquo;.
           </p>
         </div>
         <div className="header-chip">Forex</div>
@@ -157,10 +273,20 @@ export default function ForexMonitorOutcomesPage() {
               ))}
             </select>
           </div>
+          <div>
+            <label>Sort by</label>
+            <select value={sortKey} onChange={(event) => setSortKey(event.target.value as SortKey)}>
+              {SORT_OPTIONS.map((o) => (
+                <option key={o.key} value={o.key}>
+                  {o.label}
+                </option>
+              ))}
+            </select>
+          </div>
           <button className="section-tab active" onClick={load}>
             Refresh
           </button>
-          <div className="forex-badge">{totalSignals} resolved signals</div>
+          <div className="forex-badge">{totalDecided} decided signals</div>
         </div>
 
         {error ? <div className="error">{error}</div> : null}
@@ -169,48 +295,83 @@ export default function ForexMonitorOutcomesPage() {
           <div className="chart-placeholder">Loading monitor outcomes...</div>
         ) : (
           <>
-            <h3 style={{ marginTop: 8 }}>Per-strategy summary (resolved only)</h3>
+            <h3 style={{ marginTop: 8 }}>
+              Candidate scorecard — ranked by expectancy ({visibleCandidates.length} cells)
+            </h3>
+            <p style={{ fontSize: 12, opacity: 0.7, marginTop: -4 }}>
+              Click a row for its SL/TP sweep. ⚠ = thin sample (n&lt;20), treat with caution. PF/WR/expectancy
+              are on the fixed reference bracket; <strong>R</strong> = expectancy in units of risk (exp ÷ SL),
+              scale-invariant so large-pip gold and tight FX compare fairly. %DoA = share of signals whose max
+              favourable move stayed under 2 pips (&ldquo;dead on arrival&rdquo; = an entry leak no stop can fix).
+            </p>
             <table className="forex-table">
               <thead>
                 <tr>
-                  <th>Strategy</th>
-                  <th>Signals</th>
+                  <th>Strategy · Pair</th>
+                  <th>n</th>
+                  <th>PF</th>
+                  <th>WR</th>
+                  <th>Exp (pips)</th>
+                  <th>R (exp/SL)</th>
                   <th>Avg MFE</th>
                   <th>Avg MAE</th>
-                  <th>Early MAE (15m)</th>
-                  <th>Avg P&amp;L @24h</th>
-                  <th>Ref TP / SL</th>
-                  <th>Ref WR</th>
-                  <th>Avg Ref P&amp;L</th>
+                  <th>%DoA</th>
+                  <th>Med MFE (losers)</th>
+                  <th>~/mo</th>
+                  <th>Best SL/TP</th>
+                  <th>TP/SL/TO</th>
                 </tr>
               </thead>
               <tbody>
-                {summary.length === 0 ? (
+                {visibleCandidates.length === 0 ? (
                   <tr>
-                    <td colSpan={9}>No resolved monitor-only outcomes in this window.</td>
+                    <td colSpan={13}>No decided monitor-only outcomes in this window.</td>
                   </tr>
                 ) : (
-                  summary.map((s) => (
-                    <tr key={s.strategy}>
-                      <td>{s.strategy}</td>
-                      <td>{s.n}</td>
-                      <td>{fmt(s.avg_mfe)}</td>
-                      <td>{fmt(s.avg_mae)}</td>
-                      <td>{fmt(s.avg_early_mae)}</td>
-                      <td className={s.avg_pnl_1440m != null && s.avg_pnl_1440m < 0 ? "negative" : "positive"}>
-                        {signed(s.avg_pnl_1440m)}
-                      </td>
-                      <td>
-                        {s.tp} / {s.sl}
-                      </td>
-                      <td className={s.ref_wr != null && s.ref_wr < 50 ? "negative" : "positive"}>
-                        {s.ref_wr == null ? "—" : `${s.ref_wr.toFixed(0)}%`}
-                      </td>
-                      <td className={s.avg_ref_pnl != null && s.avg_ref_pnl < 0 ? "negative" : "positive"}>
-                        {signed(s.avg_ref_pnl)}
-                      </td>
-                    </tr>
-                  ))
+                  visibleCandidates.map((c) => {
+                    const key = `${c.strategy}__${c.epic}`;
+                    const isOpen = expanded === key;
+                    const pfPos = c.pf == null || c.pf >= 1;
+                    return (
+                      <Fragment key={key}>
+                        <tr
+                          onClick={() => setExpanded(isOpen ? null : key)}
+                          style={{ cursor: "pointer", opacity: c.thin ? 0.6 : 1 }}
+                        >
+                          <td>
+                            {isOpen ? "▾ " : "▸ "}
+                            <strong>{c.strategy}</strong> · {c.pair}
+                          </td>
+                          <td>
+                            {c.thin ? "⚠ " : ""}
+                            {c.n}
+                          </td>
+                          <td className={pfPos ? "positive" : "negative"}>{pf(c.pf)}</td>
+                          <td>{fmt(c.wr, 0)}%</td>
+                          <td className={c.expectancy != null && c.expectancy < 0 ? "negative" : "positive"}>
+                            {signed(c.expectancy)}
+                          </td>
+                          <td className={c.expectancy_r != null && c.expectancy_r < 0 ? "negative" : "positive"}>
+                            {c.expectancy_r == null ? "—" : `${c.expectancy_r > 0 ? "+" : ""}${c.expectancy_r.toFixed(2)}R`}
+                          </td>
+                          <td>{fmt(c.avg_mfe)}</td>
+                          <td>{fmt(c.avg_mae)}</td>
+                          <td className={c.dead_on_arrival_pct != null && c.dead_on_arrival_pct > 40 ? "negative" : ""}>
+                            {c.dead_on_arrival_pct == null ? "—" : `${c.dead_on_arrival_pct.toFixed(0)}%`}
+                          </td>
+                          <td>{fmt(c.median_mfe_losers)}</td>
+                          <td>{c.per_month == null ? "—" : c.per_month.toFixed(0)}</td>
+                          <td>
+                            {c.sweep.best.sl}/{c.sweep.best.tp}
+                          </td>
+                          <td>
+                            {c.tp_hits}/{c.sl_hits}/{c.timeouts}
+                          </td>
+                        </tr>
+                        {isOpen ? renderSweep(c) : null}
+                      </Fragment>
+                    );
+                  })
                 )}
               </tbody>
             </table>
