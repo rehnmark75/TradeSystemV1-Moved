@@ -3,6 +3,12 @@ import { pool } from "../../../../lib/db";
 
 export const dynamic = "force-dynamic";
 
+const NO_STORE_HEADERS = {
+  "Cache-Control": "no-store, no-cache, must-revalidate, proxy-revalidate",
+  Pragma: "no-cache",
+  Expires: "0",
+};
+
 // --- Scanner edge floor -------------------------------------------------
 // scanner_pf is a closed-trade profit factor. Winners and losers must use
 // the same status='closed' population, otherwise open/expired/partial rows can
@@ -825,37 +831,43 @@ export async function GET(request: Request) {
           })()
         : result.rows;
 
-    return NextResponse.json({
-      rows,
-      meta: {
-        scoring_mode: mode,
-        batch_date: result.rows[0]?.signal_timestamp ?? null,
-        edge_window_days: EDGE_WINDOW_DAYS,
-        edge_pf_floor: EDGE_PF_FLOOR,
-        edge_min_closed: EDGE_MIN_CLOSED,
-        edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
-        max_per_scanner: maxPerScanner,
-        daytrade_signal_date_count: mode === "daytrades" ? DAYTRADE_SIGNAL_DATE_COUNT : null,
-        daytrade_pool_size: mode === "daytrades" ? result.rows.length : null,
-        daytrade_tradable_count: daytradeTradableCount,
-        daytrade_live_candle_count: daytradeLiveCandleCount,
-        daytrade_rvol_source:
-          mode === "daytrades"
-            ? "intraday_5m_state_when_present_else_prior_session_daily"
-            : null,
-        daytrade_execution_quality:
-          mode === "daytrades"
-            ? "0-12 live score: spread 4, quote age 2, entry discipline 2, size fit 2, room-vs-spread 2"
-            : null,
-        daytrade_live_confirmation_bonus:
-          mode === "daytrades"
-            ? "0-8 added: live RVOL pace + above/below session VWAP (covered subset only)"
-            : null,
+    return NextResponse.json(
+      {
+        rows,
+        meta: {
+          scoring_mode: mode,
+          batch_date: result.rows[0]?.signal_timestamp ?? null,
+          edge_window_days: EDGE_WINDOW_DAYS,
+          edge_pf_floor: EDGE_PF_FLOOR,
+          edge_min_closed: EDGE_MIN_CLOSED,
+          edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
+          max_per_scanner: maxPerScanner,
+          daytrade_signal_date_count: mode === "daytrades" ? DAYTRADE_SIGNAL_DATE_COUNT : null,
+          daytrade_pool_size: mode === "daytrades" ? result.rows.length : null,
+          daytrade_tradable_count: daytradeTradableCount,
+          daytrade_live_candle_count: daytradeLiveCandleCount,
+          daytrade_rvol_source:
+            mode === "daytrades"
+              ? "intraday_5m_state_when_present_else_prior_session_daily"
+              : null,
+          daytrade_execution_quality:
+            mode === "daytrades"
+              ? "0-12 live score: spread 4, quote age 2, entry discipline 2, size fit 2, room-vs-spread 2"
+              : null,
+          daytrade_live_confirmation_bonus:
+            mode === "daytrades"
+              ? "0-8 added: live RVOL pace + above/below session VWAP (covered subset only)"
+              : null,
+        },
       },
-    });
+      { headers: NO_STORE_HEADERS }
+    );
   } catch (error) {
     console.error("top-candidates query failed", error);
-    return NextResponse.json({ error: "Failed to load top candidates" }, { status: 500 });
+    return NextResponse.json(
+      { error: "Failed to load top candidates" },
+      { status: 500, headers: NO_STORE_HEADERS }
+    );
   } finally {
     client.release();
   }

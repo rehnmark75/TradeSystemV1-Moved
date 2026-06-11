@@ -520,7 +520,8 @@ export default function SignalsPage() {
       try {
         const params = new URLSearchParams({ limit: viewMode === "daytrades" ? "50" : "10" });
         if (viewMode === "daytrades") params.set("mode", "daytrades");
-        const res = await fetch(`${apiPath("signals/top")}?${params.toString()}`);
+        params.set("_", String(Date.now()));
+        const res = await fetch(`${apiPath("signals/top")}?${params.toString()}`, { cache: "no-store" });
         const data = await res.json();
         setTopCandidates(data.rows || []);
         setTopMeta(data.meta || null);
