@@ -242,13 +242,10 @@ class DeepAnalysisOrchestrator:
             logger.info("Deep analysis is disabled")
             return []
 
-        # Get unanalyzed high-quality signals
-        if min_tier == 'B':
-            tier_filter = "('A+', 'A', 'B')"
-        elif min_tier == 'A':
-            tier_filter = "('A+', 'A')"
-        else:
-            tier_filter = "('A+')"
+        # Get unanalyzed signals at or above min_tier ('D' = all tiers)
+        tier_levels = ['A+', 'A', 'B', 'C', 'D']
+        cutoff = tier_levels.index(min_tier) if min_tier in tier_levels else 1
+        tier_filter = "(" + ", ".join(f"'{t}'" for t in tier_levels[:cutoff + 1]) + ")"
 
         status_filter = "IN ('active', 'triggered', 'partial_exit')" if include_non_active else "= 'active'"
 
@@ -271,7 +268,7 @@ class DeepAnalysisOrchestrator:
             return []
 
         signal_ids = [row['id'] for row in rows]
-        logger.info(f"Found {len(signal_ids)} unanalyzed A+/A signals")
+        logger.info(f"Found {len(signal_ids)} unanalyzed signals (tier >= {min_tier})")
 
         return await self.analyze_signals_batch(
             signal_ids,

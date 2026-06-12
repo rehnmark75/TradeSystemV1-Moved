@@ -1854,9 +1854,9 @@ def create_parser() -> argparse.ArgumentParser:
     )
     deep_analyze_parser.add_argument(
         "--min-tier",
-        default="A",
-        choices=["A+", "A", "B"],
-        help="Minimum tier for batch analysis (default: A)"
+        default="D",
+        choices=["A+", "A", "B", "C", "D"],
+        help="Minimum tier for batch analysis (default: D = all tiers)"
     )
     deep_analyze_parser.add_argument(
         "--days",

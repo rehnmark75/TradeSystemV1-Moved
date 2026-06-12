@@ -458,42 +458,45 @@ class ScannerManager:
     async def _auto_deep_analysis(
         self,
         signals: List[SignalSetup],
-        min_tier: str = 'A',
+        min_tier: str = 'D',
     ):
         """
-        Automatically run deep analysis on high-quality signals.
+        Automatically run deep analysis on scanned signals.
 
         This runs after signals are saved to database, performing deep
-        technical, fundamental, and contextual analysis on A+ and A tier signals.
+        technical, fundamental, and contextual analysis.
+
+        All tiers are analyzed by default (Jun 2026): quality_tier is
+        anti-predictive of forward outcome, so gating DAQ on A+/A skewed
+        coverage away from the populations that actually win.
 
         Args:
             signals: List of SignalSetup objects
-            min_tier: Minimum tier to auto-analyze (default: 'A')
+            min_tier: Minimum tier to auto-analyze (default: 'D' = all)
         """
         if not DEEP_ANALYSIS_AVAILABLE:
             logger.debug("Deep analysis not available - skipping auto-analysis")
             return
 
-        # Filter to high-quality signals only
         tier_order = {'D': 0, 'C': 1, 'B': 2, 'A': 3, 'A+': 4}
-        min_tier_value = tier_order.get(min_tier, 3)
+        min_tier_value = tier_order.get(min_tier, 0)
 
-        high_quality = [
+        eligible = [
             s for s in signals
             if tier_order.get(s.quality_tier.value, 0) >= min_tier_value
         ]
 
-        if not high_quality:
-            logger.debug("No high-quality signals for deep analysis")
+        if not eligible:
+            logger.debug("No signals for deep analysis")
             return
 
-        logger.info(f"[DEEP] Starting deep analysis for {len(high_quality)} A+/A signals")
+        logger.info(f"[DEEP] Starting deep analysis for {len(eligible)} signals (min tier: {min_tier})")
 
         # Get signal IDs from database (recently created)
         scan_start_time = datetime.now() - timedelta(minutes=10)
         signal_ids = []
 
-        for signal in high_quality:
+        for signal in eligible:
             try:
                 query = """
                     SELECT id FROM stock_scanner_signals

@@ -361,7 +361,7 @@ class DeepAnalysisConfig:
     """Configuration for deep analysis"""
     # Enable/disable components
     enabled: bool = True
-    min_tier_for_auto: str = 'A'  # Minimum signal tier for auto-analysis
+    min_tier_for_auto: str = 'D'  # Minimum signal tier for auto-analysis ('D' = all tiers)
 
     # Component weights (must sum to 100)
     mtf_weight: int = 20
