@@ -195,6 +195,7 @@ class AutoOpenTrader:
             "dry_run": self.dry_run,
             "stage": "idle",
             "created": 0,
+            "capped": 0,
             "validated": 0,
             "placed": 0,
             "rejected": 0,
@@ -221,13 +222,14 @@ class AutoOpenTrader:
             await self._mark_run_status(run_id, "completed")
             return result
 
-        candidates = await self._fetch_daytrade_candidates()
+        candidates, capped = await self._fetch_daytrade_candidates()
         if not candidates:
             result["stage"] = "no_candidates"
             return result
 
         created = await self._upsert_candidates(run_id, trade_date, candidates)
         result["created"] = created
+        result["capped"] = await self._record_capped_candidates(run_id, trade_date, capped)
 
         validated = await self._validate_candidates(run_id, candidates)
         result["validated"] = validated["watching"]
@@ -324,7 +326,7 @@ class AutoOpenTrader:
         """, trade_date, self.enabled, self.dry_run, json.dumps(config))
         return int(row["id"])
 
-    async def _fetch_daytrade_candidates(self) -> List[Dict[str, Any]]:
+    async def _fetch_daytrade_candidates(self) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
         # Clamp to the route's hard cap (daytrades returns at most 50). A larger
         # configured value is honored only once the route cap is raised (deferred).
         pool = min(int(self.candidate_pool_limit), 50)
@@ -345,7 +347,7 @@ class AutoOpenTrader:
                 payload = await response.json()
                 if response.status >= 400:
                     raise RuntimeError(f"Top day trades API returned {response.status}: {payload}")
-                return list(payload.get("rows") or [])
+                return list(payload.get("rows") or []), list(payload.get("capped_rows") or [])
 
     async def _upsert_candidates(self, run_id: int, trade_date, candidates: List[Dict[str, Any]]) -> int:
         count = 0
@@ -360,6 +362,14 @@ class AutoOpenTrader:
                     prev_close, day_change_pct
                 ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
                 ON CONFLICT (run_id, ticker) DO UPDATE SET
+                    status = CASE
+                        WHEN stock_auto_trade_candidates.status = 'capped' THEN 'queued'
+                        ELSE stock_auto_trade_candidates.status
+                    END,
+                    reason = CASE
+                        WHEN stock_auto_trade_candidates.status = 'capped' THEN NULL
+                        ELSE stock_auto_trade_candidates.reason
+                    END,
                     rank = EXCLUDED.rank,
                     candidate_score = EXCLUDED.candidate_score,
                     scanner_name = EXCLUDED.scanner_name,
@@ -406,6 +416,51 @@ class AutoOpenTrader:
                 self._num(row.get("pm_suggested_stop")), self._num(row.get("pm_suggested_target")),
                 self._num(row.get("session_vwap")),
                 *self._day_change(row),
+            )
+            count += 1
+        return count
+
+    async def _record_capped_candidates(self, run_id: int, trade_date, capped: List[Dict[str, Any]]) -> int:
+        """Audit-log names the route's per-scanner cap dropped from the pool.
+
+        These rows never enter validation or trading (status='capped' is outside
+        every selection filter); they exist so "did the cap suppress winners from
+        scanner X?" is answerable later. Raw SQL-scored rows, no broker quote.
+        """
+        count = 0
+        for row in capped:
+            ticker = row.get("ticker")
+            if not ticker:
+                continue
+            reason = (
+                f"Per-scanner cap: {row.get('scanner_name') or 'unknown'} "
+                f"rank {row.get('scanner_rank')} > max {self.max_per_scanner}"
+            )
+            await self.db.execute("""
+                INSERT INTO stock_auto_trade_candidates (
+                    run_id, trade_date, rank, ticker, status, reason, candidate_score,
+                    scanner_name, order_bias, pm_status, pm_direction,
+                    relative_volume, atr_percent
+                ) VALUES ($1,$2,NULL,$3,'capped',$4,$5,$6,$7,$8,$9,$10,$11)
+                ON CONFLICT (run_id, ticker) DO UPDATE SET
+                    status = CASE
+                        WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run', 'failed')
+                        THEN stock_auto_trade_candidates.status
+                        ELSE 'capped'
+                    END,
+                    reason = CASE
+                        WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run', 'failed')
+                        THEN stock_auto_trade_candidates.reason
+                        ELSE EXCLUDED.reason
+                    END,
+                    candidate_score = EXCLUDED.candidate_score,
+                    scanner_name = EXCLUDED.scanner_name,
+                    updated_at = NOW()
+            """,
+                run_id, trade_date, ticker, reason, self._num(row.get("candidate_score")),
+                row.get("scanner_name"), row.get("order_bias"), row.get("pm_status"),
+                row.get("pm_direction"), self._num(row.get("relative_volume")),
+                self._num(row.get("atr_percent")),
             )
             count += 1
         return count

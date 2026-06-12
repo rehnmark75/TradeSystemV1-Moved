@@ -627,13 +627,29 @@ export async function GET(request: Request) {
             ORDER BY candidate_score DESC, rs_percentile DESC NULLS LAST, ticker
           ) AS scanner_rank
         FROM eligible
+      ),
+      included AS (
+        SELECT *,
+          row_number() OVER (ORDER BY candidate_score DESC, rs_percentile DESC NULLS LAST, ticker) AS rank
+        FROM capped
+        WHERE scanner_rank <= $4
+        ORDER BY candidate_score DESC, rs_percentile DESC NULLS LAST, ticker
+        LIMIT $5
       )
-      SELECT *,
-        row_number() OVER (ORDER BY candidate_score DESC, rs_percentile DESC NULLS LAST, ticker) AS rank
+      -- Capped-out audit rows: names dropped by the per-scanner cap that would
+      -- otherwise have made the list (score at/above the included cutoff, or the
+      -- list isn't full). Returned flagged so callers can record the suppression;
+      -- they are NOT part of the tradable pool.
+      SELECT *, FALSE AS capped_by_scanner FROM included
+      UNION ALL
+      SELECT *, NULL::bigint AS rank, TRUE AS capped_by_scanner
       FROM capped
-      WHERE scanner_rank <= $4
-      ORDER BY candidate_score DESC, rs_percentile DESC NULLS LAST, ticker
-      LIMIT $5
+      WHERE scanner_rank > $4
+        AND (
+          (SELECT count(*) FROM included) < $5
+          OR candidate_score >= (SELECT min(candidate_score) FROM included)
+        )
+      ORDER BY capped_by_scanner, candidate_score DESC, rs_percentile DESC NULLS LAST, ticker
     `;
     const result = await client.query(query, [
       EDGE_WINDOW_DAYS,
@@ -643,17 +659,19 @@ export async function GET(request: Request) {
       queryLimit,
       EDGE_NO_LOSS_PF_CAP,
     ]);
+    const includedRows = result.rows.filter((row) => !row.capped_by_scanner);
+    const cappedRows = result.rows.filter((row) => row.capped_by_scanner);
     let daytradeTradableCount: number | null = null;
     let daytradeLiveCandleCount: number | null = null;
     const rows =
       mode === "daytrades"
         ? await (async () => {
-            const tickers = result.rows.map((row) => row.ticker);
+            const tickers = includedRows.map((row) => row.ticker);
             const [quotes, candleStats] = await Promise.all([
               fetchBrokerQuotes(tickers),
               fetchIntradayCandleStats(client, tickers),
             ]);
-            const enrichedRows = result.rows.map((row) => {
+            const enrichedRows = includedRows.map((row) => {
               const quote = quotes[row.ticker] ?? {};
               const spreadPct = quote.broker_spread_pct ?? null;
               const quoteTime = quote.broker_quote_time ? new Date(quote.broker_quote_time) : null;
@@ -836,21 +854,26 @@ export async function GET(request: Request) {
               .slice(0, limit)
               .map((row, index) => ({ ...row, rank: index + 1 }));
           })()
-        : result.rows;
+        : includedRows;
 
     return NextResponse.json(
       {
         rows,
+        // Names suppressed by the per-scanner cap that would otherwise have made
+        // the list. Raw SQL-scored rows (no broker-quote enrichment) — for audit
+        // logging by the auto-trader, not for trading.
+        capped_rows: cappedRows,
         meta: {
           scoring_mode: mode,
-          batch_date: result.rows[0]?.signal_timestamp ?? null,
+          batch_date: includedRows[0]?.signal_timestamp ?? null,
           edge_window_days: EDGE_WINDOW_DAYS,
           edge_pf_floor: EDGE_PF_FLOOR,
           edge_min_closed: EDGE_MIN_CLOSED,
           edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
           max_per_scanner: maxPerScanner,
           daytrade_signal_date_count: mode === "daytrades" ? DAYTRADE_SIGNAL_DATE_COUNT : null,
-          daytrade_pool_size: mode === "daytrades" ? result.rows.length : null,
+          daytrade_pool_size: mode === "daytrades" ? includedRows.length : null,
+          daytrade_capped_count: mode === "daytrades" ? cappedRows.length : null,
           daytrade_tradable_count: daytradeTradableCount,
           daytrade_live_candle_count: daytradeLiveCandleCount,
           daytrade_rvol_source:
