@@ -694,16 +694,21 @@ class AutoOpenTrader:
         # The route's daytrades tradability gate is authoritative for "not
         # tradable" -- honor it as a veto so we never place an order the picker
         # already rejected (e.g. "Spread eats range", or any future order_bias /
-        # gate the route adds without this list being updated). Our own STRICTER
-        # checks still run below, so a live-in-play rescue with no premarket read
-        # is still rejected on pm_status -- the auto trader stays conservative.
+        # gate the route adds without this list being updated).
         if row.get("tradable") is False:
             return f"Route gate not tradable: {row.get('gate_reason') or 'rejected'}"
         if row.get("signal_type") and row.get("signal_type") != "BUY":
             return f"Signal is not BUY: {row.get('signal_type')}"
         if row.get("pm_direction") and row.get("pm_direction") != "BUY":
             return f"Premarket direction is not BUY: {row.get('pm_direction')}"
-        if row.get("pm_status") in ("Stale PM", "No PM data", "PM against", "PM fading"):
+        # PM hard block covers only ACTIVE bearish reads (gap against the long /
+        # fading). Stale/missing PM is a data-availability problem, not a signal:
+        # since Jun 12 2026 those names are allowed through IF the route's
+        # live-in-play rescue confirmed them (live RVOL >= 2, holding >= VWAP,
+        # spread OK) -- non-rescued stale/no-PM names still arrive tradable=False
+        # and are vetoed above. PM levels are not load-bearing for execution
+        # (entry falls back to ask/last; brackets are fixed SL/TP pct).
+        if row.get("pm_status") in ("PM against", "PM fading"):
             return f"Bad PM status: {row.get('pm_status')}"
         if row.get("order_bias") in ("Avoid", "Avoid spread", "Refresh", "Wait", "Wait pullback"):
             return f"Bad order bias: {row.get('order_bias')}"
