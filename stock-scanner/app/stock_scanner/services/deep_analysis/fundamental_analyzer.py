@@ -251,6 +251,13 @@ class FundamentalDeepAnalyzer:
         - Earnings 4-7 days away: 50
         - Earnings within 3 days: 20
         - Ex-dividend within 3 days: -10 penalty
+
+        Stale calendar handling: most stock_instruments.earnings_date values
+        are in the past (calendar not refreshed after the report). A past date
+        is projected forward in 91-day quarterly steps to estimate the next
+        report. Projected dates carry +/- a week of uncertainty, so they use
+        softer penalties (floor 50, never the hard 20) and are flagged in
+        details as projected.
         """
         earnings_date = data.get('earnings_date')
         ex_div_date = data.get('ex_dividend_date')
@@ -266,6 +273,7 @@ class FundamentalDeepAnalyzer:
         score = 100  # Start at max (no risk)
 
         # Check earnings date
+        earnings_projected = False
         if earnings_date:
             # Convert to datetime if needed
             if isinstance(earnings_date, str):
@@ -277,12 +285,23 @@ class FundamentalDeepAnalyzer:
                 # Convert date to datetime for comparison
                 earnings_date = datetime.combine(earnings_date, datetime.min.time())
 
+            if earnings_date and earnings_date.tzinfo is not None:
+                earnings_date = earnings_date.replace(tzinfo=None)
+
+            # Stale calendar: project a past report date forward by quarterly
+            # cycles to estimate the next one
+            if earnings_date and earnings_date <= now:
+                quarters_behind = ((now - earnings_date).days // 91) + 1
+                earnings_date = earnings_date + timedelta(days=91 * quarters_behind)
+                earnings_projected = True
+
             if earnings_date and earnings_date > now:
                 days_to_earnings = (earnings_date - now).days
 
                 if days_to_earnings <= 3:
-                    score = 20
-                    risk_level = 'high'
+                    # Projected dates are +/- a week off; don't apply the hard penalty
+                    score = 50 if earnings_projected else 20
+                    risk_level = 'medium' if earnings_projected else 'high'
                     earnings_within_7d = True
                     earnings_within_14d = True
                 elif days_to_earnings <= 7:
@@ -327,6 +346,7 @@ class FundamentalDeepAnalyzer:
             ex_dividend_date=ex_div_date,
             risk_level=risk_level,
             details={
+                'earnings_date_projected': earnings_projected,
                 'analyst_rating': data.get('analyst_rating'),
                 'target_price': data.get('target_price'),
                 'number_of_analysts': data.get('number_of_analysts'),
