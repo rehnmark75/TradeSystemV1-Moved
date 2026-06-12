@@ -51,16 +51,18 @@ class AutoOpenTrader:
         "AUTO_TRADE_START_DELAY_MINUTES": ("start_delay_minutes", "int", "15"),
         "AUTO_TRADE_VALIDATE_DELAY_MINUTES": ("validate_delay_minutes", "int", "5"),
         "AUTO_TRADE_STOP_AFTER_MINUTES": ("stop_after_minutes", "int", "45"),
-        "AUTO_TRADE_STOP_LOSS_PCT": ("stop_loss_pct", "float", "3.0"),
-        "AUTO_TRADE_TAKE_PROFIT_PCT": ("take_profit_pct", "float", "5.0"),
+        # SL/TP from Jun 11 2026 bracket sweep (sl_tp_sweep.py): SL2/TP7 plateau
+        # (PF 1.09 vs 1.00 for old 3/5 at 2-3d horizon, H1/H2 robust).
+        "AUTO_TRADE_STOP_LOSS_PCT": ("stop_loss_pct", "float", "2.0"),
+        "AUTO_TRADE_TAKE_PROFIT_PCT": ("take_profit_pct", "float", "7.0"),
         "AUTO_TRADE_MAX_STOP_DISTANCE_PCT": ("max_stop_distance_pct", "float", "3.0"),
         "AUTO_TRADE_MAX_RISK_PCT": ("max_risk_pct", "float", "3.0"),
         "AUTO_TRADE_MAX_RISK_USD": ("max_risk_usd", "float", "15.0"),
-        # Conditional ATR stop (validated Jun 5 2026): for high-ATR names the flat
-        # 3% stop sits inside the noise band and whipsaws winners. For ATR >=
-        # threshold, use an ATR-width stop + ATR-scaled size at the SAME max_risk_usd
-        # (downside-neutral). Below threshold, keep the fixed stop_loss/take_profit.
-        "AUTO_TRADE_ATR_STOP_ENABLED": ("atr_stop_enabled", "bool", "true"),
+        # Conditional ATR stop: DISABLED Jun 11 2026 — full-population bracket
+        # sweep (sl_tp_sweep.py) showed the ATR-dynamic grid <= PF 1.0 at the
+        # 2-3d horizon everywhere at portfolio level; fixed brackets dominate.
+        # (Supersedes the Jun 5 high-ATR-quartile finding.)
+        "AUTO_TRADE_ATR_STOP_ENABLED": ("atr_stop_enabled", "bool", "false"),
         "AUTO_TRADE_ATR_THRESHOLD_PCT": ("atr_threshold_pct", "float", "7.0"),
         "AUTO_TRADE_ATR_STOP_MULT": ("atr_stop_mult", "float", "1.0"),   # k: stop = k*ATR%
         "AUTO_TRADE_ATR_RR": ("atr_rr", "float", "1.6667"),              # TP = rr*stop (keeps 5/3)
@@ -615,8 +617,10 @@ class AutoOpenTrader:
             "stop_loss": round(stop_loss, 2),
             "take_profit": round(take_profit, 2),
             "trade_ready_override": True,
-            "breakeven_enabled": True,
-            "breakeven_trigger_usd": 10,
+            # BE disabled Jun 11 2026: trigger sweep (be_trigger_sweep.py) showed
+            # BE kills ~1.7x more winners than the losers it rescues at every
+            # trigger level/horizon; BE-off dominates (PF 0.99 vs 0.44 at $10).
+            "breakeven_enabled": False,
         }
         timeout = aiohttp.ClientTimeout(total=45)
         async with aiohttp.ClientSession(timeout=timeout) as session:
