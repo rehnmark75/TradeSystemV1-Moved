@@ -244,7 +244,7 @@ export async function GET(request: Request) {
             + 0.12 * (
                 CASE
                   WHEN pm_is_current_session AND pm_direction = 'BUY'
-                    THEN COALESCE(pm_confidence, 0) * 100
+                    THEN LEAST(COALESCE(pm_confidence, 0) * 100, 100)
                   ELSE 50
                 END
               )
@@ -520,6 +520,10 @@ export async function GET(request: Request) {
         LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
           AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
         LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
+          -- Age guard: the pool spans 2 signal dates, and daq_news_score feeds
+          -- the candidate score (0.08 weight). Without this, stale DAQ rows
+          -- (incl. the pre-Jun-12-2026 scorer's garbage rows) leak into ranking.
+          AND d.analysis_timestamp >= CURRENT_DATE - INTERVAL '1 day'
         LEFT JOIN scanner_edge e ON s.scanner_name = e.scanner_name
         LEFT JOIN LATERAL (
           SELECT
@@ -804,6 +808,8 @@ export async function GET(request: Request) {
                 // day trade," and folding a 0-12 mechanics bonus into the rank was
                 // re-lifting quiet-but-easy-to-fill names above the actual movers.
                 // It stays as a displayed metric and still feeds the gate.
+                // NOTE: the inner Number() is load-bearing — pg returns numeric
+                // columns as strings, and .toFixed() on a string throws.
                 candidate_score: Number(
                   (Number(row.candidate_score ?? 0) + liveConfirmationBonus).toFixed(1)
                 ),

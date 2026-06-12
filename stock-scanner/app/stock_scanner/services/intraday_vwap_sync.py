@@ -89,6 +89,10 @@ class IntradayVwapSync:
     SETTING_DEFS = {
         "INTRADAY_VWAP_ENABLED": ("enabled", "bool", "true"),
         "INTRADAY_VWAP_POOL_LIMIT": ("pool_limit", "int", "50"),
+        # MUST match AUTO_TRADE_MAX_PER_SCANNER -- the auto trader's pool must be
+        # a subset of this worker's pool or names lack session_vwap and get
+        # rejected by the fail-closed VWAP gate.
+        "INTRADAY_VWAP_MAX_PER_SCANNER": ("max_per_scanner", "int", "10"),
         "INTRADAY_VWAP_START_BEFORE_OPEN_MIN": ("start_before_open_min", "int", "5"),
         "INTRADAY_VWAP_STOP_AFTER_OPEN_MIN": ("stop_after_open_min", "int", "60"),
         "INTRADAY_VWAP_INTERVAL_SECONDS": ("interval_seconds", "int", "150"),
@@ -243,7 +247,11 @@ class IntradayVwapSync:
 
     # --------------------------------------------------------------- data steps
     async def _fetch_candidate_pool(self) -> List[str]:
-        url = f"{self.trading_ui_url}/api/signals/top?limit={self.pool_limit}&mode=daytrades"
+        max_per_scanner = max(1, min(int(self.max_per_scanner), int(self.pool_limit)))
+        url = (
+            f"{self.trading_ui_url}/api/signals/top?limit={self.pool_limit}&mode=daytrades"
+            f"&maxPerScanner={max_per_scanner}"
+        )
         timeout = aiohttp.ClientTimeout(total=30)
         try:
             async with aiohttp.ClientSession(timeout=timeout) as session:

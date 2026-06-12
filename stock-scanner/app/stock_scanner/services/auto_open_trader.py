@@ -37,6 +37,12 @@ class AutoOpenTrader:
         # rejected by the fail-closed VWAP gate. Clamped to the route's 50 cap;
         # >50 needs the route-cap change (deferred 100/tier-3 phase).
         "AUTO_TRADE_CANDIDATE_POOL_LIMIT": ("candidate_pool_limit", "int", "50"),
+        # Per-scanner slot cap in the candidate pool. Without this the route's
+        # maxPerScanner defaults to `limit` (inert) and one prolific scanner can
+        # monopolize all 50 slots. MUST match INTRADAY_VWAP_MAX_PER_SCANNER or
+        # the pools diverge and wider names lack session_vwap (fail-closed VWAP
+        # gate rejects them).
+        "AUTO_TRADE_MAX_PER_SCANNER": ("max_per_scanner", "int", "10"),
         "AUTO_TRADE_MAX_SPREAD_PCT": ("max_spread_pct", "float", "0.4"),
         "AUTO_TRADE_MIN_SCORE": ("min_score", "float", "65"),
         # RVOL floor + VWAP veto: live-intraday confirmation gates. The values
@@ -316,7 +322,11 @@ class AutoOpenTrader:
                 "raise the /api/signals/top cap to go higher",
                 self.candidate_pool_limit,
             )
-        url = f"{self.trading_ui_url}/api/signals/top?limit={pool}&mode=daytrades"
+        max_per_scanner = max(1, min(int(self.max_per_scanner), pool))
+        url = (
+            f"{self.trading_ui_url}/api/signals/top?limit={pool}&mode=daytrades"
+            f"&maxPerScanner={max_per_scanner}"
+        )
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:
             async with session.get(url) as response:
