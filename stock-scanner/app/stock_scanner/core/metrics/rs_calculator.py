@@ -202,6 +202,8 @@ class RSCalculator:
                 etf = yf.Ticker(ticker)
                 # Use 3mo period to ensure we have enough data
                 hist = etf.history(period="3mo")
+                # Restrict to bars on/before calc_date (history runs to 'now')
+                hist = hist[[d <= calc_date for d in hist.index.date]]
                 if len(hist) >= days + 1:
                     closes = hist['Close'].values.tolist()
                     # Filter out NaN closes (e.g. pre-market rows before market opens)
@@ -620,9 +622,17 @@ class MarketRegimeCalculator:
                 import yfinance as yf
                 spy = yf.Ticker("SPY")
                 hist = spy.history(period="1y")
-                if len(hist) >= 200:
-                    closes = hist['Close'].values.tolist()
-                    # Convert to list of dicts format
+                # Restrict to bars on/before calc_date (history runs to 'now')
+                hist = hist[[d <= calc_date for d in hist.index.date]]
+                # Drop NaN closes: the pipeline runs pre-market, when yfinance
+                # returns a NaN row for the current day. An unfiltered NaN at
+                # closes[0] poisons every SPY metric and _classify_regime then
+                # mislabels the day as bearish (NaN > 0 is False).
+                closes = [
+                    float(c) for c in hist['Close'].values.tolist()
+                    if not (isinstance(c, float) and np.isnan(c))
+                ]
+                if len(closes) >= 200:
                     rows = [{'close': c} for c in reversed(closes)]
             except Exception as e:
                 logger.warning(f"Failed to fetch SPY from yfinance: {e}")
