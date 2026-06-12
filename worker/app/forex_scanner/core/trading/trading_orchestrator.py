@@ -423,10 +423,12 @@ class TradingOrchestrator:
             self.logger.warning(f"⚠️ RejectionOutcomeAnalyzer initialization failed: {e}")
 
         # Initialize MonitorOutcomeAnalyzer for monitor-only forward outcomes.
-        # Runs once/24h (monitor signals are evaluated over a 24h horizon).
+        # Runs once/6h; signals are evaluated over a 24h horizon, so the
+        # shorter cadence just resolves completed windows sooner (analyzer
+        # re-evaluates OPEN rows idempotently).
         self.monitor_outcome_analyzer = None
         self._last_monitor_outcome_analysis = None
-        self._monitor_outcome_interval_hours = 24
+        self._monitor_outcome_interval_hours = 6
         try:
             if MonitorOutcomeAnalyzer is not None:
                 self.monitor_outcome_analyzer = MonitorOutcomeAnalyzer()
