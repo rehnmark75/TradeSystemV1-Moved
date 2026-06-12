@@ -52,6 +52,10 @@ class AutoOpenTrader:
         "AUTO_TRADE_MIN_RELATIVE_VOLUME": ("min_relative_volume", "float", "0"),
         "AUTO_TRADE_REQUIRE_INTRADAY_RVOL": ("require_intraday_rvol", "bool", "false"),
         "AUTO_TRADE_REQUIRE_ABOVE_VWAP": ("require_above_vwap", "bool", "true"),
+        # Day-change gate: at execution time the ticker must be trading above
+        # the previous session's close (real-time broker quote vs prior close).
+        # Fail-closed: no usable prev close -> no confirmation -> skip.
+        "AUTO_TRADE_REQUIRE_POSITIVE_DAY": ("require_positive_day", "bool", "true"),
         "AUTO_TRADE_MAX_QUOTE_AGE_MINUTES": ("max_quote_age_minutes", "int", "3"),
         "AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT": ("pullback_limit_offset_pct", "float", "0.3"),
         "AUTO_TRADE_START_DELAY_MINUTES": ("start_delay_minutes", "int", "15"),
@@ -151,6 +155,14 @@ class AutoOpenTrader:
         await self.db.execute("""
             ALTER TABLE stock_auto_trade_candidates
             ADD COLUMN IF NOT EXISTS session_vwap DECIMAL(12,4)
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS prev_close DECIMAL(12,4)
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS day_change_pct DECIMAL(10,4)
         """)
         await self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_stock_auto_trade_candidates_run_status
@@ -344,8 +356,9 @@ class AutoOpenTrader:
                     order_bias, pm_status, pm_direction, broker_bid, broker_ask,
                     broker_last, broker_spread_pct, broker_quote_age_minutes,
                     relative_volume, intraday_relative_volume, atr_percent,
-                    planned_entry, planned_stop_loss, planned_take_profit, session_vwap
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21)
+                    planned_entry, planned_stop_loss, planned_take_profit, session_vwap,
+                    prev_close, day_change_pct
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
                 ON CONFLICT (run_id, ticker) DO UPDATE SET
                     rank = EXCLUDED.rank,
                     candidate_score = EXCLUDED.candidate_score,
@@ -362,6 +375,8 @@ class AutoOpenTrader:
                     intraday_relative_volume = EXCLUDED.intraday_relative_volume,
                     atr_percent = EXCLUDED.atr_percent,
                     session_vwap = EXCLUDED.session_vwap,
+                    prev_close = EXCLUDED.prev_close,
+                    day_change_pct = EXCLUDED.day_change_pct,
                     planned_entry = CASE
                         WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
                         THEN stock_auto_trade_candidates.planned_entry
@@ -390,6 +405,7 @@ class AutoOpenTrader:
                 self._num(row.get("pm_suggested_entry")),
                 self._num(row.get("pm_suggested_stop")), self._num(row.get("pm_suggested_target")),
                 self._num(row.get("session_vwap")),
+                *self._day_change(row),
             )
             count += 1
         return count
@@ -688,6 +704,24 @@ class AutoOpenTrader:
             return "broker_live_position:open"
         return None
 
+    def _day_change(self, row: Dict[str, Any]) -> tuple[Optional[float], Optional[float]]:
+        """(prev_close, day_change_pct) from real-time broker price vs prior close.
+
+        Prefer the screening-metrics prior-session close (nightly daily close for
+        MAX(calculation_date)); the PM service's previous_close can be days stale
+        (Jun 12: DAKT PM said 19.13 when yesterday closed 20.93) so it is only a
+        fallback, and only when the PM row is from today's session.
+        """
+        prev_close = self._num(row.get("prior_session_close"))
+        if (not prev_close or prev_close <= 0) and row.get("pm_is_current_session"):
+            prev_close = self._num(row.get("pm_previous_close"))
+        if not prev_close or prev_close <= 0:
+            return None, None
+        price = self._num(row.get("broker_last")) or self._num(row.get("broker_ask"))
+        if not price or price <= 0:
+            return prev_close, None
+        return prev_close, (price - prev_close) / prev_close * 100
+
     def _reject_reason(self, row: Optional[Dict[str, Any]]) -> Optional[str]:
         if not row:
             return f"Missing from refreshed Day Trades pool (top {self.candidate_pool_limit})"
@@ -747,6 +781,18 @@ class AutoOpenTrader:
                 return "Missing broker price for VWAP check"
             if price_for_vwap < session_vwap:
                 return f"Price {price_for_vwap:.2f} below session VWAP {session_vwap:.2f}"
+        # Day-change veto: a BUY on a ticker trading at/below yesterday's close
+        # is buying a red name. Uses the real-time broker quote (age-gated
+        # above), not the scanner's delayed data. Fail-closed like the VWAP
+        # gate. Off switch: AUTO_TRADE_REQUIRE_POSITIVE_DAY=false.
+        if self.require_positive_day:
+            prev_close, day_change_pct = self._day_change(row)
+            if prev_close is None:
+                return "Missing previous close (require_positive_day)"
+            if day_change_pct is None:
+                return "Missing broker price for day-change check"
+            if day_change_pct <= 0:
+                return f"Not positive on day: {day_change_pct:+.2f}% (prev close {prev_close:.2f})"
         ask = self._num(row.get("broker_ask"))
         if ask is None or ask <= 0:
             return "Missing broker ask"

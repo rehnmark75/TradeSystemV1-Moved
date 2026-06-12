@@ -494,6 +494,7 @@ export async function GET(request: Request) {
           bt_closed.last_closed_side,
           e.pf AS scanner_pf,
           e.closed_n AS scanner_closed_n,
+          m.current_price AS prior_session_close,
           pm.signal_type AS pm_signal_type,
           pm.direction AS pm_direction,
           pm.strength AS pm_strength,
