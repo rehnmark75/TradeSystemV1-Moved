@@ -155,12 +155,12 @@ class FundamentalDeepAnalyzer:
                 quality_flags.append(f'Good ROE ({roe_pct:.1f}%)')
             elif roe_pct > 10:
                 score += 5
-            elif roe_pct < 5:
-                score -= 10
-                risk_flags.append(f'Low ROE ({roe_pct:.1f}%)')
             elif roe_pct < 0:
                 score -= 20
                 risk_flags.append(f'Negative ROE ({roe_pct:.1f}%)')
+            elif roe_pct < 5:
+                score -= 10
+                risk_flags.append(f'Low ROE ({roe_pct:.1f}%)')
 
         # Profit Margin
         profit_margin = data.get('profit_margin')
@@ -197,12 +197,12 @@ class FundamentalDeepAnalyzer:
             elif debt_equity < 1.0:
                 score += 5
                 quality_flags.append(f'Moderate debt (D/E: {debt_equity:.2f})')
-            elif debt_equity > 2.0:
-                score -= 10
-                risk_flags.append(f'High debt (D/E: {debt_equity:.2f})')
             elif debt_equity > 3.0:
                 score -= 15
                 risk_flags.append(f'Very high debt (D/E: {debt_equity:.2f})')
+            elif debt_equity > 2.0:
+                score -= 10
+                risk_flags.append(f'High debt (D/E: {debt_equity:.2f})')
 
         # Current Ratio (Liquidity)
         current_ratio = data.get('current_ratio')

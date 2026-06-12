@@ -572,10 +572,10 @@ class TechnicalDeepAnalyzer:
 
         smc_data = dict(row)
 
-        # Extract key fields
-        smc_trend = smc_data.get('smc_trend', 'neutral')
-        smc_bias = smc_data.get('smc_bias', 'neutral')
-        premium_discount = smc_data.get('premium_discount_zone', 'equilibrium')
+        # Extract key fields (DB stores Title Case: 'Bullish', 'Extreme Discount', ...)
+        smc_trend = (smc_data.get('smc_trend') or 'neutral').lower()
+        smc_bias = (smc_data.get('smc_bias') or 'neutral').lower()
+        premium_discount = (smc_data.get('premium_discount_zone') or 'equilibrium').lower()
         zone_position = smc_data.get('zone_position', 0.5)
         nearest_ob_type = smc_data.get('nearest_ob_type')
         nearest_ob_distance = smc_data.get('nearest_ob_distance', 100)
@@ -583,16 +583,17 @@ class TechnicalDeepAnalyzer:
 
         # Check trend alignment
         signal_bullish = signal_direction == TrendDirection.BULLISH
-        smc_bullish = smc_trend in ('bullish', 'strong_bullish')
-        smc_bearish = smc_trend in ('bearish', 'strong_bearish')
+        smc_bullish = 'bullish' in smc_trend
+        smc_bearish = 'bearish' in smc_trend
 
         trend_aligned = (signal_bullish and smc_bullish) or (not signal_bullish and smc_bearish)
         trend_against = (signal_bullish and smc_bearish) or (not signal_bullish and smc_bullish)
 
-        # Check zone (bullish signals best in discount, bearish in premium)
+        # Check zone (bullish signals best in discount, bearish in premium).
+        # Substring match covers 'Discount' and 'Extreme Discount' (and premium variants).
         in_favorable_zone = (
-            (signal_bullish and premium_discount == 'discount') or
-            (not signal_bullish and premium_discount == 'premium')
+            (signal_bullish and 'discount' in premium_discount) or
+            (not signal_bullish and 'premium' in premium_discount)
         )
 
         # Check proximity to order block

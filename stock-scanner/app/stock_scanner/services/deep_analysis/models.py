@@ -141,7 +141,7 @@ class TechnicalDeepResult:
         mtf_weighted = (self.mtf.score / 100) * 20
         volume_weighted = (self.volume.score / 100) * 10
         smc_weighted = (self.smc.score / 100) * 15
-        return int(mtf_weighted + volume_weighted + smc_weighted)
+        return round(mtf_weighted + volume_weighted + smc_weighted)
 
 
 @dataclass
@@ -199,7 +199,7 @@ class FundamentalDeepResult:
         quality_weighted = (self.quality.score / 100) * 15
         catalyst_weighted = (self.catalyst.score / 100) * 10
         # institutional_weighted = (self.institutional.score / 100) * 0  # Skip for MVP
-        return int(quality_weighted + catalyst_weighted)
+        return round(quality_weighted + catalyst_weighted)
 
 
 @dataclass
@@ -254,7 +254,7 @@ class ContextualDeepResult:
         news_weighted = (self.news.score / 100) * 10
         regime_weighted = (self.regime.score / 100) * 10
         sector_weighted = (self.sector.score / 100) * 10
-        return int(news_weighted + regime_weighted + sector_weighted)
+        return round(news_weighted + regime_weighted + sector_weighted)
 
 
 @dataclass

@@ -273,9 +273,8 @@ class ContextualDeepAnalyzer:
 
     async def _analyze_regime(self, signal_direction: TrendDirection) -> MarketRegimeResult:
         """
-        Analyze current market regime based on SPY.
-
-        Fetches SPY data to determine overall market direction.
+        Analyze current market regime from the nightly market_context table
+        (SPY trend + universe breadth, computed by the daily pipeline).
 
         Scoring (based on alignment with signal):
         - Strong alignment (bullish signal in strong bull market): 100
@@ -284,59 +283,61 @@ class ContextualDeepAnalyzer:
         - Counter-trend: 40
         - Strong counter-trend: 20
         """
-        # Fetch SPY candles from database
         query = """
-            SELECT timestamp, open, high, low, close, volume
-            FROM stock_candles
-            WHERE ticker = $1 AND timeframe = $2
-            ORDER BY timestamp DESC
-            LIMIT $3
+            SELECT calculation_date, market_regime, spy_trend,
+                   spy_vs_sma50_pct, spy_vs_sma200_pct,
+                   pct_above_sma50, ad_ratio
+            FROM market_context
+            WHERE calculation_date >= CURRENT_DATE - INTERVAL '7 days'
+            ORDER BY calculation_date DESC
+            LIMIT 1
         """
-        rows = await self.db.fetch(query, 'SPY', '1d', 50)
+        row = await self.db.fetchrow(query)
 
-        if not rows or len(rows) < 20:
+        if not row:
             return MarketRegimeResult(
                 score=60,  # Neutral when no data
                 regime=MarketRegime.NEUTRAL,
                 spy_trend=TrendDirection.NEUTRAL,
                 signal_regime_aligned=True,
-                details={'error': 'Insufficient SPY data'}
+                details={'error': 'No recent market_context data'}
             )
 
-        df = pd.DataFrame([dict(row) for row in rows])
-        df = df.sort_values('timestamp').reset_index(drop=True)
+        ctx = dict(row)
+        regime_str = (ctx.get('market_regime') or '').lower()
+        spy_trend_str = (ctx.get('spy_trend') or '').lower()
 
-        # Calculate metrics
-        latest_close = df.iloc[-1]['close']
-        close_1w_ago = df.iloc[-5]['close'] if len(df) >= 5 else latest_close
-        close_1m_ago = df.iloc[-20]['close'] if len(df) >= 20 else latest_close
-
-        spy_change_1w = ((latest_close - close_1w_ago) / close_1w_ago) * 100
-        spy_change_1m = ((latest_close - close_1m_ago) / close_1m_ago) * 100
-
-        # Calculate EMAs
-        df['ema_20'] = df['close'].ewm(span=20, adjust=False).mean()
-        df['ema_50'] = df['close'].ewm(span=50, adjust=False).mean()
-
-        latest_ema_20 = df.iloc[-1]['ema_20']
-        latest_ema_50 = df.iloc[-1]['ema_50']
-
-        # Determine regime
-        if spy_change_1m > 5 and latest_close > latest_ema_20 > latest_ema_50:
+        # Map pipeline regime labels (bull_confirmed / bull_weakening /
+        # bear_weakening / bear_confirmed) onto the DAQ regime enum
+        if regime_str == 'bull_confirmed':
             regime = MarketRegime.STRONG_BULLISH
-            spy_trend = TrendDirection.BULLISH
-        elif spy_change_1m > 2 and latest_close > latest_ema_50:
+        elif 'bull' in regime_str:
             regime = MarketRegime.BULLISH
-            spy_trend = TrendDirection.BULLISH
-        elif spy_change_1m < -5 and latest_close < latest_ema_20 < latest_ema_50:
+        elif regime_str == 'bear_confirmed':
             regime = MarketRegime.STRONG_BEARISH
-            spy_trend = TrendDirection.BEARISH
-        elif spy_change_1m < -2 and latest_close < latest_ema_50:
+        elif 'bear' in regime_str:
             regime = MarketRegime.BEARISH
-            spy_trend = TrendDirection.BEARISH
         else:
             regime = MarketRegime.NEUTRAL
+
+        if spy_trend_str == 'rising':
+            spy_trend = TrendDirection.BULLISH
+        elif spy_trend_str == 'falling':
+            spy_trend = TrendDirection.BEARISH
+        else:
             spy_trend = TrendDirection.NEUTRAL
+
+        def _num(v):
+            # NaN-safe numeric conversion (market_context stores NaN on bad SPY fetches;
+            # NaN would break the JSONB insert downstream)
+            try:
+                f = float(v)
+                return f if f == f else None
+            except (TypeError, ValueError):
+                return None
+
+        spy_change_1w = None
+        spy_change_1m = _num(ctx.get('spy_vs_sma50_pct'))
 
         # Check alignment with signal
         signal_bullish = signal_direction == TrendDirection.BULLISH
@@ -385,9 +386,13 @@ class ContextualDeepAnalyzer:
             spy_change_1m=spy_change_1m,
             signal_regime_aligned=aligned,
             details={
-                'spy_close': latest_close,
-                'spy_ema_20': latest_ema_20,
-                'spy_ema_50': latest_ema_50,
+                'source': 'market_context',
+                'calculation_date': str(ctx.get('calculation_date')),
+                'market_regime': regime_str,
+                'spy_vs_sma50_pct': spy_change_1m,
+                'spy_vs_sma200_pct': _num(ctx.get('spy_vs_sma200_pct')),
+                'pct_above_sma50': _num(ctx.get('pct_above_sma50')),
+                'ad_ratio': _num(ctx.get('ad_ratio')),
             }
         )
 
@@ -423,63 +428,31 @@ class ContextualDeepAnalyzer:
                 details={'error': f'No ETF mapping for sector: {sector}'}
             )
 
-        # Fetch sector ETF and SPY data
+        # Fetch latest sector relative strength from the nightly sector_analysis
+        # table (sector names there are GICS-style, so join on the ETF symbol)
         query = """
-            SELECT ticker, timestamp, close
-            FROM stock_candles
-            WHERE ticker IN ($1, $2)
-              AND timeframe = $3
-            ORDER BY timestamp DESC
-            LIMIT $4
+            SELECT calculation_date, sector_return_5d, sector_return_20d, rs_vs_spy
+            FROM sector_analysis
+            WHERE sector_etf = $1
+              AND calculation_date >= CURRENT_DATE - INTERVAL '7 days'
+            ORDER BY calculation_date DESC
+            LIMIT 1
         """
-        rows = await self.db.fetch(query, sector_etf, 'SPY', '1d', 100)
+        row = await self.db.fetchrow(query, sector_etf)
 
-        if not rows or len(rows) < 40:  # Need at least 20 days for both
+        if not row or row['rs_vs_spy'] is None:
             return SectorRotationResult(
                 score=50,
                 sector=sector,
                 sector_etf=sector_etf,
-                details={'error': 'Insufficient sector/SPY data'}
+                details={'error': 'No recent sector_analysis data'}
             )
 
-        # Separate data by ticker
-        sector_data = []
-        spy_data = []
+        sector_change_1w = float(row['sector_return_5d']) if row['sector_return_5d'] is not None else None
+        sector_change_1m = float(row['sector_return_20d']) if row['sector_return_20d'] is not None else None
 
-        for row in rows:
-            if row['ticker'] == sector_etf:
-                sector_data.append(dict(row))
-            else:
-                spy_data.append(dict(row))
-
-        if len(sector_data) < 20 or len(spy_data) < 20:
-            return SectorRotationResult(
-                score=50,
-                sector=sector,
-                sector_etf=sector_etf,
-                details={'error': 'Insufficient data for comparison'}
-            )
-
-        # Sort by timestamp
-        sector_data = sorted(sector_data, key=lambda x: x['timestamp'])
-        spy_data = sorted(spy_data, key=lambda x: x['timestamp'])
-
-        # Calculate performance
-        sector_latest = sector_data[-1]['close']
-        sector_1w_ago = sector_data[-5]['close'] if len(sector_data) >= 5 else sector_latest
-        sector_1m_ago = sector_data[-20]['close'] if len(sector_data) >= 20 else sector_latest
-
-        spy_latest = spy_data[-1]['close']
-        spy_1w_ago = spy_data[-5]['close'] if len(spy_data) >= 5 else spy_latest
-        spy_1m_ago = spy_data[-20]['close'] if len(spy_data) >= 20 else spy_latest
-
-        sector_change_1w = ((sector_latest - sector_1w_ago) / sector_1w_ago) * 100
-        sector_change_1m = ((sector_latest - sector_1m_ago) / sector_1m_ago) * 100
-
-        spy_change_1m = ((spy_latest - spy_1m_ago) / spy_1m_ago) * 100
-
-        # Calculate relative strength
-        sector_rs = sector_change_1m - spy_change_1m
+        # Relative strength vs SPY (20d, percentage points)
+        sector_rs = float(row['rs_vs_spy'])
 
         # Determine if outperforming
         sector_outperforming = sector_rs > 0
@@ -505,6 +478,7 @@ class ContextualDeepAnalyzer:
             sector_change_1w=sector_change_1w,
             sector_change_1m=sector_change_1m,
             details={
-                'spy_change_1m': spy_change_1m,
+                'source': 'sector_analysis',
+                'calculation_date': str(row['calculation_date']),
             }
         )
