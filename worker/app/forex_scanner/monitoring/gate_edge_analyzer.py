@@ -88,6 +88,16 @@ STRATEGY_CONFIG_URL = os.getenv(
 # strategy that writes to strategy_rejections can be passed via --strategy.
 DEFAULT_STRATEGY = "RANGE_FADE"
 
+# Duplication guard: a persistent condition (price beyond the band, a standing
+# direction lock, an HTF misalignment) re-fires the SAME gate on the SAME setup
+# every 5m scan, so raw rejection counts read as inflated n. We collapse a run of
+# rejections sharing (epic, direction, gate) into one "setup" whenever consecutive
+# scans are within this gap; only the first (freshest) of each cluster is
+# evaluated. 30 min > the 5m scan cadence but < the spacing of genuinely distinct
+# setups, so distinct fades survive while bar-by-bar repeats collapse. Set to 0 to
+# disable (evaluate every rejection).
+DEDUPE_GAP_MINUTES = 30
+
 
 class GateEdgeAnalyzer(MonitorOutcomeAnalyzer):
     """Score the forward edge of GATED (rejected) setups, per gate.
@@ -103,13 +113,20 @@ class GateEdgeAnalyzer(MonitorOutcomeAnalyzer):
 
     # -- rejection selection (strategy_config DB) ---------------------------
 
-    def get_candidate_rejections(self, start_date, end_date, strategy: str) -> pd.DataFrame:
+    def get_candidate_rejections(
+        self, start_date, end_date, strategy: str, dedupe_gap_minutes: int = DEDUPE_GAP_MINUTES
+    ) -> pd.DataFrame:
         """Direction-bearing rejections old enough to have a forward candle.
 
         Cross-DB re-evaluation: strategy_rejections lives in strategy_config and
         rejection_outcomes in forex, so we can't LEFT JOIN. Instead we exclude
         rejection_ids already RESOLVED in forex and let the idempotent upsert
         re-evaluate OPEN/NO_DATA rows.
+
+        The duplication guard (collapse persistent same-setup repeats) runs BEFORE
+        the resolved-id exclusion, so cluster leaders are chosen deterministically
+        across runs — a resolved leader keeps representing its cluster instead of a
+        later member sneaking in as a fresh "first".
         """
         max_signal_time = end_date - timedelta(minutes=MIN_SIGNAL_AGE_MINUTES)
         resolved_ids = self._resolved_rejection_ids(start_date)
@@ -137,9 +154,35 @@ class GateEdgeAnalyzer(MonitorOutcomeAnalyzer):
                     },
                 ).mappings().all()
             )
+        df = self._dedupe_persistent_setups(df, dedupe_gap_minutes)
         if not df.empty and resolved_ids:
             df = df[~df["rejection_id"].isin(list(resolved_ids))]
         return df
+
+    @staticmethod
+    def _dedupe_persistent_setups(df: pd.DataFrame, gap_minutes: int) -> pd.DataFrame:
+        """Collapse bar-by-bar repeats of the same (epic, direction, gate) setup.
+
+        Keeps the first rejection of each cluster, where a new cluster starts when
+        the (epic, direction, stage) key changes or the gap since the previous
+        same-key rejection exceeds gap_minutes. gap_minutes<=0 disables.
+        """
+        if df.empty or gap_minutes <= 0:
+            return df
+        d = df.sort_values(["epic", "direction", "stage", "scan_timestamp"]).reset_index(drop=True)
+        ts = pd.to_datetime(d["scan_timestamp"], utc=True)
+        key = d["epic"].astype(str) + "|" + d["direction"].astype(str) + "|" + d["stage"].astype(str)
+        new_key = key.ne(key.shift(1))
+        gap_exceeded = ts.diff() > pd.Timedelta(minutes=gap_minutes)
+        cluster_start = (new_key | gap_exceeded).to_numpy()
+        deduped = d[cluster_start]
+        dropped = len(df) - len(deduped)
+        if dropped > 0:
+            logger.info(
+                "Dedupe (gap=%dmin): %d rejections -> %d distinct setups (%d repeats collapsed)",
+                gap_minutes, len(df), len(deduped), dropped,
+            )
+        return deduped
 
     def _resolved_rejection_ids(self, start_date) -> set:
         """rejection_ids already finalized (RESOLVED) in forex.rejection_outcomes."""
@@ -227,11 +270,17 @@ class GateEdgeAnalyzer(MonitorOutcomeAnalyzer):
 
     # -- run ----------------------------------------------------------------
 
-    def run(self, days_back: int = 7, strategy: str = DEFAULT_STRATEGY, dry_run: bool = False) -> dict:
+    def run(
+        self,
+        days_back: int = 7,
+        strategy: str = DEFAULT_STRATEGY,
+        dry_run: bool = False,
+        dedupe_gap_minutes: int = DEDUPE_GAP_MINUTES,
+    ) -> dict:
         end = datetime.utcnow()
         start = end - timedelta(days=days_back)
 
-        df = self.get_candidate_rejections(start, end, strategy)
+        df = self.get_candidate_rejections(start, end, strategy, dedupe_gap_minutes)
         if df.empty:
             logger.info("No candidate %s rejections to analyze", strategy)
             return {"analyzed": 0, "resolved": 0, "open": 0, "no_data": 0}
@@ -262,8 +311,13 @@ def main():
     ap.add_argument("--days", type=int, default=7, help="Lookback window in days")
     ap.add_argument("--strategy", default=DEFAULT_STRATEGY, help="Strategy to analyze (strategy_rejections.strategy)")
     ap.add_argument("--dry-run", action="store_true", help="Simulate but do not save")
+    ap.add_argument("--dedupe-gap", type=int, default=DEDUPE_GAP_MINUTES,
+                    help="Collapse same (epic,dir,gate) rejections within N min into one setup (0=off)")
     args = ap.parse_args()
-    GateEdgeAnalyzer().run(days_back=args.days, strategy=args.strategy, dry_run=args.dry_run)
+    GateEdgeAnalyzer().run(
+        days_back=args.days, strategy=args.strategy, dry_run=args.dry_run,
+        dedupe_gap_minutes=args.dedupe_gap,
+    )
 
 
 if __name__ == "__main__":
