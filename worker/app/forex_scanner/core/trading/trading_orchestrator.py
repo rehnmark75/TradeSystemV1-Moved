@@ -65,6 +65,7 @@ try:
     # Import RejectionOutcomeAnalyzer for automatic outcome analysis
     from monitoring.rejection_outcome_analyzer import RejectionOutcomeAnalyzer
     from monitoring.monitor_outcome_analyzer import MonitorOutcomeAnalyzer
+    from monitoring.gate_edge_analyzer import GateEdgeAnalyzer
 
     # Import SMCRejectionHistoryManager for tracking validation rejections
     try:
@@ -120,6 +121,13 @@ except ImportError:
     except ImportError as e:
         print(f"⚠️ MonitorOutcomeAnalyzer not available: {e}")
         MonitorOutcomeAnalyzer = None
+
+    # Import GateEdgeAnalyzer for per-gate rejection edge scoring (non-SMC strategies)
+    try:
+        from forex_scanner.monitoring.gate_edge_analyzer import GateEdgeAnalyzer
+    except ImportError as e:
+        print(f"⚠️ GateEdgeAnalyzer not available: {e}")
+        GateEdgeAnalyzer = None
 
     # Import SMCRejectionHistoryManager for tracking validation rejections
     try:
@@ -437,6 +445,21 @@ class TradingOrchestrator:
                 self.logger.warning("⚠️ MonitorOutcomeAnalyzer not available")
         except Exception as e:
             self.logger.warning(f"⚠️ MonitorOutcomeAnalyzer initialization failed: {e}")
+
+        # Initialize GateEdgeAnalyzer for per-gate rejection edge scoring.
+        # Scores the forward edge of setups REJECTED at an edge gate (non-SMC
+        # strategies); same 6h cadence / 24h horizon as the monitor analyzer.
+        self.gate_edge_analyzer = None
+        self._last_gate_edge_analysis = None
+        self._gate_edge_interval_hours = 6
+        try:
+            if GateEdgeAnalyzer is not None:
+                self.gate_edge_analyzer = GateEdgeAnalyzer()
+                self.logger.info("✅ GateEdgeAnalyzer initialized for per-gate rejection edge scoring")
+            else:
+                self.logger.warning("⚠️ GateEdgeAnalyzer not available")
+        except Exception as e:
+            self.logger.warning(f"⚠️ GateEdgeAnalyzer initialization failed: {e}")
 
         # Auto-pause layer (Phase 2): per-(strategy, pair) decay -> monitor-only.
         # Inert until cells are opted into the auto_pause_eligibility allowlist;
@@ -2160,6 +2183,11 @@ class TradingOrchestrator:
             self.logger.debug(f"Monitor-outcome maintenance error (non-critical): {e}")
 
         try:
+            self._run_gate_edge_analysis_if_due()
+        except Exception as e:
+            self.logger.debug(f"Gate-edge maintenance error (non-critical): {e}")
+
+        try:
             self._run_auto_pause_check_if_due()
         except Exception as e:
             # Don't let maintenance failures disrupt scanning
@@ -2236,6 +2264,40 @@ class TradingOrchestrator:
         except Exception as e:
             self.logger.debug(f"Monitor-outcome analysis skipped: {e}")
             self._last_monitor_outcome_analysis = now  # avoid retry spam
+
+    def _run_gate_edge_analysis_if_due(self):
+        """Score the forward edge of REJECTED setups, per gate, once/6h.
+
+        Reads direction-bearing RANGE_FADE rejections from strategy_rejections,
+        simulates MFE/MAE + a reference SL/TP grid forward from ig_candles, and
+        upserts into rejection_outcomes. Turns each edge gate into a measurable
+        lever (see v_rejection_gate_edge). OPEN rows re-evaluate until their
+        24h window completes.
+        """
+        if not getattr(self, "gate_edge_analyzer", None):
+            return
+
+        now = datetime.now()
+        if self._last_gate_edge_analysis is not None:
+            hours_since_last = (now - self._last_gate_edge_analysis).total_seconds() / 3600
+            if hours_since_last < self._gate_edge_interval_hours:
+                return
+
+        try:
+            self.logger.info("🚪 Running gate-edge (rejection) analysis...")
+            # 3-day lookback covers fresh rejections + re-evaluation of OPEN rows.
+            stats = self.gate_edge_analyzer.run(days_back=3, strategy="RANGE_FADE", dry_run=False)
+            self._last_gate_edge_analysis = now
+            if stats.get('analyzed', 0) > 0:
+                self.logger.info(
+                    f"🚪 Gate-edge analysis complete: {stats['analyzed']} rejections "
+                    f"({stats.get('resolved', 0)} resolved, {stats.get('open', 0)} open)"
+                )
+            else:
+                self.logger.debug("🚪 Gate-edge analysis: no new rejections")
+        except Exception as e:
+            self.logger.debug(f"Gate-edge analysis skipped: {e}")
+            self._last_gate_edge_analysis = now  # avoid retry spam
 
     def _run_auto_pause_check_if_due(self):
         """Auto-pause eligible (strategy, pair) cells whose rolling LIVE
