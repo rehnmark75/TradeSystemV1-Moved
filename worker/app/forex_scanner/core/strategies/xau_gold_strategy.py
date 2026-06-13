@@ -318,7 +318,7 @@ class XAUGoldStrategy(StrategyInterface):
             return None
 
         # DI alignment gate: block when momentum (DI) contradicts HTF bias
-        if bool(getattr(cfg, "di_alignment_gate_enabled", True)):
+        if cfg.di_alignment_gate_enabled:
             plus_di, minus_di = self._compute_di(df_trigger)
             if bias == "bearish" and plus_di > minus_di:
                 self._reject(epic, "di_misaligned_sell", f"+DI={plus_di:.1f} > -DI={minus_di:.1f}")
@@ -378,17 +378,13 @@ class XAUGoldStrategy(StrategyInterface):
         rsi_neutral = cfg.rsi_neutral_min <= rsi_val <= cfg.rsi_neutral_max
 
         # RSI directional floor: SELL into oversold / BUY into overbought are losing setups
-        rsi_sell_floor = float(getattr(cfg, "rsi_sell_floor", 45.0))
-        rsi_buy_ceiling = float(getattr(cfg, "rsi_buy_ceiling", 80.0))
-        if bias == "bearish" and rsi_val < rsi_sell_floor:
-            self._reject(epic, "rsi_sell_floor", f"rsi={rsi_val:.1f} < floor={rsi_sell_floor:.1f}")
+        if bias == "bearish" and rsi_val < cfg.rsi_sell_floor:
+            self._reject(epic, "rsi_sell_floor", f"rsi={rsi_val:.1f} < floor={cfg.rsi_sell_floor:.1f}")
             return None
-        if bias == "bullish" and rsi_val > rsi_buy_ceiling:
-            self._reject(epic, "rsi_buy_ceiling", f"rsi={rsi_val:.1f} > ceiling={rsi_buy_ceiling:.1f}")
+        if bias == "bullish" and rsi_val > cfg.rsi_buy_ceiling:
+            self._reject(epic, "rsi_buy_ceiling", f"rsi={rsi_val:.1f} > ceiling={cfg.rsi_buy_ceiling:.1f}")
             return None
 
-        # DXY confluence is not wired yet; weight is zeroed in DB config to keep
-        # the confidence scale honest. Setting False has no effect while w_dxy_confluence=0.
         dxy_confluence = False
 
         # Confidence
@@ -765,7 +761,7 @@ class XAUGoldStrategy(StrategyInterface):
                 continue
 
             # DI alignment gate: block when momentum (DI) contradicts direction
-            if bool(getattr(cfg, "di_alignment_gate_enabled", True)):
+            if cfg.di_alignment_gate_enabled:
                 if direction == "SELL" and plus_di > minus_di:
                     self._reject(epic, "di_misaligned_sell", f"+DI={plus_di:.1f} > -DI={minus_di:.1f}")
                     filtered_candidates += 1
@@ -775,15 +771,13 @@ class XAUGoldStrategy(StrategyInterface):
                     filtered_candidates += 1
                     continue
 
-            # RSI directional floor: SELL into oversold is a losing setup for gold
-            rsi_sell_floor = float(getattr(cfg, "rsi_sell_floor", 45.0))
-            if direction == "SELL" and rsi_val < rsi_sell_floor:
-                self._reject(epic, "rsi_sell_floor", f"rsi={rsi_val:.1f} < floor={rsi_sell_floor:.1f}")
+            # RSI directional floor: SELL into oversold / BUY into overbought are losing setups
+            if direction == "SELL" and rsi_val < cfg.rsi_sell_floor:
+                self._reject(epic, "rsi_sell_floor", f"rsi={rsi_val:.1f} < floor={cfg.rsi_sell_floor:.1f}")
                 filtered_candidates += 1
                 continue
-            rsi_buy_ceiling = float(getattr(cfg, "rsi_buy_ceiling", 80.0))
-            if direction == "BUY" and rsi_val > rsi_buy_ceiling:
-                self._reject(epic, "rsi_buy_ceiling", f"rsi={rsi_val:.1f} > ceiling={rsi_buy_ceiling:.1f}")
+            if direction == "BUY" and rsi_val > cfg.rsi_buy_ceiling:
+                self._reject(epic, "rsi_buy_ceiling", f"rsi={rsi_val:.1f} > ceiling={cfg.rsi_buy_ceiling:.1f}")
                 filtered_candidates += 1
                 continue
 

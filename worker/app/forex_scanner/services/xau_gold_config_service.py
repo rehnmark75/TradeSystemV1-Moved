@@ -143,6 +143,9 @@ class XAUGoldConfig:
     dxy_confluence_enabled: bool = True
     rsi_neutral_min: float = 40.0
     rsi_neutral_max: float = 60.0
+    rsi_sell_floor: float = 45.0
+    rsi_buy_ceiling: float = 80.0
+    di_alignment_gate_enabled: bool = True
 
     enabled_pairs: List[str] = field(default_factory=lambda: ["CS.D.CFEGOLD.CEE.IP"])
 
