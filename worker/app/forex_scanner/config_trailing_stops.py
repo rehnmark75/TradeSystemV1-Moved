@@ -571,4 +571,22 @@ SCALP_TRAILING_CONFIGS = {
         'partial_close_trigger_points': 15,
         'partial_close_size': 0.5,
     },
+
+    # ========== GOLD (XAU/USD) — wider pip scale, trending-regime only ==========
+    # SL cap 50 pips (ATR-based, 1.5× 1H ATR). Stages proportionate to ~35-50 pip SL.
+    # Mirrors trailing_pair_config (demo, XAU_GOLD, is_scalp=false).
+    'CS.D.CFEGOLD.CEE.IP': {
+        'break_even_trigger_points': 20,  # 40% of max SL — protect fast
+        'stage1_trigger_points': 35,      # lock +15 pips
+        'stage1_lock_points': 15,
+        'stage2_trigger_points': 55,      # lock +35 pips
+        'stage2_lock_points': 35,
+        'stage3_trigger_points': 80,      # ATR trail from here
+        'stage3_atr_multiplier': 1.3,
+        'stage3_min_distance': 20,
+        'min_trail_distance': 15,
+        'enable_partial_close': False,
+        'partial_close_trigger_points': 55,
+        'partial_close_size': 0.5,
+    },
 }
