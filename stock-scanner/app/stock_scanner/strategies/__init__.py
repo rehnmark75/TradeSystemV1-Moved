@@ -28,6 +28,7 @@ from .gap_and_go import GapAndGoStrategy, GapSignal
 from .reversal_strategy import ReversalStrategy, ReversalSignal
 from .rsi_divergence import RSIDivergenceStrategy, RSIDivergenceSignal
 from .trend_reversal import TrendReversalStrategy, TrendReversalSignal
+from .regime_adaptive_composite import RegimeAdaptiveCompositeStrategy, RegimeAdaptiveSignal
 
 __all__ = [
     # Already optimized strategies
@@ -49,6 +50,8 @@ __all__ = [
     'RSIDivergenceSignal',
     'TrendReversalStrategy',
     'TrendReversalSignal',
+    'RegimeAdaptiveCompositeStrategy',
+    'RegimeAdaptiveSignal',
 
     # Legacy (scanner-specific)
     'ZeroLagMATrendStrategy',

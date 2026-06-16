@@ -23,6 +23,7 @@ Other Strategies:
 - PreMarketCatalystScanner: Stored pre-market gap/news catalysts
 - SqueezeMomentumScanner: BB/KC squeeze release momentum
 - UltimateMAMTFScanner: Configurable MA reclaim/cross scanner
+- RegimeAdaptiveCompositeScanner: Long-only trend/compression/range composite
 """
 
 # Backtested & optimized strategies (PF > 1.5)
@@ -38,6 +39,7 @@ from .rsi_divergence import RSIDivergenceScanner
 from .pocket_pivot import PocketPivotScanner
 from .squeeze_momentum import SqueezeMomentumScanner
 from .ultimate_ma_mtf import UltimateMAMTFScanner
+from .regime_adaptive_composite import RegimeAdaptiveCompositeScanner
 from .catalyst_scanners import (
     EarningsDriftScanner,
     ShortSqueezeBreakoutScanner,
@@ -61,6 +63,7 @@ __all__ = [
     'PocketPivotScanner',
     'SqueezeMomentumScanner',
     'UltimateMAMTFScanner',
+    'RegimeAdaptiveCompositeScanner',
     'EarningsDriftScanner',
     'ShortSqueezeBreakoutScanner',
     'SectorRotationLeaderScanner',

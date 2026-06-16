@@ -39,6 +39,7 @@ from .strategies import (
     PreMarketCatalystScanner,
     SqueezeMomentumScanner,
     UltimateMAMTFScanner,
+    RegimeAdaptiveCompositeScanner,
     # TrendReversalScanner removed - PF 1.09 too low
 )
 
@@ -125,6 +126,7 @@ class ScannerManager:
         'premarket_catalyst': PreMarketCatalystScanner,
         'squeeze_momentum': SqueezeMomentumScanner,
         'ultimate_ma_mtf': UltimateMAMTFScanner,
+        'regime_adaptive_composite': RegimeAdaptiveCompositeScanner,
     }
 
     DEFAULT_ENABLED_SCANNERS = [
@@ -135,6 +137,7 @@ class ScannerManager:
         'gap_and_go',
         'squeeze_momentum',
         'ultimate_ma_mtf',
+        'regime_adaptive_composite',
     ]
 
     def __init__(
@@ -234,9 +237,17 @@ class ScannerManager:
 
         # Collect results
         for scanner_name, signals in zip(self._scanners.keys(), results):
-            scanner_results[scanner_name] = signals
-            all_signals.extend(signals)
-            logger.info(f"  {scanner_name}: {len(signals)} signals")
+            long_signals = [signal for signal in signals if signal.signal_type.value == "BUY"]
+            dropped_short_count = len(signals) - len(long_signals)
+            if dropped_short_count:
+                logger.warning(
+                    "  %s: dropped %s non-long signals because stock scanner is long-only",
+                    scanner_name,
+                    dropped_short_count,
+                )
+            scanner_results[scanner_name] = long_signals
+            all_signals.extend(long_signals)
+            logger.info(f"  {scanner_name}: {len(long_signals)} long signals")
 
         scan_timestamp = datetime.combine(calculation_date, time(hour=12))
         normalized_count = 0
