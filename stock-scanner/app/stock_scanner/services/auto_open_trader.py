@@ -383,17 +383,23 @@ class AutoOpenTrader:
                     order_bias = EXCLUDED.order_bias,
                     pm_status = EXCLUDED.pm_status,
                     pm_direction = EXCLUDED.pm_direction,
-                    broker_bid = EXCLUDED.broker_bid,
-                    broker_ask = EXCLUDED.broker_ask,
-                    broker_last = EXCLUDED.broker_last,
-                    broker_spread_pct = EXCLUDED.broker_spread_pct,
-                    broker_quote_age_minutes = EXCLUDED.broker_quote_age_minutes,
-                    relative_volume = EXCLUDED.relative_volume,
-                    intraday_relative_volume = EXCLUDED.intraday_relative_volume,
-                    atr_percent = EXCLUDED.atr_percent,
-                    session_vwap = EXCLUDED.session_vwap,
-                    prev_close = EXCLUDED.prev_close,
-                    day_change_pct = EXCLUDED.day_change_pct,
+                    -- Market snapshot (broker quote + derived gate inputs) freezes
+                    -- once an order is committed, so the row stays an immutable record
+                    -- of what the gates actually evaluated at decision time. Without
+                    -- this, later polls overwrite these with post-entry values and a
+                    -- clean entry can look like it entered red (e.g. POET Jun 16:
+                    -- entered +0.43% on day, faded to -4%, stored value showed -4%).
+                    broker_bid = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.broker_bid ELSE EXCLUDED.broker_bid END,
+                    broker_ask = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.broker_ask ELSE EXCLUDED.broker_ask END,
+                    broker_last = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.broker_last ELSE EXCLUDED.broker_last END,
+                    broker_spread_pct = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.broker_spread_pct ELSE EXCLUDED.broker_spread_pct END,
+                    broker_quote_age_minutes = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.broker_quote_age_minutes ELSE EXCLUDED.broker_quote_age_minutes END,
+                    relative_volume = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.relative_volume ELSE EXCLUDED.relative_volume END,
+                    intraday_relative_volume = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.intraday_relative_volume ELSE EXCLUDED.intraday_relative_volume END,
+                    atr_percent = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.atr_percent ELSE EXCLUDED.atr_percent END,
+                    session_vwap = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.session_vwap ELSE EXCLUDED.session_vwap END,
+                    prev_close = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.prev_close ELSE EXCLUDED.prev_close END,
+                    day_change_pct = CASE WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run') THEN stock_auto_trade_candidates.day_change_pct ELSE EXCLUDED.day_change_pct END,
                     planned_entry = CASE
                         WHEN stock_auto_trade_candidates.status IN ('order_submitted', 'dry_run')
                         THEN stock_auto_trade_candidates.planned_entry
