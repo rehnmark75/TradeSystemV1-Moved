@@ -176,6 +176,19 @@ class SignalDetector:
             self.logger.warning(f"⚠️ SMC_SIMPLE_V2 config check failed; disabled: {e}")
             self.smc_simple_v2_enabled = False
 
+        # CONFLUENCE_STACK is demo-only forward monitoring. It always emits
+        # monitor_only signals and is never invoked from the live config set.
+        try:
+            config_set = os.getenv("TRADING_CONFIG_SET", "demo")
+            if config_set == "demo":
+                scanner_cfg = get_scanner_config()
+                self.confluence_stack_enabled = scanner_cfg.is_strategy_enabled("CONFLUENCE_STACK")
+            else:
+                self.confluence_stack_enabled = False
+        except Exception as e:
+            self.logger.warning(f"⚠️ CONFLUENCE_STACK config check failed; disabled: {e}")
+            self.confluence_stack_enabled = False
+
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
         self._strategy_router = None
@@ -247,6 +260,7 @@ class SignalDetector:
                 'SQUEEZE_MOMENTUM': 'squeeze_momentum_strategy',
                 'ULTIMATE_MA_MTF_FOREX': 'ultimate_ma_mtf_forex_strategy',
                 'SMC_SIMPLE_V2': 'smc_simple_v2_strategy',
+                'CONFLUENCE_STACK': 'confluence_stack_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -1166,6 +1180,27 @@ class SignalDetector:
                     self.logger.error(f"❌ [SMC_SIMPLE_V2] Error for {epic}: {e}")
                     individual_results['smc_simple_v2'] = None
 
+            if self.confluence_stack_enabled and not self._is_gold_epic(epic):
+                try:
+                    self.logger.debug(f"🔍 [CONFLUENCE_STACK] Starting demo monitor detection for {epic}")
+                    _cs_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _cs_ts = _cs_bt_time if _cs_bt_time is not None else datetime.now(timezone.utc)
+                    cs_signal = self.detect_confluence_stack_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_cs_ts
+                    )
+                    individual_results['confluence_stack'] = cs_signal
+                    if cs_signal:
+                        all_signals.append(cs_signal)
+                        self.logger.info(
+                            f"✅ [CONFLUENCE_STACK:MONITOR] Signal detected for {epic}: "
+                            f"{cs_signal.get('signal')} @ {cs_signal.get('entry_price', 0):.5f}"
+                        )
+                    else:
+                        self.logger.info(f"📊 [CONFLUENCE_STACK:MONITOR] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [CONFLUENCE_STACK] Error for {epic}: {e}")
+                    individual_results['confluence_stack'] = None
+
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
@@ -1223,6 +1258,8 @@ class SignalDetector:
         'SQZMOM': 'SQUEEZE_MOMENTUM',
         'ULTIMATE_MTF': 'ULTIMATE_MA_MTF_FOREX',
         'UMTF': 'ULTIMATE_MA_MTF_FOREX',
+        'STACK': 'CONFLUENCE_STACK',
+        'CONFLUENCE': 'CONFLUENCE_STACK',
     }
 
     def _detect_single_strategy(
@@ -1266,6 +1303,8 @@ class SignalDetector:
                 signal = self.detect_ultimate_ma_mtf_forex_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'SMC_SIMPLE_V2':
                 signal = self.detect_smc_simple_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'CONFLUENCE_STACK':
+                signal = self.detect_confluence_stack_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'INSIDE_DAY':
                 signal = self.detect_inside_day_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
@@ -2300,6 +2339,82 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting KAMA V2 signals for {epic}: {e}")
+            return None
+
+    def detect_confluence_stack_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the Confluence Stack strategy."""
+        try:
+            strategy = self._get_strategy('CONFLUENCE_STACK')
+            if strategy is None:
+                return None
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_confluence_stack_backtest_id', None) != current_id:
+                    self._confluence_stack_backtest_id = current_id
+                    strategy.reset_cooldowns()
+
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='5m',
+                lookback_hours=96,
+            )
+            df_15m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='15m',
+                lookback_hours=120,
+            )
+            df_1h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='1h',
+                lookback_hours=240,
+            )
+            df_4h = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='4h',
+                lookback_hours=320,
+            )
+
+            if any(df is None or df.empty for df in (df_5m, df_15m, df_1h, df_4h)):
+                self.logger.debug(f"[CONFLUENCE_STACK] Missing data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_5m,
+                df_15m=df_15m,
+                df_1h=df_1h,
+                df_4h=df_4h,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_5m)
+
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting Confluence Stack signals for {epic}: {e}")
             return None
 
     def detect_squeeze_momentum_signals(

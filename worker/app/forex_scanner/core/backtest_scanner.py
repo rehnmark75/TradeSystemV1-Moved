@@ -1432,6 +1432,20 @@ class BacktestScanner:
                 logger=self.logger,
             )
             self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP) ready for {epic} (KAMA_V2)")
+        elif strategy == 'CONFLUENCE_STACK':
+            # CONFLUENCE_STACK was designed around per-signal fixed brackets.
+            # Using the progressive trailing engine inflates win rate by locking
+            # small winners before the intended TP/SL distribution is tested.
+            simulator = TrailingStopSimulator(
+                epic=epic,
+                target_pips=34.0,       # placeholder — overridden per-signal via reward_pips
+                initial_stop_pips=22.0, # placeholder — overridden per-signal via risk_pips
+                max_bars=400,
+                use_fixed_sl_tp=True,
+                strategy=strategy,
+                logger=self.logger,
+            )
+            self.logger.debug(f"📊 TrailingStopSimulator (fixed SL/TP) ready for {epic} (CONFLUENCE_STACK)")
         else:
             # New engine: uses live PAIR_TRAILING_CONFIGS / SCALP_TRAILING_CONFIGS.
             # Scalp mode uses SCALP_TRAILING_CONFIGS with full progressive trailing
