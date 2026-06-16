@@ -1,0 +1,177 @@
+[OK] Stock Scanner config loaded v0.1.0
+[DB] Database: postgres:5432/stocks
+[API] RoboMarkets API: configured
+[LIST] Watchlist: 23 stocks
+======================================================================
+SCANNER COMPOSITION ABLATION
+Run timestamp: 2026-06-15 14:58 UTC
+======================================================================
+
+Total BUY signals loaded: 7,405
+
+History span per scanner:
+  reversal_scanner                   : n=   3, 2025-05-01 → 2025-09-29 (151d)
+  zlma_trend                         : n= 589, 2025-12-08 → 2026-06-15 (188d)
+  gap_and_go                         : n=2629, 2025-12-27 → 2026-06-15 (169d)
+  breakout_confirmation              : n=1403, 2025-12-27 → 2026-06-08 (162d)
+  trend_momentum                     : n=   1, 2025-12-27 → 2025-12-27 (0d)
+  trend_reversal                     : n=  32, 2025-12-27 → 2026-01-08 (11d)
+  macd_momentum                      : n= 749, 2026-01-06 → 2026-06-08 (152d)
+  ema_pullback                       : n= 431, 2026-01-06 → 2026-06-15 (159d)
+  high_retest                        : n= 238, 2026-05-26 → 2026-06-05 (10d)
+  pocket_pivot                       : n= 323, 2026-05-26 → 2026-06-08 (13d)
+  premarket_catalyst                 : n=  99, 2026-05-26 → 2026-06-12 (17d)
+  volatility_contraction_breakout    : n=  41, 2026-05-26 → 2026-06-09 (14d)
+  earnings_drift                     : n=  38, 2026-05-26 → 2026-06-05 (10d)
+  sector_rotation_leader             : n= 231, 2026-05-26 → 2026-06-05 (10d)
+  relative_strength_leader           : n= 163, 2026-05-26 → 2026-06-05 (10d)
+  squeeze_momentum                   : n= 318, 2026-06-08 → 2026-06-15 (7d)
+  ultimate_ma_mtf                    : n= 117, 2026-06-08 → 2026-06-15 (6d)
+
+Loading 1h candles...
+  8,609,284 bars, 3475 tickers
+Loading daily candles for ATR...
+  1,232,083 bars, 3472 tickers
+
+Running sim on 7,405 signals...
+
+Simulation complete: 7,190 resolved, 215 dropped (no candle data)
+  Clean win/loss outcomes (excl. timeout/be): 3,338
+  Timeout outcomes: 420
+  BE exits: 3,432
+
+======================================================================
+SECTION 1: PER-SCANNER FULL-HISTORY METRICS (fixed 3%SL/5%TP)
+======================================================================
+
+  scanner                                  n   n_wl     WR%   pooled_PF   exp%/trade   timeout%           regime_flag
+  breakout_confirmation                 1401    756    25.4        0.57        -0.48        3.4     MULTI-REGIME (ok)
+  earnings_drift                          34      3    66.7        3.33        +0.21        0.0   SINGLE-REGIME (3wk)
+  ema_pullback                           428    232    23.7        0.52        -0.49        6.8     MULTI-REGIME (ok)
+  gap_and_go                            2610   1247    15.2        0.30        -0.84        1.3     MULTI-REGIME (ok)
+  high_retest                            238    123    65.0        3.10        +1.39       15.5   SINGLE-REGIME (3wk)
+  macd_momentum                          749    367    28.3        0.66        -0.24        5.6     MULTI-REGIME (ok)
+  pocket_pivot                           301    102    24.5        0.54        -0.27        2.3   SINGLE-REGIME (3wk)
+  premarket_catalyst                      99     49    16.3        0.33        -0.84        0.0   SINGLE-REGIME (3wk)
+  relative_strength_leader               163     55    14.5        0.28        -0.59        3.1   SINGLE-REGIME (3wk)
+  reversal_scanner                         3      1     0.0        0.00        -1.00        0.0     MULTI-REGIME (ok)
+  sector_rotation_leader                 231     87    11.5        0.22        -0.77        0.9   SINGLE-REGIME (3wk)
+  squeeze_momentum                       255     50    16.0        0.32        +0.18       57.3   SINGLE-REGIME (3wk)
+  trend_momentum                           1      0     0.0         N/A        +3.33      100.0        PARTIAL-REGIME
+  trend_reversal                          32     14    28.6        0.67        -0.34        3.1        PARTIAL-REGIME
+  ultimate_ma_mtf                         88     22     9.1        0.17        -0.16       45.5   SINGLE-REGIME (3wk)
+  volatility_contraction_breakout         41     10    90.0       15.00        +1.06        9.8   SINGLE-REGIME (3wk)
+  zlma_trend                             516    220    17.7        0.36        -0.66        4.5     MULTI-REGIME (ok)
+
+======================================================================
+SECTION 2: PORTFOLIO ABLATION
+======================================================================
+
+  BASELINE (all scanners)
+    n=7,190 (100% of baseline)   pooled PF=0.471   WR=22.0%   exp=-0.51%/trade
+    n_wins=735 n_losses=2603 n_resolved=3338
+
+  DROP losers (gap_and_go + breakout_confirmation + squeeze_momentum)
+    n=2,924 (41% of baseline)   pooled PF=0.614   WR=26.9%   exp=-0.28%/trade
+    n_wins=346 n_losses=939 n_resolved=1285
+
+  (Auto-identified PF<1.0 scanners: ['breakout_confirmation', 'ema_pullback', 'gap_and_go', 'macd_momentum', 'pocket_pivot', 'premarket_catalyst', 'relative_strength_leader', 'reversal_scanner', 'sector_rotation_leader', 'squeeze_momentum', 'trend_reversal', 'ultimate_ma_mtf', 'zlma_trend'])
+
+  DROP all PF<1.0 scanners (auto-identified)
+    n=314 (4% of baseline)   pooled PF=3.370   WR=66.9%   exp=+1.22%/trade
+    n_wins=91 n_losses=45 n_resolved=136
+
+  KEEP only adequate-n winners (PF>=1.2, n>=150): high_retest + RSL + pocket_pivot + SRL
+    n=933 (13% of baseline)   pooled PF=0.840   WR=33.5%   exp=-0.03%/trade
+    n_wins=123 n_losses=244 n_resolved=367
+
+======================================================================
+SECTION 3: ROBUSTNESS — TEMPORAL SPLIT
+======================================================================
+
+  Split date: 2026-03-01
+  EARLY half = before 2026-03-01 (multi-regime, incl. Dec 2025 – Feb 2026)
+  LATE half = 2026-03-01 onwards
+
+  Scanners that launched AFTER 2026-03-01 cannot be split — flagged.
+
+  Early period signals (with outcome): 2,340
+  Late period signals (with outcome): 4,850
+
+  scanner                              early_n   early_PF   early_WR  late_n   late_PF   late_WR   stable?
+  breakout_confirmation                    750       0.69      29.3%     651      0.43     20.6%       YES
+  earnings_drift                             0        N/A        N/A      34       N/A       N/A  SINGLE-REG
+  ema_pullback                             184       0.37      18.0%     244      0.68     28.9%       YES
+  gap_and_go                               916       0.39      18.8%    1694      0.25     12.9%       YES
+  high_retest                                0        N/A        N/A     238      3.10     65.0%  SINGLE-REG
+  macd_momentum                            319       0.83      33.3%     430      0.52     23.7%       YES
+  pocket_pivot                               0        N/A        N/A     301      0.54     24.5%  SINGLE-REG
+  premarket_catalyst                         0        N/A        N/A      99      0.33     16.3%  SINGLE-REG
+  relative_strength_leader                   0        N/A        N/A     163      0.28     14.5%  SINGLE-REG
+  reversal_scanner                           3        N/A        N/A       0       N/A       N/A      THIN
+  sector_rotation_leader                     0        N/A        N/A     231      0.22     11.5%  SINGLE-REG
+  squeeze_momentum                           0        N/A        N/A     255      0.32     16.0%  SINGLE-REG
+  trend_momentum                             1        N/A        N/A       0       N/A       N/A      THIN
+  trend_reversal                            32       0.67      28.6%       0       N/A       N/A      THIN
+  ultimate_ma_mtf                            0        N/A        N/A      88      0.17      9.1%  SINGLE-REG
+  volatility_contraction_breakout            0        N/A        N/A      41     15.00     90.0%  SINGLE-REG
+  zlma_trend                               135       0.52      23.8%     381      0.30     15.3%       YES
+
+======================================================================
+SECTION 4: POOL DEPTH — can freed slots be filled by better scanners?
+======================================================================
+
+  Signals per trading day from NON-loser scanners (PF>=1.0, post May-26):
+
+  date          signals_from_good_scanners
+  2026-06-12                            58
+  2026-06-11                            66
+  2026-06-10                            67
+  2026-06-09                            82
+  2026-06-08                            70
+  2026-06-06                            54
+  2026-06-05                           189
+  2026-06-04                           209
+  2026-06-03                           138
+  2026-06-02                           149
+  2026-06-01                           137
+  2026-05-30                            20
+  2026-05-29                           130
+  2026-05-28                           134
+  2026-05-27                            22
+  2026-05-26                           133
+
+  Median per trading day (good scanners): 106
+  8 trade slots / run → pool is DEEP ENOUGH (need >8 to fill freed slots)
+
+======================================================================
+SECTION 5: VERDICT TABLE
+======================================================================
+
+  Confidence tiers (n = resolved wins+losses in full-history):
+    HIGH:    n>=200, multi-regime — stand behind the verdict
+    MEDIUM:  n 100-199 — indicative, verify after more trades
+    LOW:     n<100 OR single-regime — monitor only, do NOT act
+
+  scanner                                n_wl      PF                  regime       verdict      action
+  breakout_confirmation                   756    0.57       MULTI-REGIME (ok)         LOSER    CAP/DROP
+  earnings_drift                            3    3.33     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  ema_pullback                            232    0.52       MULTI-REGIME (ok)         LOSER    CAP/DROP
+  gap_and_go                             1247    0.30       MULTI-REGIME (ok)         LOSER    CAP/DROP
+  high_retest                             123    3.10     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  macd_momentum                           367    0.66       MULTI-REGIME (ok)         LOSER    CAP/DROP
+  pocket_pivot                            102    0.54     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  premarket_catalyst                       49    0.33     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  relative_strength_leader                 55    0.28     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  reversal_scanner                          1    0.00       MULTI-REGIME (ok)  INSUFFICIENT        HOLD
+  sector_rotation_leader                   87    0.22     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  squeeze_momentum                         50    0.32     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  trend_momentum                            0     N/A          PARTIAL-REGIME  INSUFFICIENT        HOLD
+  trend_reversal                           14    0.67          PARTIAL-REGIME  INSUFFICIENT        HOLD
+  ultimate_ma_mtf                          22    0.17     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  volatility_contraction_breakout          10   15.00     SINGLE-REGIME (3wk)       MONITOR        HOLD
+  zlma_trend                              220    0.36       MULTI-REGIME (ok)         LOSER    CAP/DROP
+
+======================================================================
+Script: stock-scanner/app/stock_scanner/analysis/scanner_ablation.py
+======================================================================
