@@ -56,6 +56,13 @@ class AutoOpenTrader:
         # the previous session's close (real-time broker quote vs prior close).
         # Fail-closed: no usable prev close -> no confirmation -> skip.
         "AUTO_TRADE_REQUIRE_POSITIVE_DAY": ("require_positive_day", "bool", "true"),
+        # Minimum positive margin (percent) the day-change must clear, not just
+        # > 0. A name +0.1% on the day is effectively flat and clears a bare
+        # > 0 check (e.g. POET Jun 16: opened ~flat vs true prior close, passed,
+        # then faded to -4%). Require some cushion to avoid buying flat names.
+        # 0 keeps the old behaviour (any positive). Only applies when
+        # require_positive_day is on.
+        "AUTO_TRADE_MIN_DAY_CHANGE_PCT": ("min_day_change_pct", "float", "0"),
         "AUTO_TRADE_MAX_QUOTE_AGE_MINUTES": ("max_quote_age_minutes", "int", "3"),
         "AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT": ("pullback_limit_offset_pct", "float", "0.3"),
         "AUTO_TRADE_START_DELAY_MINUTES": ("start_delay_minutes", "int", "15"),
@@ -846,8 +853,14 @@ class AutoOpenTrader:
                 return "Missing previous close (require_positive_day)"
             if day_change_pct is None:
                 return "Missing broker price for day-change check"
+            min_margin = self.min_day_change_pct
             if day_change_pct <= 0:
                 return f"Not positive on day: {day_change_pct:+.2f}% (prev close {prev_close:.2f})"
+            if min_margin > 0 and day_change_pct < min_margin:
+                return (
+                    f"Day change {day_change_pct:+.2f}% below min margin "
+                    f"{min_margin:.2f}% (prev close {prev_close:.2f})"
+                )
         ask = self._num(row.get("broker_ask"))
         if ask is None or ask <= 0:
             return "Missing broker ask"
