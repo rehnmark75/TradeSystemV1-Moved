@@ -35,6 +35,19 @@ from ...strategies.rsi_divergence import RSIDivergenceStrategy
 
 
 # Strategy registry (7 strategies total - TREND_REVERSAL removed, PF too low)
+#
+# ⚠️ BACKTEST-vs-LIVE PARITY CAVEAT:
+# These classes are the SINGLE source of signal logic for EMA_PULLBACK,
+# MACD_MOMENTUM, SQUEEZE, ULTIMATE_MA, BREAKOUT and GAP_AND_GO — their live
+# scanners (scanners/strategies/*) delegate to the same class, so backtest
+# numbers transfer to live.
+#
+# This is NOT true for REVERSAL and ZLMA. Their live scanners
+# (reversal_scanner.py / zlma_trend.py) are PARALLEL re-implementations with
+# their own (looser) parameters, scoring and DB-context inputs — they do NOT
+# call ReversalStrategy / ZLMACrossoverStrategy. Any PF figure produced here
+# for REVERSAL/ZLMA describes code that does not run live. Do not cite it as a
+# live expectation until the two implementations are deliberately reconciled.
 STRATEGY_REGISTRY: Dict[str, Type] = {
     # Already optimized
     'EMA_PULLBACK': EMATrendPullbackStrategy,
@@ -54,7 +67,7 @@ STRATEGY_REGISTRY: Dict[str, Type] = {
     'BREAKOUT_CONFIRMATION': BreakoutConfirmationStrategy,
     'GAP_AND_GO': GapAndGoStrategy,
     'GAP': GapAndGoStrategy,
-    'REVERSAL': ReversalStrategy,  # PF 2.44 - Best performer
+    'REVERSAL': ReversalStrategy,  # backtest PF 2.44 — but live reversal_scanner.py does NOT use this class (see parity caveat above)
     'RSI_DIVERGENCE': RSIDivergenceStrategy,
     'RSI_DIV': RSIDivergenceStrategy,
 }

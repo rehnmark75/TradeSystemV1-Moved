@@ -16,13 +16,18 @@ Entry Logic (from backtested strategy):
 9. Volume >= 1.2x average (institutional participation)
 10. Quality tier A+, A, or B only (skip C/D)
 
-This scanner fetches candle data and runs the exact same strategy
-that achieved PF 2.02 in backtesting.
+This scanner fetches candle data and runs EMATrendPullbackStrategy so that
+live signals share a single code path with the backtest.
+
+NOTE ON PERFORMANCE: an early backtest reported PF ~2.02, but the live
+scanner has since been flagged as a net loser (PF < 1) in the Jun 2026
+scanner-composition ablation. Do NOT treat the historical 2.02 figure as a
+live expectation — re-run a windowed backtest before relying on this edge.
 """
 
 import logging
 from dataclasses import dataclass
-from datetime import datetime, timedelta, date
+from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import List, Dict, Any, Optional
 
@@ -54,15 +59,16 @@ class EMAPullbackConfig(ScannerConfig):
 
 class EMAPullbackScanner(BaseScanner):
     """
-    EMA Pullback Scanner using the exact backtested strategy logic.
+    EMA Pullback Scanner using the EMATrendPullbackStrategy logic.
 
     This scanner:
-    1. Pre-filters candidates using watchlist data (fast database query)
-    2. Fetches candle data for promising candidates
-    3. Runs EMATrendPullbackStrategy.scan() - identical to backtest
+    1. Loads all active tickers from stock_instruments
+    2. Fetches candle data + indicators for each via BacktestDataProvider
+    3. Runs EMATrendPullbackStrategy.scan() - the same code path as the backtest
     4. Converts signals to SignalSetup format for database storage
 
-    This ensures live signals match backtested performance (PF 2.02).
+    Sharing the strategy class with the backtest keeps the signal logic in one
+    place. See the module docstring for the live-vs-backtest performance caveat.
     """
 
     def __init__(
@@ -91,7 +97,7 @@ class EMAPullbackScanner(BaseScanner):
 
     @property
     def description(self) -> str:
-        return "EMA trend pullback - uses backtested strategy (PF 2.02)"
+        return "EMA trend pullback - shared strategy class with backtest"
 
     async def scan(self, calculation_date: datetime = None) -> List[SignalSetup]:
         """
@@ -168,46 +174,6 @@ class EMAPullbackScanner(BaseScanner):
         self.log_scan_summary(len(tickers), len(signals), high_quality)
 
         return signals
-
-    async def _get_latest_watchlist_date(self) -> date:
-        """Get the most recent date with watchlist data."""
-        query = """
-            SELECT MAX(calculation_date) as latest_date
-            FROM stock_watchlist
-        """
-        rows = await self.db.fetch(query)
-        if rows and rows[0]['latest_date']:
-            return rows[0]['latest_date']
-        return datetime.now().date()
-
-    async def _get_trend_candidates(
-        self,
-        calculation_date: date
-    ) -> List[Dict[str, Any]]:
-        """
-        Pre-filter candidates with bullish trend from watchlist.
-
-        This fast database query reduces the number of tickers we need
-        to fetch full candle data for. We only need tickers that:
-        - Have bullish SMA alignment (price > major EMAs)
-        - Are in an uptrend
-        - Have reasonable liquidity
-
-        Note: ADX/MACD filters are applied by the strategy on candle data,
-        not in the pre-filter. This allows the strategy to be the single
-        source of truth for entry conditions.
-        """
-        # Query for bullish trend candidates
-        # Keep pre-filter loose - strategy will apply strict filters on candle data
-        additional_filters = """
-            AND w.trend_strength IN ('strong_up', 'up')
-            AND w.sma_cross_signal IN ('golden_cross', 'bullish')
-        """
-
-        return await self.get_watchlist_candidates(
-            calculation_date,
-            additional_filters
-        )
 
     def _convert_to_signal_setup(
         self,
@@ -322,21 +288,10 @@ class EMAPullbackScanner(BaseScanner):
             elif rv >= 1.2:
                 factors.append(f"Good volume ({rv:.1f}x)")
 
-        # ADX/MACD from candidate
-        adx = candidate.get('adx')
-        if adx:
-            factors.append(f"ADX trending ({float(adx):.0f})")
-
-        macd = candidate.get('macd')
-        if macd and float(macd) > 0:
-            factors.append("MACD bullish")
-
-        # Trend strength
-        trend = candidate.get('trend_strength', '')
-        if trend == 'strong_up':
-            factors.append("Strong uptrend")
-        elif trend == 'up':
-            factors.append("Uptrend confirmed")
+        # NOTE: ADX/MACD/trend-strength are validated inside the strategy on
+        # candle data, but are not carried on PullbackSignal, so they are not
+        # listed as confluence factors here. (The live scan passes only
+        # {'ticker', 'sector'} as `candidate`.)
 
         return factors[:8]
 
