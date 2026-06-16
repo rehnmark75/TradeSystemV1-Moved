@@ -1338,15 +1338,15 @@ export default function SignalsPage() {
         <div className="view-toggle" style={{ display: "flex", gap: 8, margin: "4px 0 14px" }}>
           <button className="claude-btn" style={{ opacity: viewMode === "all" ? 1 : 0.5 }} onClick={() => setViewMode("all")}>All Signals</button>
           <button className="claude-btn" style={{ opacity: viewMode === "top10" ? 1 : 0.5 }} onClick={() => { setViewMode("top10"); setTopRefreshNonce((n) => n + 1); }}>Top 10 Candidates</button>
-          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => { setViewMode("daytrades"); setTopRefreshNonce((n) => n + 1); }} title="Click to refresh">Top 50 Day Trades{viewMode === "daytrades" && topLoadedAt ? ` · ${topLoadedAt}` : ""}</button>
+          <button className="claude-btn" style={{ opacity: viewMode === "daytrades" ? 1 : 0.5 }} onClick={() => { setViewMode("daytrades"); setTopRefreshNonce((n) => n + 1); }} title="Click to refresh">Auto-Trader Candidates{viewMode === "daytrades" && topLoadedAt ? ` · ${topLoadedAt}` : ""}</button>
         </div>
 
         {viewMode === "top10" || viewMode === "daytrades" ? (
           <div className="top10-view">
             <div className="footer-note" style={{ marginBottom: 10 }}>
-              {viewMode === "daytrades" ? "Top 50 day trades" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
+              {viewMode === "daytrades" ? "Auto-trader candidates" : "Top candidates"} from the latest scan batch{topMeta?.batch_date ? ` (${new Date(topMeta.batch_date).toLocaleDateString("en-US", { month: "2-digit", day: "2-digit" })})` : ""}.
               {viewMode === "daytrades"
-                ? " Score (0–100) leads with activity: 0.30×RVOL + 0.14×range + 0.16×RS + 0.12×TV + 0.12×premarket conviction + 0.08×live news + 0.08×entry-not-extended, ± rising-RS / gap / overbought / liquidity / low-float / squeeze / earnings. Names streaming live 1h candles also earn a bonus for intraday RVOL pace + holding above session VWAP. A tradability gate (current-session premarket BUY, or live-volume confirmation, + acceptable spread) ranks above score — non-tradable rows are dimmed."
+                ? " Tuned for the real 1–3 day swing hold. Score (0–100): 0.30×RVOL (cap 2×) + 0.14×range + 0.16×RS + 0.12×TV + 0.12×premarket conviction + 0.08×live news + 0.08×entry-not-extended (vs EMA50), ± rising-RS / gap / overbought / liquidity / low-float / squeeze / earnings. Live intraday RVOL/VWAP is shown but no longer moves the rank (meaningless overnight). Gate now hard-blocks only explicit premarket bearishness (PM against/fading) + bad spread — missing/stale premarket data no longer rejects. Non-tradable rows are dimmed."
                 : " Score = 0.55×RS + 0.45×TV consensus + rising-RS bonus − risk penalties."}
               {viewMode === "daytrades" && topMeta?.daytrade_tradable_count != null
                 ? ` ${topMeta.daytrade_tradable_count} of the top ${topMeta.daytrade_pool_size ?? "?"} candidates are tradable right now${
@@ -1356,7 +1356,7 @@ export default function SignalsPage() {
               {" "}Scanners with no demonstrated edge (PF &lt; {topMeta?.edge_pf_floor ?? 1} over {topMeta?.edge_window_days ?? 60}d of closed trades) are excluded; scanner PF is shown so marginal scanners stay visible.
             </div>
             {topLoading ? (
-              <div className="footer-note">Loading {viewMode === "daytrades" ? "top 50 day trades" : "top candidates"}…</div>
+              <div className="footer-note">Loading {viewMode === "daytrades" ? "auto-trader candidates" : "top candidates"}…</div>
             ) : topCandidates.length === 0 ? (
               <div className="footer-note">No {viewMode === "daytrades" ? "day-trade candidates" : "candidates"} in the latest batch.</div>
             ) : (

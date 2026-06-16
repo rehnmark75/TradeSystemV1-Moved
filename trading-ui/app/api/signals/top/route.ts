@@ -229,7 +229,11 @@ export async function GET(request: Request) {
               -- All core terms use 100%-populated daily metrics so every name is
               -- scored on the same basis (live intraday RVOL/VWAP is added in JS
               -- as a bonus for the sparse streaming subset).
-              0.30 * LEAST(COALESCE(relative_volume, 0) / 3.0 * 100, 100)
+              -- RVOL ceiling lowered 3.0 -> 2.0 for the swing (1-3 day) horizon:
+              -- a name at 2x average volume is sufficiently active to enter and
+              -- exit over multiple days; rewarding 3x+ over-credits explosive
+              -- intraday movers that suit day trading, not a multi-day hold.
+              0.30 * LEAST(COALESCE(relative_volume, 0) / 2.0 * 100, 100)
             -- Range earns credit only in PROPORTION to how active the name is:
             -- a wide range on light volume is not a tradable mover, just a
             -- volatile sleeper. Scaled by RVOL capped at 1.0 (at/above average
@@ -250,20 +254,24 @@ export async function GET(request: Request) {
               )
             + 0.08 * COALESCE(daq_news_score, 50)
             + 0.08 * (
-                -- entry-not-extended: 100 at/below EMA20, decaying ~20pts per ATR
-                -- above it (a proxy for VWAP/extension; live session VWAP feeds
-                -- the JS confirmation bonus instead of overriding this). Neutral
-                -- 60 when ATR/EMA unavailable (atr_14 is 'NaN' during warmup,
-                -- which would otherwise sort to TOP).
+                -- entry-not-extended, SWING benchmark: 100 at/below EMA50 (the
+                -- institutional swing-pullback reference), decaying ~15pts per ATR
+                -- above it. Was EMA20 (an intraday-reversion proxy) -- too tight
+                -- for a 1-3 day hold, whose targets are larger so a wider ATR
+                -- tolerance is appropriate. Neutral 60 when ATR/EMA unavailable
+                -- (atr_14 is 'NaN' during warmup, which would otherwise sort to TOP).
                 CASE
                   WHEN atr_14 IS NULL OR atr_14 <= 0 OR atr_14 = 'NaN'
                     OR entry_price IS NULL OR entry_price = 'NaN'
-                    OR ema_20 IS NULL OR ema_20 = 'NaN'
+                    OR ema_50 IS NULL OR ema_50 = 'NaN'
                   THEN 60
-                  ELSE GREATEST(0, 100 - 20 * GREATEST((entry_price - ema_20) / atr_14, 0))
+                  ELSE GREATEST(0, 100 - 15 * GREATEST((entry_price - ema_50) / atr_14, 0))
                 END
               )
-            + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -12 ELSE 0 END)
+            -- rs_trend 'deteriorating' penalty softened -12 -> -5: ~92% of the
+            -- universe carries the 'deteriorating' label, so the old -12 was a
+            -- near-constant floor reduction (no discrimination), not a signal.
+            + (CASE rs_trend WHEN 'improving' THEN 5 WHEN 'deteriorating' THEN -5 ELSE 0 END)
             + (CASE
                 WHEN pm_is_current_session AND pm_direction = 'BUY' AND pm_gap_percent BETWEEN 1 AND 8 THEN 6
                 WHEN pm_is_current_session AND pm_direction = 'BUY' AND pm_gap_percent > 8 THEN 2
@@ -323,7 +331,24 @@ export async function GET(request: Request) {
         `;
 
     const query = `
-      WITH scanner_edge AS (
+      WITH scanner_pctl AS (
+        -- Per-scanner 5th/95th percentile of realized_pnl_pct over the window.
+        -- Used to winsorize before computing PF, so a single penny-stock survivor
+        -- (e.g. realized +350%) or one blow-up loss can't dominate a scanner's
+        -- edge metric. The native-SL/TP realized series is heavily fat-tailed on
+        -- low-priced names; clamping the tails makes the floor track the
+        -- systematic edge rather than outlier luck.
+        SELECT
+          scanner_name,
+          percentile_cont(0.95) WITHIN GROUP (ORDER BY realized_pnl_pct) AS p95,
+          percentile_cont(0.05) WITHIN GROUP (ORDER BY realized_pnl_pct) AS p05
+        FROM stock_scanner_signals
+        WHERE signal_timestamp >= NOW() - ($1 * INTERVAL '1 day')
+          AND status = 'closed'
+          AND realized_pnl_pct IS NOT NULL
+        GROUP BY scanner_name
+      ),
+      scanner_edge AS (
         SELECT
           scanner_name,
           closed_n,
@@ -334,15 +359,21 @@ export async function GET(request: Request) {
           END AS pf
         FROM (
           SELECT
-            scanner_name,
+            ss.scanner_name,
             count(*) AS closed_n,
-            COALESCE(sum(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0), 0)::numeric AS gross_profit,
-            ABS(COALESCE(sum(realized_pnl_pct) FILTER (WHERE realized_pnl_pct <= 0), 0))::numeric AS gross_loss
-          FROM stock_scanner_signals
-          WHERE signal_timestamp >= NOW() - ($1 * INTERVAL '1 day')
-            AND status = 'closed'
-            AND realized_pnl_pct IS NOT NULL
-          GROUP BY scanner_name
+            COALESCE(sum(w) FILTER (WHERE w > 0), 0)::numeric AS gross_profit,
+            ABS(COALESCE(sum(w) FILTER (WHERE w <= 0), 0))::numeric AS gross_loss
+          FROM (
+            SELECT
+              s.scanner_name,
+              LEAST(GREATEST(s.realized_pnl_pct, p.p05), p.p95) AS w
+            FROM stock_scanner_signals s
+            JOIN scanner_pctl p ON s.scanner_name = p.scanner_name
+            WHERE s.signal_timestamp >= NOW() - ($1 * INTERVAL '1 day')
+              AND s.status = 'closed'
+              AND s.realized_pnl_pct IS NOT NULL
+          ) ss
+          GROUP BY ss.scanner_name
         ) closed_edge
       ),
       latest_batch AS (
@@ -772,15 +803,19 @@ export async function GET(request: Request) {
               // tradable only if premarket confirms a current-session BUY and the
               // order bias is actionable. Surfaced per-row so the UI can show why.
               const finalPmStatus = openConfirmed ? "Open confirmed" : row.pm_status;
-              const hardPmReject = ["Stale PM", "No PM data", "PM against", "PM fading"].includes(
+              // Swing-horizon gate: only EXPLICIT premarket bearishness hard-blocks.
+              // "No PM data" / "Stale PM" no longer reject -- only ~14% of executed
+              // trades ever had a current-session premarket BUY, so requiring a 4am
+              // premarket catalog hit blocked the majority of legitimate multi-day
+              // entries. Their order_bias ("Wait"/"Refresh") is likewise dropped
+              // from the bias hard-reject below so the softening is coherent.
+              const hardPmReject = ["PM against", "PM fading"].includes(
                 String(finalPmStatus ?? "")
               );
               const hardBiasReject = [
                 "Avoid",
                 "Avoid spread",
                 "Spread eats range",
-                "Refresh",
-                "Wait",
                 "Wait pullback",
               ].includes(orderBias);
               const hardSignalReject = String(row.signal_type ?? "") !== "BUY";
@@ -820,18 +855,18 @@ export async function GET(request: Request) {
                   room: roomScore,
                 },
                 spread_to_room: spreadToRoom == null ? null : Number(spreadToRoom.toFixed(3)),
-                // candidate_score is MERIT only: the SQL core (in-play + leadership
-                // + setup) plus the live-volume confirmation bonus. Execution
-                // quality (spread/fill mechanics) is deliberately NOT added here --
-                // it answers "can I get a good fill right now," not "is this a good
-                // day trade," and folding a 0-12 mechanics bonus into the rank was
-                // re-lifting quiet-but-easy-to-fill names above the actual movers.
-                // It stays as a displayed metric and still feeds the gate.
+                // candidate_score is MERIT only: the SQL core (leadership + setup).
+                // The live session-VWAP / intraday-RVOL bonus is NO LONGER added
+                // here -- "holding above VWAP right now" has no meaning for a
+                // position held 1-3 days overnight, so it must not move the swing
+                // rank. It stays computed as a displayed metric (live_confirmation_bonus)
+                // and still feeds the live-in-play tradability rescue path below.
+                // Execution quality (spread/fill mechanics) likewise stays out of
+                // the rank -- it answers "can I get a good fill," not "is this a
+                // good swing candidate."
                 // NOTE: the inner Number() is load-bearing — pg returns numeric
                 // columns as strings, and .toFixed() on a string throws.
-                candidate_score: Number(
-                  (Number(row.candidate_score ?? 0) + liveConfirmationBonus).toFixed(1)
-                ),
+                candidate_score: Number(Number(row.candidate_score ?? 0).toFixed(1)),
                 order_bias: orderBias,
                 tradable: finalTradable,
                 gate_reason: finalTradable
@@ -886,7 +921,7 @@ export async function GET(request: Request) {
               : null,
           daytrade_live_confirmation_bonus:
             mode === "daytrades"
-              ? "0-8 added: live RVOL pace + above/below session VWAP (covered subset only)"
+              ? "0-8 display metric (NOT added to candidate_score for swing horizon): live RVOL pace + above/below session VWAP (covered subset only)"
               : null,
         },
       },
