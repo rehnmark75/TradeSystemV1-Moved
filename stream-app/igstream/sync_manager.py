@@ -16,6 +16,8 @@ logger = logging.getLogger(__name__)
 # Constants
 STREAM_REFRESH_INTERVAL = 60         # How often to check stream status
 AUTH_REFRESH_INTERVAL = 55 * 60      # IG tokens expire hourly
+INITIAL_AUTH_MAX_RETRIES = 10        # Retries for initial auth on startup (DNS/network not ready)
+INITIAL_AUTH_RETRY_DELAY = 6         # Seconds between initial-auth retries (capped backoff)
 RECONNECT_BACKOFF = 60               # Minimum wait before reconnecting
 
 # ✅ Active streaming timeframes (matches chart_streamer.py configuration)
@@ -308,9 +310,25 @@ async def auth_refresher():
 async def start_all_streams():
     """Initialize and start all streams"""
     logger.info("🚀 Starting all forex streams...")
-    
-    # Initial auth
-    await refresh_auth()
+
+    # Initial auth — retry on transient failures (DNS/network not ready on
+    # full-stack restart). Without this, a single boot-order race kills startup
+    # ("Application startup failed. Exiting.") and streaming never resumes until
+    # a manual restart.
+    for attempt in range(1, INITIAL_AUTH_MAX_RETRIES + 1):
+        try:
+            await refresh_auth()
+            break
+        except Exception as e:
+            if attempt == INITIAL_AUTH_MAX_RETRIES:
+                logger.error(f"❌ Initial auth failed after {attempt} attempts: {e}")
+                raise
+            delay = min(INITIAL_AUTH_RETRY_DELAY * attempt, 30)
+            logger.warning(
+                f"⏳ Initial auth failed (attempt {attempt}/{INITIAL_AUTH_MAX_RETRIES}): {e} "
+                f"— retrying in {delay}s"
+            )
+            await asyncio.sleep(delay)
 
     # Start all streams
     for epic in EPICS:
