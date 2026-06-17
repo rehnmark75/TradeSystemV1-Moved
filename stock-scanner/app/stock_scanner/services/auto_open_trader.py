@@ -10,7 +10,7 @@ import asyncio
 import json
 import logging
 import os
-from datetime import datetime, time
+from datetime import date, datetime, time
 from typing import Any, Dict, List, Optional
 
 import aiohttp
@@ -23,9 +23,34 @@ logger = logging.getLogger("auto_open_trader")
 
 class AutoOpenTrader:
     ET = pytz.timezone("America/New_York")
+
+    # FOMC rate-decision (announcement) days, ET — the second day of each
+    # scheduled two-day FOMC meeting. The auto-trader only opens positions in the
+    # morning window (~9:45-10:15 ET), but the rate decision lands at 14:00 ET and
+    # positions are held multi-day, so a morning entry on a decision day is held
+    # straight into the announcement's volatility/spread blowout. We skip the whole
+    # day rather than a window around 14:00 (which the morning opener never reaches).
+    # Source: https://www.federalreserve.gov/monetarypolicy/fomccalendars.htm
+    # ⚠️ UPDATE ANNUALLY — the stale-schedule warning in _is_fomc_blackout() fires
+    # once per process when today is past the last known date.
+    FOMC_DECISION_DATES = frozenset({
+        date(2026, 1, 28),
+        date(2026, 3, 18),
+        date(2026, 4, 29),
+        date(2026, 6, 17),
+        date(2026, 7, 29),
+        date(2026, 9, 16),
+        date(2026, 10, 28),
+        date(2026, 12, 9),
+    })
+
     SETTING_DEFS = {
         "AUTO_TRADING_ENABLED": ("enabled", "bool", "true"),
         "AUTO_TRADING_DRY_RUN": ("dry_run", "bool", "false"),
+        # FOMC blackout: skip ALL new entries on a rate-decision day (capital
+        # preservation — avoids holding fresh day-trades into the 14:00 ET
+        # announcement). On by default; off switch: AUTO_TRADE_FOMC_BLACKOUT_ENABLED=false.
+        "AUTO_TRADE_FOMC_BLACKOUT_ENABLED": ("fomc_blackout_enabled", "bool", "true"),
         "MAX_ORDER_NOTIONAL_USD": ("max_notional", "float", "500"),
         "MAX_ACTIVE_STOCK_ORDERS": ("max_active_orders", "int", "5"),
         "MAX_ORDERS_PER_RUN": ("max_orders_per_run", "int", "5"),
@@ -90,6 +115,8 @@ class AutoOpenTrader:
         self.trading_ui_url = os.getenv("TRADING_UI_URL", "http://trading-ui:3000/trading").rstrip("/")
         self.robomarkets_api_key = os.getenv("ROBOMARKETS_API_KEY", "")
         self.robomarkets_account_id = os.getenv("ROBOMARKETS_ACCOUNT_ID", "")
+        self._fomc_last_known_date = max(self.FOMC_DECISION_DATES)
+        self._fomc_stale_warned = False
         self._apply_env_settings()
 
     def _apply_env_settings(self):
@@ -220,6 +247,15 @@ class AutoOpenTrader:
             result["stage"] = "market_closed_holiday"
             return result
 
+        if self.fomc_blackout_enabled and self._is_fomc_blackout(trade_date):
+            result["stage"] = "fomc_blackout"
+            logger.info(
+                "[AutoTrader] FOMC decision day %s — blackout active, no new entries placed",
+                trade_date,
+            )
+            await self._mark_run_status(run_id, "fomc_blackout")
+            return result
+
         minutes_after_open = self._minutes_after_open(now_et)
         if minutes_after_open is None or minutes_after_open < self.validate_delay_minutes:
             result["stage"] = "waiting_for_open_window"
@@ -302,6 +338,7 @@ class AutoOpenTrader:
     async def _get_or_create_run(self, trade_date) -> int:
         config = {
             "trading_ui_url": self.trading_ui_url,
+            "fomc_blackout_enabled": self.fomc_blackout_enabled,
             "max_notional": self.max_notional,
             "max_active_orders": self.max_active_orders,
             "max_orders_per_run": self.max_orders_per_run,
@@ -917,6 +954,25 @@ class AutoOpenTrader:
                 updated_at = NOW()
             WHERE id = $1
         """, run_id, status)
+
+    def _is_fomc_blackout(self, trade_date: date) -> bool:
+        """True if trade_date is a scheduled FOMC rate-decision day.
+
+        Schedule is hardcoded (FOMC_DECISION_DATES) — deterministic and dependency
+        free, the right trade-off for a live capital-preservation account. Warns
+        once per process if the schedule has gone stale so it never silently
+        expires (an empty/old list would leave the gate permanently open).
+        """
+        if trade_date in self.FOMC_DECISION_DATES:
+            return True
+        if not self._fomc_stale_warned and trade_date > self._fomc_last_known_date:
+            logger.warning(
+                "[AutoTrader] FOMC blackout schedule is stale (last known %s, today %s); "
+                "update FOMC_DECISION_DATES from the Fed calendar",
+                self._fomc_last_known_date, trade_date,
+            )
+            self._fomc_stale_warned = True
+        return False
 
     def _minutes_after_open(self, now_et: datetime) -> Optional[int]:
         if not is_trading_day(now_et):
