@@ -21,7 +21,14 @@ from dataclasses import dataclass, field
 from enum import Enum
 import pandas as pd
 
+from ..patterns.decline_base_climb import detect_pattern, LOOKBACK_DAYS as DBC_LOOKBACK
+
 logger = logging.getLogger(__name__)
+
+# Scanners for which the monitor-only decline->base->climb pattern flag is
+# computed and logged (dbc_pattern_present / dbc_pattern_score). Additive,
+# does NOT affect selection. Expand this set to monitor more scanners.
+DBC_MONITOR_SCANNERS = {"gap_and_go"}
 
 
 class SignalType(Enum):
@@ -451,6 +458,42 @@ class BaseScanner(ABC):
     # DATABASE OPERATIONS
     # =========================================================================
 
+    async def _compute_dbc_flag(self, ticker: str, ts) -> Tuple[Optional[bool], Optional[float]]:
+        """Monitor-only: compute the decline->base->climb pattern flag AS-OF the
+        signal date (no look-ahead). Returns (present, score) or (None, None).
+
+        Fully failure-isolated: any error degrades to (None, None) so a candle
+        miss or detector exception never blocks the real signal save. Uses daily
+        bars strictly before midnight of the signal's UTC date — matching the
+        signal_date generated column and the validation harness exactly."""
+        try:
+            base = str(ticker).split(".")[0]
+            # AS-OF boundary: midnight of the signal's UTC date (naive, to match
+            # the tz-naive stock_candles_synthesized.timestamp column).
+            asof = datetime(ts.year, ts.month, ts.day)
+            rows = await self.db.fetch(
+                """
+                SELECT close, high, low, COALESCE(volume, 0) AS volume
+                FROM stock_candles_synthesized
+                WHERE ticker = $1 AND timeframe = '1d' AND timestamp < $2
+                ORDER BY timestamp DESC
+                LIMIT $3
+                """,
+                base, asof, DBC_LOOKBACK,
+            )
+            if not rows or len(rows) < 20:
+                return None, None
+            # rows are DESC -> reverse to ascending for the detector
+            close = [float(r["close"]) for r in reversed(rows)]
+            high = [float(r["high"]) for r in reversed(rows)]
+            low = [float(r["low"]) for r in reversed(rows)]
+            volume = [float(r["volume"]) for r in reversed(rows)]
+            matched, score = detect_pattern(close, high, low, volume)
+            return bool(matched), (float(score) if matched else None)
+        except Exception as e:
+            logger.warning(f"DBC pattern flag failed for {ticker}: {e}")
+            return None, None
+
     async def save_signals(self, signals: List[SignalSetup]) -> int:
         """
         Save signals to database.
@@ -476,10 +519,12 @@ class BaseScanner(ABC):
                 composite_score, quality_tier,
                 trend_score, momentum_score, volume_score, pattern_score, confluence_score,
                 setup_description, confluence_factors, timeframe, market_regime,
-                suggested_position_size_pct, max_risk_per_trade_pct
+                suggested_position_size_pct, max_risk_per_trade_pct,
+                dbc_pattern_present, dbc_pattern_score
             ) VALUES (
                 $1, $2, $3, $4, $5, $6, $7, $8, $9, $10,
-                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23
+                $11, $12, $13, $14, $15, $16, $17, $18, $19, $20, $21, $22, $23,
+                $24, $25
             )
             ON CONFLICT (ticker, scanner_name, signal_date) DO UPDATE SET
                 -- Update if we get a higher quality signal on the same day
@@ -506,6 +551,15 @@ class BaseScanner(ABC):
         for signal in signals:
             try:
                 data = signal.to_db_dict()
+
+                # Monitor-only: log the decline->base->climb pattern flag for
+                # configured scanners. Failure-isolated -> never blocks the save.
+                dbc_present, dbc_score = None, None
+                if self.scanner_name in DBC_MONITOR_SCANNERS:
+                    dbc_present, dbc_score = await self._compute_dbc_flag(
+                        data['ticker'], data['signal_timestamp']
+                    )
+
                 result = await self.db.fetchval(
                     insert_query,
                     data['signal_timestamp'],
@@ -531,6 +585,8 @@ class BaseScanner(ABC):
                     data['market_regime'],
                     data['suggested_position_size_pct'],
                     data['max_risk_per_trade_pct'],
+                    dbc_present,
+                    dbc_score,
                 )
                 if result:
                     saved_count += 1
