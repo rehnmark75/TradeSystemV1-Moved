@@ -161,6 +161,15 @@ Signal Display Format:
         )
 
         parser.add_argument(
+            '--no-trailing',
+            action='store_true',
+            help='Disable all trailing/break-even/stage logic. Trades exit only on '
+                 'the fixed initial SL, the fixed TP, or timeout (pure fixed-bracket '
+                 'first-passage simulation). Spread/slippage still applied at entry; '
+                 'zero them with --override spread_pips=0 --override slippage_pips=0.'
+        )
+
+        parser.add_argument(
             '--scalp-offset',
             type=float,
             default=None,
@@ -1149,6 +1158,15 @@ Signal Display Format:
                 else:
                     config_override = atr_override
                 print("📊 ATR-Adaptive Trailing: ENABLED (distances scale with market volatility)")
+
+            # Handle --no-trailing mode (pure fixed-bracket simulation)
+            if getattr(args, 'no_trailing', False):
+                no_trail_override = {'disable_trailing': True}
+                if config_override:
+                    config_override.update(no_trail_override)
+                else:
+                    config_override = no_trail_override
+                print("🚫 Trailing DISABLED: fixed-bracket exits only (initial SL / TP / timeout)")
 
             # Validate date range parameters
             if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):

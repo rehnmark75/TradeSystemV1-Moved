@@ -337,6 +337,13 @@ class BacktestTrailingEngine:
         early_failure_min_mfe = float(cfg.get('early_failure_min_mfe_pips', 0) or 0)
         early_failure_stop = float(cfg.get('early_failure_stop_pips', 0) or 0)
 
+        # --no-trailing: pure fixed-bracket simulation. Push every stage trigger to
+        # infinity so the SL never advances — the trade can only exit on the fixed
+        # initial SL, the fixed TP, or timeout. Spread/slippage still applied at fill.
+        if _as_bool(self._config_override.get('disable_trailing', False)):
+            early_be_trig = be_trig = s1_trig = s2_trig = s3_trig = float('inf')
+            early_failure_enabled = False
+
         # State
         early_be_done = be_done = s1_done = s2_done = s3_active = False
         stage_reached = 0

@@ -220,6 +220,11 @@ def main():
                 processed_args.append(arg)
                 print(f"📊 ATR-Adaptive Trailing: ENABLED (distances scale with ATR)")
 
+            # Handle no-trailing mode (pure fixed-bracket simulation)
+            elif arg == "--no-trailing":
+                processed_args.append(arg)
+                print(f"🚫 Trailing DISABLED: fixed-bracket exits only (initial SL / TP / timeout)")
+
             # Handle scalp offset override
             elif arg == "--scalp-offset" and i + 1 < len(args):
                 processed_args.append(arg)
