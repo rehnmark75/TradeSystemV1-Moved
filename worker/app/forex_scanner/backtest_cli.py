@@ -170,6 +170,17 @@ Signal Display Format:
         )
 
         parser.add_argument(
+            '--live-parity',
+            action='store_true',
+            help='Run the backtest like the production scanner. Bundles the verified '
+                 'production knobs: 5m scan cadence (matches live scan_interval=300s), '
+                 'the full --pipeline (validator/LPF + live trailing), and turns the '
+                 'alert-dedup layer ON (the backtest hard-disables it by default), '
+                 'using a simulated-time signal-hash check that mirrors the live '
+                 'AlertDeduplicationManager. For apples-to-apples live-vs-backtest tests.'
+        )
+
+        parser.add_argument(
             '--scalp-offset',
             type=float,
             default=None,
@@ -1168,6 +1179,15 @@ Signal Display Format:
                     config_override = no_trail_override
                 print("🚫 Trailing DISABLED: fixed-bracket exits only (initial SL / TP / timeout)")
 
+            # Handle --live-parity (run like the production scanner: dedup ON)
+            if getattr(args, 'live_parity', False):
+                parity_override = {'live_parity': True}
+                if config_override:
+                    config_override.update(parity_override)
+                else:
+                    config_override = parity_override
+                print("🪞 LIVE-PARITY: alert-dedup ON (simulated-time signal-hash, mirrors live)")
+
             # Validate date range parameters
             if (args.start_date and not args.end_date) or (args.end_date and not args.start_date):
                 print("❌ Both --start-date and --end-date must be provided together")
@@ -2107,6 +2127,17 @@ Signal Display Format:
             return 0
 
         args = parser.parse_args()
+
+        # --live-parity: force the production-scanner knobs before dispatch.
+        # (config_override['live_parity'] is set later in execute_command and drives
+        # the simulated-time dedup inside BacktestScanner.)
+        if getattr(args, 'live_parity', False):
+            if getattr(args, 'timeframe', None) != '5m':
+                print(f"🪞 LIVE-PARITY: forcing --timeframe 5m (live scan_interval=300s)")
+                args.timeframe = '5m'
+            if not getattr(args, 'pipeline', False):
+                print(f"🪞 LIVE-PARITY: forcing --pipeline (validator + live trailing)")
+                args.pipeline = True
 
         # Execute the command
         success = self.execute_command(args)

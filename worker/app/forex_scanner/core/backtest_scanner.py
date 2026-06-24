@@ -252,6 +252,25 @@ class BacktestScanner:
             or smc_config_scalp_enabled
         )
 
+        # --live-parity: mirror the production scanner's alert-dedup, which the
+        # backtest hard-disables above (enable_deduplication=False). The live
+        # AlertDeduplicationManager is wall-clock based and unusable in replay, so
+        # we apply an equivalent signal-hash check keyed on *simulated* time.
+        self._live_parity = bool(self._config_override and self._config_override.get('live_parity'))
+        self._dedup_hash_seen = {}  # signal_hash -> last simulated timestamp
+        if self._live_parity:
+            from datetime import timedelta as _td
+            try:
+                try:
+                    from core.alert_deduplication import AlertCooldownConfig
+                except ImportError:
+                    from forex_scanner.core.alert_deduplication import AlertCooldownConfig
+                self._dedup_window = _td(minutes=AlertCooldownConfig().epic_signal_cooldown_minutes)
+            except Exception:
+                self._dedup_window = _td(minutes=5)
+            self.enable_deduplication = True
+            self.logger.info(f"🪞 LIVE-PARITY: signal-hash dedup ON (suppression window {self._dedup_window})")
+
         if BACKTEST_USE_LEGACY_SIMULATOR:
             self.logger.warning("⚠️ [LEGACY] BACKTEST_USE_LEGACY_SIMULATOR=1 — using old TrailingStopSimulator for A/B comparison")
             try:
@@ -1324,6 +1343,20 @@ class BacktestScanner:
                 signal['backtest_mode'] = True
                 signal['signal_timestamp'] = timestamp
 
+                # --live-parity: mirror the production alert-dedup (signal-hash) on
+                # simulated time — suppress an identical signal repeated within the
+                # window, exactly as the live AlertDeduplicationManager would.
+                if self._live_parity:
+                    sig_hash = self._live_parity_signal_hash(signal)
+                    last_seen = self._dedup_hash_seen.get(sig_hash)
+                    if last_seen is not None and (timestamp - last_seen) < self._dedup_window:
+                        self.logger.debug(
+                            f"🪞 LIVE-PARITY dedup: skip {signal.get('epic')} "
+                            f"{signal.get('signal_type')} @ {timestamp} (dup within window)"
+                        )
+                        continue
+                    self._dedup_hash_seen[sig_hash] = timestamp
+
                 # Add historical market intelligence if available
                 if formatted_intelligence:
                     signal['market_intelligence'] = formatted_intelligence
@@ -1357,6 +1390,32 @@ class BacktestScanner:
                 continue
 
         return processed_signals
+
+    def _live_parity_signal_hash(self, signal: Dict) -> str:
+        """Replicate AlertDeduplicationManager.generate_signal_hash (live) so the
+        backtest's --live-parity dedup keys on the same fields production does."""
+        import hashlib
+        import json as _json
+
+        def _r(v, n):
+            try:
+                return round(float(v), n)
+            except (TypeError, ValueError):
+                return None
+
+        hash_data = {
+            'epic': signal.get('epic', ''),
+            'signal_type': signal.get('signal_type', ''),
+            'strategy': signal.get('strategy', ''),
+            'price': _r(signal.get('price', 0) or 0, 5),
+            'confidence_score': _r(signal.get('confidence_score', 0) or 0, 4),
+            'timeframe': signal.get('timeframe', ''),
+            'ema_short': _r(signal.get('ema_short'), 5) if signal.get('ema_short') else None,
+            'ema_long': _r(signal.get('ema_long'), 5) if signal.get('ema_long') else None,
+            'macd_line': _r(signal.get('macd_line'), 6) if signal.get('macd_line') else None,
+        }
+        hash_string = _json.dumps(hash_data, sort_keys=True, separators=(',', ':'))
+        return hashlib.md5(hash_string.encode()).hexdigest()
 
     def _get_trailing_stop_simulator(self, epic: str, strategy: str = 'DEFAULT'):
         """

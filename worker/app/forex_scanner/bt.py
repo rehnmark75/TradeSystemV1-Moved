@@ -225,6 +225,11 @@ def main():
                 processed_args.append(arg)
                 print(f"🚫 Trailing DISABLED: fixed-bracket exits only (initial SL / TP / timeout)")
 
+            # Handle live-parity mode (run like the production scanner)
+            elif arg == "--live-parity":
+                processed_args.append(arg)
+                print(f"🪞 LIVE-PARITY: 5m cadence + pipeline + alert-dedup ON (mirrors production scanner)")
+
             # Handle scalp offset override
             elif arg == "--scalp-offset" and i + 1 < len(args):
                 processed_args.append(arg)
