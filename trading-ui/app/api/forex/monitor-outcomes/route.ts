@@ -245,6 +245,23 @@ export async function GET(request: Request) {
 
         const deadOnArrival = cell.mfe.filter((m) => m < 2).length;
 
+        // Directional-edge metrics — bracket-INDEPENDENT, so they can't be inflated
+        // by the reference TP:SL geometry (a 50% coin-flip on a 1.5:1 bracket prints
+        // PF ~1.5 with zero real edge). These are the primary promotion screen.
+        const avgMfe = avg(cell.mfe);
+        const avgMae = avg(cell.mae);
+        // Edge ratio: avg favourable excursion / avg adverse excursion. >1 = price
+        // runs further for us than against us before either side resolves.
+        const edge_ratio = avgMfe != null && avgMae != null && avgMae > 0 ? round(avgMfe / avgMae, 2) : null;
+        // Per-signal robustness check: share of signals whose MFE beat their MAE.
+        // Outlier-proof (one huge MFE can't carry it), unlike the ratio of averages.
+        // cell.mfe / cell.mae are pushed index-aligned in the grouping loop above.
+        let favCount = 0;
+        for (let i = 0; i < cell.mfe.length; i += 1) {
+          if (cell.mfe[i] > cell.mae[i]) favCount += 1;
+        }
+        const pct_mfe_favorable = n ? round((favCount / n) * 100, 0) : null;
+
         return {
           strategy: cell.strategy,
           epic: cell.epic,
@@ -259,8 +276,10 @@ export async function GET(request: Request) {
           // Scale-invariant edge: expectancy in units of risk (pips / SL pips), so
           // gold's large-pip cells rank fairly against tight FX cells.
           expectancy_r: headline.exp != null && refSl > 0 ? round(headline.exp / refSl, 3) : null,
-          avg_mfe: avg(cell.mfe),
-          avg_mae: avg(cell.mae),
+          edge_ratio,
+          pct_mfe_favorable,
+          avg_mfe: avgMfe,
+          avg_mae: avgMae,
           avg_early_mae: avg(cell.earlyMae),
           dead_on_arrival_pct: n ? round((deadOnArrival / n) * 100, 1) : null,
           median_mfe_losers: median(cell.loserMfe),
@@ -271,10 +290,11 @@ export async function GET(request: Request) {
           sweep: { sl_values: slAxis, tp_values: tpAxis, grid, best },
         };
       })
-      // Default order: R-multiple (scale-invariant) then PF; thin cells sink via a
-      // penalty so a n=3 PF-infinity cell doesn't top the board. The UI can re-sort.
+      // Default order: directional EDGE (avg MFE / avg MAE), bracket-independent so it
+      // ranks real entry edge rather than TP:SL geometry. Thin cells sink via a penalty
+      // so an n=3 ratio doesn't top the board. The UI can re-sort on other metrics.
       .sort((a, b) => {
-        const score = (c: typeof a) => (c.expectancy_r ?? -Infinity) - (c.thin ? 1000 : 0);
+        const score = (c: typeof a) => (c.edge_ratio ?? -Infinity) - (c.thin ? 1000 : 0);
         return score(b) - score(a);
       });
 

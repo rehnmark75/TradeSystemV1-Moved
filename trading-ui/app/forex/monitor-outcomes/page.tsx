@@ -22,6 +22,8 @@ type Candidate = {
   pf: number | null;
   expectancy: number | null;
   expectancy_r: number | null;
+  edge_ratio: number | null;
+  pct_mfe_favorable: number | null;
   avg_mfe: number | null;
   avg_mae: number | null;
   avg_early_mae: number | null;
@@ -85,18 +87,32 @@ const expBg = (v: number | null, maxAbs: number) => {
   return v >= 0 ? `rgba(34,197,94,${a})` : `rgba(239,68,68,${a})`;
 };
 
-type SortKey = "expectancy_r" | "expectancy" | "pf" | "wr" | "n" | "per_month";
+type SortKey =
+  | "edge_ratio"
+  | "pct_mfe_favorable"
+  | "expectancy_r"
+  | "expectancy"
+  | "pf"
+  | "wr"
+  | "n"
+  | "per_month";
 const SORT_OPTIONS: { key: SortKey; label: string }[] = [
+  { key: "edge_ratio", label: "Edge (MFE ÷ MAE) — primary" },
+  { key: "pct_mfe_favorable", label: "% Favourable (MFE > MAE)" },
   { key: "expectancy_r", label: "R-multiple (exp ÷ SL)" },
   { key: "expectancy", label: "Expectancy (pips)" },
-  { key: "pf", label: "Profit factor" },
-  { key: "wr", label: "Win rate" },
+  { key: "pf", label: "Profit factor (diagnostic)" },
+  { key: "wr", label: "Win rate (diagnostic)" },
   { key: "n", label: "Sample size (n)" },
   { key: "per_month", label: "Frequency (~/mo)" },
 ];
 // null PF means no losses (∞) — sort it to the top.
 const sortVal = (c: Candidate, key: SortKey) =>
   key === "pf" ? (c.pf == null ? Infinity : c.pf) : (c[key] ?? -Infinity);
+
+// Edge colour: clearly favourable (>1.2) green, leaking (<1.0) red, marginal amber.
+const edgeClass = (v: number | null) =>
+  v == null ? "" : v >= 1.2 ? "positive" : v < 1.0 ? "negative" : "";
 
 export default function ForexMonitorOutcomesPage() {
   const { environment } = useEnvironment();
@@ -105,7 +121,7 @@ export default function ForexMonitorOutcomesPage() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [strategyFilter, setStrategyFilter] = useState<string>("ALL");
-  const [sortKey, setSortKey] = useState<SortKey>("expectancy_r");
+  const [sortKey, setSortKey] = useState<SortKey>("edge_ratio");
   const [expanded, setExpanded] = useState<string | null>(null);
 
   const load = () => {
@@ -161,7 +177,7 @@ export default function ForexMonitorOutcomesPage() {
     );
     return (
       <tr>
-        <td colSpan={13} style={{ background: "rgba(255,255,255,0.02)", padding: "12px 16px" }}>
+        <td colSpan={14} style={{ background: "rgba(255,255,255,0.02)", padding: "12px 16px" }}>
           <div style={{ fontSize: 12, opacity: 0.8, marginBottom: 8 }}>
             <strong>SL/TP sweep</strong> — expectancy (pips/trade) re-derived from this cell&apos;s MFE/MAE
             distribution. Approximate (max-excursion timing, pessimistic ties); a screen, not a backtest.
@@ -238,11 +254,14 @@ export default function ForexMonitorOutcomesPage() {
         <div>
           <h1>Monitor Outcomes — Candidate Edge</h1>
           <p>
-            Per-(strategy · pair) directional edge for monitor-only signals, simulated against a fixed
-            reference SL/TP bracket over 24h. This is a <strong>raw-edge screen to pick demo forward-test
-            candidates — not a promotion verdict.</strong> Live execution uses progressive trailing/break-even
-            stops that materially change P&amp;L, so a strong cell here means &ldquo;worth forward-testing&rdquo;,
-            not &ldquo;ready to trade&rdquo;.
+            Per-(strategy · pair) directional edge for monitor-only signals. Ranked by{" "}
+            <strong>Edge = avg&nbsp;MFE ÷ avg&nbsp;MAE</strong> — how much further price runs in our favour than
+            against us over 24h. This is <strong>bracket-independent</strong>, so it measures the entry itself
+            rather than the SL/TP geometry (a coin-flip on a 1.5:1 bracket prints PF&nbsp;~1.5 with no real edge —
+            which is why PF/WR here are <strong>diagnostic only</strong>, not the ranking metric). Read it as a{" "}
+            <strong>screen to pick demo forward-test candidates — not a promotion verdict</strong>: live execution
+            uses progressive trailing/break-even stops that materially change P&amp;L. A strong cell means
+            &ldquo;worth forward-testing&rdquo;, not &ldquo;ready to trade&rdquo;.
           </p>
         </div>
         <div className="header-chip">Forex</div>
@@ -296,28 +315,31 @@ export default function ForexMonitorOutcomesPage() {
         ) : (
           <>
             <h3 style={{ marginTop: 8 }}>
-              Candidate scorecard — ranked by expectancy ({visibleCandidates.length} cells)
+              Candidate scorecard — ranked by edge ({visibleCandidates.length} cells)
             </h3>
             <p style={{ fontSize: 12, opacity: 0.7, marginTop: -4 }}>
-              Click a row for its SL/TP sweep. ⚠ = thin sample (n&lt;20), treat with caution. PF/WR/expectancy
-              are on the fixed reference bracket; <strong>R</strong> = expectancy in units of risk (exp ÷ SL),
-              scale-invariant so large-pip gold and tight FX compare fairly. %DoA = share of signals whose max
-              favourable move stayed under 2 pips (&ldquo;dead on arrival&rdquo; = an entry leak no stop can fix).
+              Click a row for its SL/TP sweep. ⚠ = thin sample (n&lt;20), treat with caution. <strong>Edge</strong> =
+              avg MFE ÷ avg MAE (<span className="positive">≥1.2 good</span>, <span className="negative">&lt;1.0 leaks</span>);{" "}
+              <strong>%Fav</strong> = share of signals whose MFE beat their MAE (outlier-proof cross-check of Edge).{" "}
+              <strong>%DoA</strong> = share whose max favourable move stayed under 2 pips (&ldquo;dead on arrival&rdquo;,
+              an entry leak no stop can fix). The greyed <strong>PF / WR / Exp</strong> block is on the fixed reference
+              bracket — <strong>diagnostic only</strong> (inflated by TP:SL geometry); do not rank on it.
             </p>
             <table className="forex-table">
               <thead>
                 <tr>
                   <th>Strategy · Pair</th>
                   <th>n</th>
-                  <th>PF</th>
-                  <th>WR</th>
-                  <th>Exp (pips)</th>
-                  <th>R (exp/SL)</th>
+                  <th title="avg MFE ÷ avg MAE — primary edge metric">Edge</th>
+                  <th title="% of signals whose MFE beat their MAE">%Fav</th>
                   <th>Avg MFE</th>
                   <th>Avg MAE</th>
+                  <th title="avg adverse move in the first 15 min — entry-timing quality">Early MAE</th>
                   <th>%DoA</th>
-                  <th>Med MFE (losers)</th>
                   <th>~/mo</th>
+                  <th style={{ opacity: 0.55 }} title="diagnostic only — fixed reference bracket">PF</th>
+                  <th style={{ opacity: 0.55 }} title="diagnostic only — fixed reference bracket">WR</th>
+                  <th style={{ opacity: 0.55 }} title="diagnostic only — fixed reference bracket">Exp</th>
                   <th>Best SL/TP</th>
                   <th>TP/SL/TO</th>
                 </tr>
@@ -325,7 +347,7 @@ export default function ForexMonitorOutcomesPage() {
               <tbody>
                 {visibleCandidates.length === 0 ? (
                   <tr>
-                    <td colSpan={13}>No decided monitor-only outcomes in this window.</td>
+                    <td colSpan={14}>No decided monitor-only outcomes in this window.</td>
                   </tr>
                 ) : (
                   visibleCandidates.map((c) => {
@@ -346,21 +368,29 @@ export default function ForexMonitorOutcomesPage() {
                             {c.thin ? "⚠ " : ""}
                             {c.n}
                           </td>
-                          <td className={pfPos ? "positive" : "negative"}>{pf(c.pf)}</td>
-                          <td>{fmt(c.wr, 0)}%</td>
-                          <td className={c.expectancy != null && c.expectancy < 0 ? "negative" : "positive"}>
-                            {signed(c.expectancy)}
+                          <td className={edgeClass(c.edge_ratio)} style={{ fontWeight: 700 }}>
+                            {c.edge_ratio == null ? "—" : `${c.edge_ratio.toFixed(2)}×`}
                           </td>
-                          <td className={c.expectancy_r != null && c.expectancy_r < 0 ? "negative" : "positive"}>
-                            {c.expectancy_r == null ? "—" : `${c.expectancy_r > 0 ? "+" : ""}${c.expectancy_r.toFixed(2)}R`}
+                          <td className={c.pct_mfe_favorable != null && c.pct_mfe_favorable < 50 ? "negative" : ""}>
+                            {c.pct_mfe_favorable == null ? "—" : `${c.pct_mfe_favorable.toFixed(0)}%`}
                           </td>
                           <td>{fmt(c.avg_mfe)}</td>
                           <td>{fmt(c.avg_mae)}</td>
+                          <td>{fmt(c.avg_early_mae)}</td>
                           <td className={c.dead_on_arrival_pct != null && c.dead_on_arrival_pct > 40 ? "negative" : ""}>
                             {c.dead_on_arrival_pct == null ? "—" : `${c.dead_on_arrival_pct.toFixed(0)}%`}
                           </td>
-                          <td>{fmt(c.median_mfe_losers)}</td>
                           <td>{c.per_month == null ? "—" : c.per_month.toFixed(0)}</td>
+                          <td className={pfPos ? "positive" : "negative"} style={{ opacity: 0.55 }}>
+                            {pf(c.pf)}
+                          </td>
+                          <td style={{ opacity: 0.55 }}>{fmt(c.wr, 0)}%</td>
+                          <td
+                            className={c.expectancy != null && c.expectancy < 0 ? "negative" : "positive"}
+                            style={{ opacity: 0.55 }}
+                          >
+                            {signed(c.expectancy)}
+                          </td>
                           <td>
                             {c.sweep.best.sl}/{c.sweep.best.tp}
                           </td>
