@@ -68,6 +68,13 @@ class AutoOpenTrader:
         # the pools diverge and wider names lack session_vwap (fail-closed VWAP
         # gate rejects them).
         "AUTO_TRADE_MAX_PER_SCANNER": ("max_per_scanner", "int", "10"),
+        # EMA50 freshness gate (sessions). The route keeps a candidate only if it
+        # is above its daily EMA50 AND crossed up within this many trading
+        # sessions (a fresh reclaim, not an established trend). MUST match
+        # INTRADAY_VWAP_EMA50_MAX_CROSS_AGE_SESSIONS so the VWAP worker computes
+        # session_vwap for the same gated pool (else fail-closed VWAP gate rejects
+        # names lacking it). 0 keeps only same-session crosses; raise to loosen.
+        "AUTO_TRADE_EMA50_MAX_CROSS_AGE_SESSIONS": ("ema50_max_cross_age_sessions", "int", "10"),
         "AUTO_TRADE_MAX_SPREAD_PCT": ("max_spread_pct", "float", "0.4"),
         "AUTO_TRADE_MIN_SCORE": ("min_score", "float", "65"),
         # RVOL floor + VWAP veto: live-intraday confirmation gates. The values
@@ -384,6 +391,7 @@ class AutoOpenTrader:
         url = (
             f"{self.trading_ui_url}/api/signals/top?limit={pool}&mode=daytrades"
             f"&maxPerScanner={max_per_scanner}"
+            f"&maxEmaCrossAgeSessions={int(self.ema50_max_cross_age_sessions)}"
         )
         timeout = aiohttp.ClientTimeout(total=30)
         async with aiohttp.ClientSession(timeout=timeout) as session:

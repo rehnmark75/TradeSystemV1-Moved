@@ -20,6 +20,11 @@ const EDGE_PF_FLOOR = 1.0; // drop a scanner below this PF...
 const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
 const EDGE_NO_LOSS_PF_CAP = 3.0; // score cap for closed wins with zero closed losses
 const DAYTRADE_SIGNAL_DATE_COUNT = 2; // include today's partial scan plus latest complete batch
+// Day-trade EMA50 freshness gate (default; overridable via ?maxEmaCrossAgeSessions).
+// A candidate is kept only if it is currently above its daily EMA50 AND the upward
+// cross happened within this many trading sessions (i.e. a fresh reclaim, not an
+// established multi-week trend). Computed from stock_screening_metrics history.
+const DEFAULT_MAX_EMA_CROSS_AGE_SESSIONS = 10;
 const ROBOMARKETS_API_URL = process.env.ROBOMARKETS_API_URL || "https://api.stockstrader.com/api/v1";
 const ROBOMARKETS_API_KEY = process.env.ROBOMARKETS_API_KEY || "";
 const ROBOMARKETS_ACCOUNT_ID = process.env.ROBOMARKETS_ACCOUNT_ID || "";
@@ -215,6 +220,12 @@ export async function GET(request: Request) {
     Math.max(1, Number(searchParams.get("maxPerScanner") || limit))
   );
   const queryLimit = mode === "daytrades" ? Math.min(50, Math.max(limit, limit * 3)) : limit;
+  // EMA50 freshness threshold (trading sessions). Daytrades-only gate; clamped 0-60.
+  const rawCrossAge = searchParams.get("maxEmaCrossAgeSessions");
+  const parsedCrossAge = rawCrossAge === null ? DEFAULT_MAX_EMA_CROSS_AGE_SESSIONS : Number(rawCrossAge);
+  const maxEmaCrossAgeSessions = Number.isFinite(parsedCrossAge)
+    ? Math.min(60, Math.max(0, Math.floor(parsedCrossAge)))
+    : DEFAULT_MAX_EMA_CROSS_AGE_SESSIONS;
 
   const client = await pool.connect();
   try {
@@ -397,6 +408,40 @@ export async function GET(request: Request) {
         }
         ORDER BY ticker, scanner_name, signal_timestamp DESC
       ),
+      -- EMA50 freshness: from the stored daily metrics history, compute whether
+      -- each pool ticker is currently above its EMA50 and how many trading
+      -- sessions ago the current above-EMA50 run began (the upward cross). Uses
+      -- the SAME stored ema_50 the scoring uses, so the snapshot and the cross
+      -- age can never disagree at the boundary. Restricted to pool tickers for
+      -- speed. A name continuously above EMA50 for its entire recorded history
+      -- has no in-history cross -> age NULL -> excluded as an established trend.
+      ema_hist AS (
+        SELECT
+          sm.ticker,
+          (sm.current_price > sm.ema_50) AS above,
+          ROW_NUMBER() OVER (PARTITION BY sm.ticker ORDER BY sm.calculation_date) AS rn
+        FROM stock_screening_metrics sm
+        WHERE sm.ema_50 IS NOT NULL
+          AND sm.ema_50::text <> 'NaN'
+          AND sm.current_price IS NOT NULL
+          AND sm.current_price::text <> 'NaN'
+          AND sm.ticker IN (SELECT DISTINCT ticker FROM latest_batch)
+      ),
+      ema_cross AS (
+        SELECT
+          ticker,
+          -- the latest row (max rn) is above its EMA50
+          (MAX(rn) FILTER (WHERE above) = MAX(rn)) AS above_ema50,
+          CASE
+            WHEN (MAX(rn) FILTER (WHERE above) = MAX(rn))
+                 AND MAX(rn) FILTER (WHERE NOT above) IS NOT NULL
+              -- sessions between the last below-EMA50 day and now = cross age
+              THEN MAX(rn) - MAX(rn) FILTER (WHERE NOT above) - 1
+            ELSE NULL
+          END AS ema50_cross_age_sessions
+        FROM ema_hist
+        GROUP BY ticker
+      ),
       enriched AS (
         SELECT
           s.id,
@@ -481,6 +526,8 @@ export async function GET(request: Request) {
           m.ema_20,
           m.ema_30,
           m.ema_50,
+          COALESCE(ec.above_ema50, FALSE) AS above_ema50,
+          ec.ema50_cross_age_sessions,
           m.ema_100,
           m.ema_200,
           m.sma_10,
@@ -551,6 +598,7 @@ export async function GET(request: Request) {
         LEFT JOIN stock_instruments i ON s.ticker = i.ticker
         LEFT JOIN stock_screening_metrics m ON s.ticker = m.ticker
           AND m.calculation_date = (SELECT MAX(calculation_date) FROM stock_screening_metrics)
+        LEFT JOIN ema_cross ec ON s.ticker = ec.ticker
         LEFT JOIN stock_deep_analysis d ON s.id = d.signal_id
           -- Age guard: the pool spans 2 signal dates, and daq_news_score feeds
           -- the candidate score (0.08 weight). Without this, stale DAQ rows
@@ -648,8 +696,19 @@ export async function GET(request: Request) {
         -- Closed-only edge floor: enforce when possible, but never blank the
         -- whole current list if today's batch only contains below-floor scanners.
         SELECT * FROM scored
-        WHERE NOT edge_floor_blocked
+        WHERE (
+          NOT edge_floor_blocked
           OR NOT EXISTS (SELECT 1 FROM scored WHERE NOT edge_floor_blocked)
+        )${
+          mode === "daytrades"
+            ? `
+          -- EMA50 freshness gate (hard filter, fail-closed): keep only names that
+          -- are above EMA50 AND crossed up within $7 trading sessions. NULL age
+          -- (no in-history cross / no metrics / below EMA50) is excluded.
+          AND above_ema50
+          AND ema50_cross_age_sessions BETWEEN 0 AND $7`
+            : ""
+        }
       ),
       capped AS (
         SELECT *,
@@ -682,14 +741,17 @@ export async function GET(request: Request) {
         )
       ORDER BY capped_by_scanner, candidate_score DESC, rs_percentile DESC NULLS LAST, ticker
     `;
-    const result = await client.query(query, [
+    const queryParams: Array<number> = [
       EDGE_WINDOW_DAYS,
       EDGE_PF_FLOOR,
       EDGE_MIN_CLOSED,
       maxPerScanner,
       queryLimit,
       EDGE_NO_LOSS_PF_CAP,
-    ]);
+    ];
+    // $7 — only referenced by the daytrades EMA50 freshness gate.
+    if (mode === "daytrades") queryParams.push(maxEmaCrossAgeSessions);
+    const result = await client.query(query, queryParams);
     const includedRows = result.rows.filter((row) => !row.capped_by_scanner);
     const cappedRows = result.rows.filter((row) => row.capped_by_scanner);
     let daytradeTradableCount: number | null = null;
@@ -906,6 +968,7 @@ export async function GET(request: Request) {
           edge_min_closed: EDGE_MIN_CLOSED,
           edge_no_loss_pf_cap: EDGE_NO_LOSS_PF_CAP,
           max_per_scanner: maxPerScanner,
+          max_ema_cross_age_sessions: mode === "daytrades" ? maxEmaCrossAgeSessions : null,
           daytrade_signal_date_count: mode === "daytrades" ? DAYTRADE_SIGNAL_DATE_COUNT : null,
           daytrade_pool_size: mode === "daytrades" ? includedRows.length : null,
           daytrade_capped_count: mode === "daytrades" ? cappedRows.length : null,

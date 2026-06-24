@@ -93,6 +93,11 @@ class IntradayVwapSync:
         # a subset of this worker's pool or names lack session_vwap and get
         # rejected by the fail-closed VWAP gate.
         "INTRADAY_VWAP_MAX_PER_SCANNER": ("max_per_scanner", "int", "10"),
+        # MUST match AUTO_TRADE_EMA50_MAX_CROSS_AGE_SESSIONS -- this worker must
+        # compute session_vwap for the same EMA50-freshness-gated pool the auto
+        # trader trades, or gated names lack session_vwap and the fail-closed VWAP
+        # gate rejects them.
+        "INTRADAY_VWAP_EMA50_MAX_CROSS_AGE_SESSIONS": ("ema50_max_cross_age_sessions", "int", "10"),
         "INTRADAY_VWAP_START_BEFORE_OPEN_MIN": ("start_before_open_min", "int", "5"),
         "INTRADAY_VWAP_STOP_AFTER_OPEN_MIN": ("stop_after_open_min", "int", "60"),
         "INTRADAY_VWAP_INTERVAL_SECONDS": ("interval_seconds", "int", "150"),
