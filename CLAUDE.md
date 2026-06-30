@@ -1,677 +1,168 @@
 # CLAUDE.md
 
-This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
+Guidance for Claude Code working in this repository. Deep detail lives in
+`claude-deep-reference.md` and the topic docs (see **Extended Documentation**);
+read those on demand instead of bloating this always-loaded file.
 
 ## 🐳 CRITICAL: Docker Environment
 
-**ALL commands must run inside Docker containers. Never run Python/SQL directly on host.**
+**ALL commands run inside Docker containers. Never run Python/SQL directly on host.**
 
 ```bash
-# Python scripts
-docker exec -it task-worker python /app/forex_scanner/script.py
-
-# Database queries
-docker exec postgres psql -U postgres -d forex -c "SELECT ..."    # Forex candles/trades
-docker exec postgres psql -U postgres -d stocks -c "SELECT ..."   # Stock candles
-
-# Interactive shell
-docker exec -it task-worker bash
+docker exec -it task-worker python /app/forex_scanner/script.py     # Python
+docker exec postgres psql -U postgres -d forex -c "SELECT ..."      # Forex candles/trades
+docker exec postgres psql -U postgres -d stocks -c "SELECT ..."     # Stock candles
+docker exec postgres psql -U postgres -d strategy_config -c "..."   # Strategy/trailing config
 ```
+**Path mapping**: `worker/app/` → `/app/` inside container.
 
-**Path mapping**: `worker/app/` → `/app/` inside container
-
-### Docker Compose Commands (CRITICAL)
-
-**ALWAYS use `docker compose` (v2) NOT `docker-compose` (v1):**
-
-```bash
-# ✅ CORRECT - Use docker compose (v2, space-separated)
-docker compose up -d stock-scanner
-docker compose restart task-worker
-docker compose logs -f fastapi-dev
-
-# ❌ WRONG - Never use docker-compose (v1, hyphenated)
-docker-compose up -d  # OLD VERSION - causes ContainerConfig errors
-```
-
-**Safe container operations (avoid disrupting other services):**
-
-```bash
-# Restart a single container (safest)
-docker restart stock-scanner
-
-# Recreate single container with new config (use --no-deps!)
-docker compose up -d --no-deps --force-recreate stock-scanner
-
-# View logs
-docker compose logs -f --tail 100 stock-scanner
-
-# Check container status
-docker ps --format "table {{.Names}}\t{{.Status}}"
-```
-
-**⚠️ NEVER run these without `--no-deps` flag:**
-```bash
-# DANGEROUS - may recreate dependent containers like postgres!
-docker compose up -d stock-scanner  # Without --no-deps
-
-# SAFE - only affects the specified container
-docker compose up -d --no-deps stock-scanner
-```
+**ALWAYS use `docker compose` (v2, space) NOT `docker-compose` (v1, hyphen — causes ContainerConfig errors).**
+- Safest restart: `docker restart <container>`
+- Recreate one container: `docker compose up -d --no-deps --force-recreate <container>`
+- **⚠️ NEVER `docker compose up -d <container>` without `--no-deps`** — may recreate dependents like postgres.
 
 ---
 
 ## 🚀 Entry Points
 
-### Live Scanner
 ```bash
-docker exec -it task-worker python /app/trade_scan.py              # Docker mode (default)
-docker exec -it task-worker python /app/trade_scan.py scan         # Single scan
-docker exec -it task-worker python /app/trade_scan.py live 120     # Live trading
-docker exec -it task-worker python /app/trade_scan.py status       # System status
-```
+# Live scanner (task-worker)
+docker exec -it task-worker python /app/trade_scan.py [scan|live 120|status]
 
-### Backtesting
-```bash
-docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7              # 7 days
+# Backtest (task-worker)
+docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7
 docker exec -it task-worker python /app/forex_scanner/bt.py GBPUSD 14 SMC --show-signals
 ```
-**Pair shortcuts**: EURUSD, GBPUSD, USDJPY, AUDUSD, USDCHF, USDCAD, NZDUSD, EURJPY, AUDJPY, GBPJPY
-**Strategy shortcuts**: SMC, SMC_SIMPLE (only active strategy after January 2026 cleanup)
+**Pairs**: EURUSD GBPUSD USDJPY AUDUSD USDCHF USDCAD NZDUSD EURJPY AUDJPY GBPJPY
+**Strategies**: SMC, SMC_SIMPLE (active), SMC_MOMENTUM, XAU_GOLD
 
-### CRITICAL: Backtest --timeframe vs Strategy Timeframes (Jan 2026 Discovery)
-
-The `--timeframe` parameter controls **scan interval** (how often backtest evaluates), NOT strategy timeframes:
-
-```bash
-# Scan every 5 minutes (recommended for live comparison)
-docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7 --scalp --timeframe 5m
-
-# Scan every 15 minutes (default - misses mid-candle signals)
-docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 7 --scalp --timeframe 15m
-```
-
-**Scalp mode strategy timeframes (regardless of --timeframe setting):**
-| Tier | Timeframe | Purpose |
-|------|-----------|---------|
-| TIER 1 HTF | 1h (default) | EMA bias/direction |
-| TIER 2 Trigger | 5m | Swing break detection |
-| TIER 3 Entry | 1m | Pullback entry |
-
-**Note:** GBPUSD and NZDUSD have per-pair overrides using 15m for HTF. Check `smc_simple_pair_overrides.scalp_htf_timeframe` for pair-specific settings.
-
-**Why this matters:** Live scanner runs every 2-5 minutes. Using `--timeframe 15m` only evaluates at 15m boundaries, missing signals that occur mid-candle. Jan 15 comparison showed:
-- `--timeframe 15m`: 20 signals
-- `--timeframe 5m`: 60 signals
-- Live (2 min interval): 56 signals
-
-**Recommendation:** Use `--timeframe 5m` for accurate live vs backtest comparison.
-
-### Backtest Parameter Isolation (January 2026)
-Test strategy parameters during backtesting WITHOUT affecting live trading:
-
-```bash
-# Phase 1: In-memory parameter overrides
-docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 14 \
-    --override fixed_stop_loss_pips=10 --override min_confidence=0.55
-
-# Phase 2: Persistent config snapshots
-docker exec -it task-worker python /app/forex_scanner/snapshot_cli.py create tight_sl \
-    --set fixed_stop_loss_pips=8 --set min_confidence=0.6 --desc "Tighter SL test"
-docker exec -it task-worker python /app/forex_scanner/snapshot_cli.py list
-docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 14 --snapshot tight_sl
-
-# Phase 3: Historical intelligence replay (enabled by default)
-docker exec -it task-worker python /app/forex_scanner/bt.py EURUSD 14 --no-historical-intelligence
-```
-
-See **Backtest Parameter Isolation System** section below for full documentation.
+⚠️ **`--timeframe` = scan interval, NOT strategy timeframe.** Use `--timeframe 5m` for live-parity comparison (default 15m misses mid-candle signals). Param isolation via `--override` / `--snapshot`. Full detail: `claude-deep-reference.md`.
 
 ---
 
 ## 🏗️ Core Architecture
 
-### Signal Flow (Live Trading)
 ```
-trade_scan.py (entry point)
-  └── TradingOrchestrator (core/trading/trading_orchestrator.py)
-        ├── IntelligentForexScanner (core/scanner.py) - signal detection + dedup
-        │     └── SignalDetector (core/signal_detector.py) - delegates to strategies
-        │           └── StrategyRegistry → SMCSimpleStrategy (only active)
-        ├── DataFetcher (core/data_fetcher.py) - candles + indicators
-        ├── TradeValidator, RiskManager, OrderManager
-        ├── IntegrationManager - Claude AI analysis
-        └── AlertHistoryManager (alerts/alert_history.py) - database
+trade_scan.py → TradingOrchestrator (core/trading/trading_orchestrator.py)
+  ├── IntelligentForexScanner (core/scanner.py) — detection + dedup
+  │     └── SignalDetector (core/signal_detector.py) → StrategyRegistry → strategies
+  ├── DataFetcher (core/data_fetcher.py) — candles + indicators
+  ├── TradeValidator, RiskManager, OrderManager
+  ├── IntegrationManager — Claude AI analysis
+  └── AlertHistoryManager (alerts/alert_history.py) — database
 ```
+Candle flow: IG Lightstreamer → `ig_candles` (5m base) → DataFetcher resamples 15m/1h/4h + indicators → strategy. Long-lookback backtests use `ig_candles_backtest` (Dukascopy). See `claude-deep-reference.md`.
 
-**Note:** After January 2026 cleanup, legacy strategies (EMA, MACD, etc.) are archived in `forex_scanner/archive/disabled_strategies/`. Active strategies: SMC Simple and SMC Momentum (Gate 1 validated May 3 2026).
+### Key Files
 
-### Key Files Quick Reference
-
-| Purpose | File | Container |
+| Purpose | File (under `worker/app/` unless noted) | Container |
 |---------|------|-----------|
-| **Live scanner entry** | `worker/app/trade_scan.py` | task-worker |
-| **Backtest entry** | `worker/app/forex_scanner/bt.py` | task-worker |
-| **Infrastructure config** | `worker/app/forex_scanner/config.py` | task-worker |
-| **SMC Config Service** | `worker/app/forex_scanner/services/smc_simple_config_service.py` | task-worker |
-| **Strategy Registry** | `worker/app/forex_scanner/core/strategies/strategy_registry.py` | task-worker |
-| **Orchestrator** | `worker/app/forex_scanner/core/trading/trading_orchestrator.py` | task-worker |
-| **Scanner** | `worker/app/forex_scanner/core/scanner.py` | task-worker |
-| **Signal detector** | `worker/app/forex_scanner/core/signal_detector.py` | task-worker |
-| **SMC Simple Strategy** | `worker/app/forex_scanner/core/strategies/smc_simple_strategy.py` | task-worker |
-| **Strategy templates** | `worker/app/forex_scanner/core/strategies/templates/` | task-worker |
-| **Adding new strategies** | `worker/app/forex_scanner/docs/adding_new_strategy.md` | task-worker |
-| **Order executor** | `worker/app/forex_scanner/alerts/order_executor.py` | task-worker |
-| **TRAILING STOPS (LIVE)** | `trailing_pair_config` table (in `strategy_config` DB) via `dev-app/services/trailing_config_service.py` | **fastapi-dev** |
-| **Trailing stops (backtest)** | `worker/app/forex_scanner/config_trailing_stops.py` | task-worker |
-| **Trade monitoring** | `dev-app/trailing_class.py` | fastapi-dev |
+| Live scanner entry | `trade_scan.py` | task-worker |
+| Backtest entry | `forex_scanner/bt.py` | task-worker |
+| Infrastructure config | `forex_scanner/config.py` | task-worker |
+| SMC Config Service | `forex_scanner/services/smc_simple_config_service.py` | task-worker |
+| Strategy Registry | `forex_scanner/core/strategies/strategy_registry.py` | task-worker |
+| Orchestrator | `forex_scanner/core/trading/trading_orchestrator.py` | task-worker |
+| Scanner / Signal detector | `forex_scanner/core/scanner.py` / `core/signal_detector.py` | task-worker |
+| SMC Simple Strategy | `forex_scanner/core/strategies/smc_simple_strategy.py` | task-worker |
+| Strategy templates / guide | `forex_scanner/core/strategies/templates/` · `docs/adding_new_strategy.md` | task-worker |
+| Order executor | `forex_scanner/alerts/order_executor.py` | task-worker |
+| **Trailing stops (LIVE)** | `trailing_pair_config` table (`strategy_config` DB) via `dev-app/services/trailing_config_service.py` | **fastapi-dev** |
+| Trailing stops (backtest) | `forex_scanner/config_trailing_stops.py` | task-worker |
+| Trade monitoring | `dev-app/trailing_class.py` | fastapi-dev |
 
-### Strategy System (January 2026 Cleanup)
-
-**Active Strategies:**
+### Active Strategies
 | Strategy | File | Instrument | Enable |
 |----------|------|------------|--------|
 | SMC Simple | `smc_simple_strategy.py` | FX majors/crosses | `SMC_SIMPLE_STRATEGY = True` (default) |
-| SMC Momentum | `smc_momentum_strategy.py` | FX majors/crosses | `smc_momentum_pair_overrides.is_enabled = true` |
-| XAU Gold | `xau_gold_strategy.py` | Gold (`CS.D.CFEGOLD.CEE.IP`) | `xau_gold_pair_overrides.is_enabled = true` |
+| SMC Momentum | `smc_momentum_strategy.py` | FX majors/crosses | `smc_momentum_pair_overrides.is_enabled` |
+| XAU Gold | `xau_gold_strategy.py` | Gold (`CS.D.CFEGOLD.CEE.IP`) | `xau_gold_pair_overrides.is_enabled` |
 
-**Adding New Strategies:**
-1. Copy template from `core/strategies/templates/strategy_template.py`
-2. Implement strategy logic following `StrategyInterface`
-3. Create database migration using `migrations/templates/strategy_config_template.sql`
-4. Enable in database or config.py
-5. See `docs/adding_new_strategy.md` for detailed guide
+Legacy strategies (EMA, MACD, etc.) archived in `forex_scanner/archive/disabled_strategies/`.
+**Adding a strategy:** copy `templates/strategy_template.py`, follow `StrategyInterface`, add a migration from `migrations/templates/strategy_config_template.sql`, enable in DB. Guide: `docs/adding_new_strategy.md`.
+
+Strategy/instrument deep detail (XAU Gold 3-tier logic, regime/session filters, scalp trailing): **`claude-deep-reference.md`**.
 
 ---
 
-## 📊 XAU Gold Strategy (XAU_GOLD) — Apr 2026
+## 🗄️ Database-Driven Configuration
 
-Gold-specific 3-tier SMC strategy for `CS.D.CFEGOLD.CEE.IP`. Runs alongside SMC_SIMPLE (FX pairs keep going to SMC_SIMPLE; gold is routed automatically via `_is_gold_epic()` in `signal_detector.py`).
+**Source of Truth for SMC Simple config is the `strategy_config` database — NOT config files.**
 
-### Architecture
+⛔ **NEVER read `configdata/strategies/config_smc_simple.py` for current values — it is COMPLETELY DEPRECATED and contains STALE/WRONG data** (e.g. `ENABLED_PAIRS`). Always query the DB or the trading-ui Settings page.
 
-**3-Tier Signal Logic:**
-| Tier | Timeframe | Role |
-|------|-----------|------|
-| TIER 1 HTF | 4H | EMA(50/200) bias + structure (HH/HL vs LH/LL) |
-| TIER 2 Trigger | 1H | BOS / CHOCH + MACD confirmation |
-| TIER 3 Entry | 15m | Pullback to OB / FVG / 50% fib |
-
-Signal fires only when all 3 tiers align. Scanner evaluates every 5 min.
-
-**Regime Filter:**
-- `TRENDING` (ADX > 25, ATR pct > 40): trend-follow entries — primary edge
-- `RANGING` (ADX < 20): signals blocked (gold ranges are whippy)
-- `EXPANSION` (ATR pct > 80): signals blocked (news-driven spikes, wide spreads)
-
-**Session Filter (UTC):**
-- London 07-10 + NY 13-20: primary windows
-- Asian 23-06: continuations only
-- Rollover 21-22: blocked
-
-### Key Files
-| File | Purpose |
-|------|---------|
-| `worker/app/forex_scanner/core/strategies/xau_gold_strategy.py` | Strategy implementation |
-| `worker/app/forex_scanner/services/xau_gold_config_service.py` | DB-backed config (5-min TTL cache) |
-| `worker/app/forex_scanner/migrations/create_xau_gold_config.sql` | DB schema |
-
-### Configuration (in `strategy_config` database)
 ```bash
-# Check current state
-docker exec postgres psql -U postgres -d strategy_config -c "SELECT epic, is_enabled, is_traded, monitor_only FROM xau_gold_pair_overrides;"
-
-# Check global config
-docker exec postgres psql -U postgres -d strategy_config -c "SELECT * FROM xau_gold_global_config WHERE is_active = true;"
-
-# Enable/disable trading
-UPDATE xau_gold_pair_overrides SET monitor_only = false, is_traded = true WHERE epic = 'CS.D.CFEGOLD.CEE.IP';
-UPDATE xau_gold_pair_overrides SET monitor_only = true WHERE epic = 'CS.D.CFEGOLD.CEE.IP';
-```
-
-### Instrument Notes
-- **Pip size**: 0.1 (1 point = $0.1 price movement). `get_point_value()` returns `0.1` for CFEGOLD.
-- **Order size**: 0.1 lots (configured in `dev-app/config.py` → `EPIC_ORDER_SIZES`)
-- **Worker epic map**: `CS.D.CFEGOLD.CEE.IP` → `CFEGOLD.1.CEE` → full epic in dev-app
-- **Min deal size**: 0.1 (confirmed via IG demo API, status `TRADEABLE`)
-
-### Trailing Stops (Gold-Specific)
-Values in `strategy_config.trailing_pair_config` — all figures are pips (1 pip = $0.1):
-
-| Stage | Trigger | Action |
-|-------|---------|--------|
-| Break-even | +30 pips | Move SL to entry |
-| Stage 1 | +50 pips | Lock +25 pips |
-| Stage 2 | +80 pips | Lock +50 pips |
-| Stage 3 | +110 pips | ATR trail (1.5×), min 30 pip distance |
-
-### Backtest
-```bash
-docker exec -it task-worker python /app/forex_scanner/bt.py CS.D.CFEGOLD.CEE.IP 90 XAU_GOLD --timeframe 5m --show-signals
-```
-75-day baseline (Apr 2026): 164 signals, PF 15.43 (avg win 160 pips, avg loss 20 pips).
-Note: High PF reflects fixed SL/TP defaults (80/160 pips); expect lower with tighter ATR-based stops.
-
-### Claude Vision Analysis
-`XAU_GOLD` is listed in `scanner_global_config.claude_vision_strategies`. Chart timeframes `["4h", "1h", "15m"]` align with the 3 strategy tiers.
-
----
-
-**Archived Strategies** (in `forex_scanner/archive/disabled_strategies/`):
-- EMA, MACD, SMC Structure, Bollinger+Supertrend, Scalping
-- Momentum, KAMA, Zero Lag, Ichimoku, Mean Reversion
-- Volume Profile, Silver Bullet, etc. (16 total)
-
----
-
-## 📊 Candle Data Flow
-
-```
-IG Markets API (Lightstreamer) → ig_candles table (5m base)
-                                       ↓
-                               DataFetcher resamples to 15m/1h/4h
-                                       ↓
-                               Adds technical indicators (EMA, MACD, RSI, etc.)
-                                       ↓
-                               Strategy analyzes enhanced DataFrame
-```
-
-**Database tables**: `ig_candles`, `preferred_forex_prices`
-**Resampling**: 5m → 15m (3 candles), 5m → 1h (12 candles), 5m → 4h (48 candles)
-
-### Historical Backfill: `ig_candles_backtest` (Dukascopy, excluded from backups)
-
-For multi-year backtests we use **Dukascopy Bank's** public data feed to
-populate `ig_candles_backtest` with 1m bars from 2020 onward, then
-self-resample within the same table to 5m/15m/1h/4h. Dukascopy ≠ IG
-pricing (small spread delta on FX, meaningful delta on metals — gold
-lands as `CS.D.CFEGOLD.DUKAS.IP` to avoid polluting the live IG series).
-
-**Key architectural choice**: `ig_candles_backtest` is **excluded from
-Azure backups** (`--exclude-table-data=public.ig_candles_backtest` in
-`scripts/enhanced_backup.sh` + `scripts/azure_backup.sh`). Schema is
-still dumped so a restore recreates the empty table + indexes; only the
-data is skipped. Saves ~8-10 GB per backup generation.
-
-**Restore procedure after a DR event:**
-```bash
-# 1. Restore forex DB from backup (schema only for ig_candles_backtest)
-# 2. Re-populate ig_candles_backtest from Dukascopy:
-python3 -m venv ~/.venvs/dukas
-~/.venvs/dukas/bin/pip install dukascopy-python pandas
-~/.venvs/dukas/bin/python scripts/dukascopy_download.py \
-    --start 2020-01-01 --end 2025-09-17 --output-dir /tmp/dukas/
-./scripts/dukascopy_push_local.sh /tmp/dukas/
-```
-Expected runtime: ~3-5 hours download + ~15 min load/resample.
-See `scripts/dukascopy_download.py --list-epics` for the epic mapping.
-
----
-
-## ⚡ Scalp Mode Trailing System (Jan 2026)
-
-**Source of truth**: `trailing_pair_config` DB rows where `is_scalp=true` (in `strategy_config` DB, read via `dev-app/services/trailing_config_service.py`). The `SCALP_TRAILING_CONFIGS` dict in `dev-app/config.py` is **legacy/seed-only — the live runtime no longer reads it** (DB-backed since Apr 2026).
-
-### Background: VSL System Replacement
-
-The Virtual Stop Loss (VSL) system was **deprecated in January 2026** after analysis revealed:
-- **67% premature stops** (5-6 pips too tight, $2,506 loss over 2 days)
-- **Early profit locks** (83% locked at BE, only 46% profit capture)
-- **Optimal stops: 12-20 pips** (ABOVE IG's 10-pip minimum, making VSL unnecessary)
-
-### New Architecture
-
-Scalp trades now use **IG native stops** with progressive trailing, differentiated by the `is_scalp_trade` flag.
-
-**Key Files:**
-- `trailing_pair_config` DB table (`is_scalp=true` rows) - scalp stops (12-20 pips, data-backed). The `SCALP_TRAILING_CONFIGS` dict in `dev-app/config.py` is legacy/seed-only.
-- `dev-app/services/trailing_config_service.py` - loads trailing rows from the DB (5-min cache)
-- `dev-app/enhanced_trade_processor.py` - Dynamic config selection via `get_config_for_trade()`
-- `dev-app/config_virtual_stop.py` - VSL disabled (`VIRTUAL_STOP_LOSS_ENABLED = False`)
-
-### Scalp Trailing Configuration
-
-**Per-Pair Optimal Stops (based on 2-day analysis):**
-
-| Pair | Initial Stop | BE Trigger | Stage1 | Stage2 | Partial Close | Success Rate |
-|------|-------------|-----------|---------|---------|---------------|--------------|
-| **USDCAD** | 12 pips | +6 pips | +10 → lock +5 | +12 → lock +8 | 50% @ +10 | **100%** |
-| **Majors** | 15 pips | +8 pips | +12 → lock +6 | +15 → lock +10 | 50% @ +12 | 67% |
-| **JPY Pairs** | 20 pips | +10 pips | +15 → lock +8 | +20 → lock +12 | 50% @ +15 | 50% |
-
-**Progressive Stages:**
-1. **Early BE** (+6-10 pips): Move to BE, lock +1-1.5 pips
-2. **Stage 1** (+10-15 pips): Lock +5-8 pips profit
-3. **Stage 2** (+12-20 pips): Lock +8-12 pips profit
-4. **Stage 3** (+15-25 pips): ATR-based trailing (1.5x)
-
-### How It Works
-
-**1. Trade Creation (orders_router.py):**
-```python
-# Scalp flag set based on is_scalp_trade or tight SL (≤8 pips)
-is_scalp = body.is_scalp_trade or (sl_limit and sl_limit <= 8)
-trade_log = TradeLog(..., is_scalp_trade=is_scalp)
-```
-
-**2. Dynamic Config Selection (enhanced_trade_processor.py):**
-```python
-def get_config_for_trade(self, trade: TradeLog) -> TrailingConfig:
-    """Load scalp or regular config based on is_scalp_trade flag."""
-    is_scalp = getattr(trade, 'is_scalp_trade', False)
-    pair_config = get_trailing_config_for_epic(trade.symbol, is_scalp_trade=is_scalp)
-    # Reads the DB trailing_pair_config row for (config_set, epic, is_scalp, strategy)
-```
-
-**3. Processing (trade_monitor.py → enhanced_trade_processor.py):**
-- Config loaded per-trade before processing
-- Trailing manager updated with correct config
-- Progressive trailing applied based on scalp-specific stages
-
-### Verification
-
-Check logs for scalp trades:
-```bash
-docker logs -f fastapi-dev | grep -E "(⚡|SCALP CONFIG|is_scalp_trade)"
-```
-
-Expected output:
-```
-⚡ Scalp trade: is_scalp_trade=True (using scalp trailing configs)
-⚡ [SCALP CONFIG] Trade 1971: Loading scalp-specific trailing config
-```
-
-### Benefits vs VSL
-
-| Aspect | Old VSL | New Scalp Trailing |
-|--------|---------|-------------------|
-| Stop Distance | 5-6 pips | 12-20 pips (data-backed) |
-| Management | Manual close (streaming) | IG native stops |
-| Reliability | Streaming can fail | IG manages stops |
-| Complexity | High (sync, spread adjustments) | Low (config-driven) |
-| Profit Capture | 46% (BE locks) | 60-70% (progressive stages) |
-
----
-
-## 📋 Extended Documentation
-
-For detailed information, see these docs (read with Read tool when needed):
-
-| Topic | File |
-|-------|------|
-| Commands & CLI | `claude-commands.md` |
-| Full Architecture | `claude-architecture.md` |
-| Strategy Development | `claude-strategies.md` |
-| Parameter Optimization | `claude-optimization.md` |
-| Market Intelligence | `claude-intelligence.md` |
-| Trailing Stop System | `claude-trailing-system.md` |
-| ~~Virtual Stop Loss (Scalping)~~ | ~~`claude-vsl-system.md`~~ **DEPRECATED (Jan 2026): Replaced with scalp-specific trailing configs** |
-| Development Best Practices | `claude-development.md` |
-| Configuration System | `claude-configuration.md` |
-
----
-
-## ⚠️ Important Notes
-
-- **Docker Required**: All forex scanner commands must be run inside Docker containers
-- **Database-Driven**: The system uses dynamic, optimized parameters from PostgreSQL
-- **Modular Design**: New strategies follow lightweight configuration patterns
-- **Real-time Intelligence**: Market analysis and trade context evaluation available
-
----
-
-## 🗄️ Database-Driven Configuration (SMC Simple Strategy)
-
-**Source of Truth**: `strategy_config` database (NOT config files!)
-
-The SMC Simple strategy reads ALL configuration from the database, including per-pair overrides.
-
-### ⛔ NEVER READ `configdata/strategies/config_smc_simple.py` FOR CURRENT VALUES
-
-**This file is COMPLETELY DEPRECATED.** Values like `ENABLED_PAIRS` in that file are **STALE and WRONG**.
-
-To check actual configuration:
-```bash
-# Check enabled pairs (ACTUAL source of truth)
+# Enabled pairs (actual source of truth)
 docker exec postgres psql -U postgres -d strategy_config -c "SELECT epic, is_enabled FROM smc_simple_pair_overrides WHERE is_enabled = TRUE;"
-
-# Or use Streamlit UI: Scanner Config → SMC Config tab
 ```
+Per-pair settings: `fixed_stop_loss_pips`, `fixed_take_profit_pips`, `min_confidence`, `max_confidence`, `sl_buffer_pips`, `macd_filter_enabled`. Load via `get_smc_simple_config()`. Full tables, update examples, migrations: `claude-deep-reference.md`.
 
-### Database Tables (in `strategy_config` database):
-| Table | Purpose |
-|-------|---------|
-| `smc_simple_global_config` | Global strategy parameters (~80 settings) |
-| `smc_simple_pair_overrides` | Per-pair parameter overrides (SL/TP, confidence, etc.) |
-| `smc_simple_config_audit` | Change history for auditing |
-| `smc_simple_parameter_metadata` | UI metadata for parameter display |
-
-### Key Per-Pair Settings:
-- `fixed_stop_loss_pips` - Per-pair stop loss override
-- `fixed_take_profit_pips` - Per-pair take profit override
-- `min_confidence` - Per-pair minimum confidence threshold
-- `max_confidence` - Per-pair maximum confidence cap
-- `sl_buffer_pips` - Per-pair SL buffer
-- `macd_filter_enabled` - Per-pair MACD filter toggle
-
-### Config Service:
-```python
-from forex_scanner.services.smc_simple_config_service import get_smc_simple_config
-
-config = get_smc_simple_config()  # Loads from database with caching
-sl = config.get_pair_fixed_stop_loss('CS.D.EURUSD.CEEM.IP')  # Per-pair or global fallback
-tp = config.get_pair_fixed_take_profit('CS.D.EURUSD.CEEM.IP')
-```
-
-### Updating Configuration:
-```bash
-# Set global SL/TP defaults
-docker exec postgres psql -U postgres -d strategy_config -c "
-UPDATE smc_simple_global_config
-SET fixed_stop_loss_pips = 9, fixed_take_profit_pips = 15
-WHERE is_active = TRUE;"
-
-# Set per-pair override
-docker exec postgres psql -U postgres -d strategy_config -c "
-UPDATE smc_simple_pair_overrides
-SET fixed_stop_loss_pips = 12, fixed_take_profit_pips = 20
-WHERE epic = 'CS.D.USDJPY.MINI.IP';"
-
-# View current per-pair settings
-docker exec postgres psql -U postgres -d strategy_config -c "
-SELECT epic, fixed_stop_loss_pips, fixed_take_profit_pips, min_confidence
-FROM smc_simple_pair_overrides ORDER BY epic;"
-```
-
-### Migrations:
-Located in `worker/app/forex_scanner/migrations/`:
-- `create_strategy_config_db.sql` - Initial schema
-- `add_fixed_sl_tp_columns.sql` - Per-pair SL/TP support
-- `add_max_confidence_to_pair_overrides.sql` - Confidence cap
-
-**⛔ NEVER** read or trust values from `configdata/strategies/config_smc_simple.py` - this file is **COMPLETELY DEPRECATED** and contains **STALE DATA**. Always query the database or Streamlit UI for actual configuration!
-
----
-
-## ⚠️ Scanner Config Service (CRITICAL)
-
-**File**: `worker/app/forex_scanner/services/scanner_config_service.py`
-
-The `ScannerConfigService` loads scanner settings from the `scanner_global_config` table.
-
-### IMPORTANT: Adding New Database Fields
-
-When adding new fields to `scanner_global_config` table, you MUST also add them to the `direct_fields` list in `_build_config_from_row()` method (~line 565), otherwise:
-- The field will NOT be loaded from the database
-- The dataclass default value will be used instead
-- **This caused a major bug in Jan 2026** where `data_batch_size=10000` (default) was used instead of the database value `25000`, causing "Insufficient 4h data" errors
-
-### Checklist for New Scanner Config Fields:
-1. ✅ Add column to `scanner_global_config` table
-2. ✅ Add field to `ScannerConfig` dataclass (with default)
-3. ✅ **Add field name to `direct_fields` list** (easy to forget!)
-4. ✅ If integer, add to `int_fields` set
-5. ✅ If float, add to `float_fields` set
-6. ✅ Restart container: `docker restart task-worker` (NOT `docker compose up`)
-
-### Key Performance Fields (in `scanner_global_config`):
-| Field | Purpose | Default |
-|-------|---------|---------|
-| `data_batch_size` | Max rows fetched for 1m synthesis | 25000 |
-| `reduced_lookback_hours` | Enable lookback reduction | true |
-| `lookback_reduction_factor` | Reduction multiplier | 0.7 |
-| `use_1m_base_synthesis` | Use 1m candles for resampling | true |
-
-**Note**: For 4H data with 1m synthesis, need ~14,400+ 1m candles (60 bars × 240). Set `data_batch_size >= 25000` to account for weekend gaps.
+### ⚠️ Scanner Config Service gotcha
+When adding a field to `scanner_global_config`, you MUST add the field name to the `direct_fields` list in `scanner_config_service.py::_build_config_from_row()` — else the DB value is silently ignored and the dataclass default is used (caused the Jan 2026 `data_batch_size` "Insufficient 4h data" bug). Full checklist: `claude-deep-reference.md`.
 
 ---
 
 ## 🚨 CRITICAL: Container & Config Ownership
 
-**NEVER confuse these containers - they have DIFFERENT config files!**
+**NEVER confuse these containers — they own DIFFERENT config files:**
 
-| Container | Purpose | Config Location | Owns |
-|-----------|---------|-----------------|------|
-| **fastapi-dev** | Live trade execution, trailing stops, breakeven | `dev-app/config.py` (flags/feature-switches) + `trailing_pair_config` DB (trailing values) | **Live execution; trailing VALUES live in the `strategy_config` DB** |
-| **task-worker** | Strategy scanning, backtesting, signal generation | `worker/app/forex_scanner/config.py` | Strategies, backtesting |
-| **streamlit** | Analytics dashboard, breakeven optimizer | Reads from fastapi-dev via mount | Display only |
+| Container | Purpose | Config |
+|-----------|---------|--------|
+| **fastapi-dev** | Live execution, trailing stops, breakeven | `dev-app/config.py` (flags) + `trailing_pair_config` DB (trailing VALUES) |
+| **task-worker** | Strategy scanning, backtesting, signal generation | `worker/app/forex_scanner/config.py` |
+| **streamlit** | Analytics dashboard (display only) | reads from fastapi-dev via mount |
 
-### Trailing Stop Configuration
+**Trailing stops (source of truth, DB-backed since Apr 2026)**: `trailing_pair_config` table in `strategy_config` DB. The `dev-app/config.py` `PAIR_TRAILING_CONFIGS`/`SCALP_TRAILING_CONFIGS` dicts are **legacy/seed only — the live runtime no longer reads them.** **DO NOT** edit `worker/app/forex_scanner/config_trailing_stops.py` for live changes (backtest only). Rows scoped by `config_set`+`is_scalp`+`strategy`+`epic`; update the DB row then `docker restart fastapi-dev`. Full columns & examples: `claude-deep-reference.md`.
 
-**Source of Truth (DB-backed since Apr 2026)**: the `trailing_pair_config` table in the `strategy_config` DB.
-The `dev-app/config.py` `PAIR_TRAILING_CONFIGS` / `SCALP_TRAILING_CONFIGS` dicts are **legacy/seed data only — the live runtime no longer reads them.** `get_trailing_config_for_epic()` in `dev-app/config.py` delegates to `dev-app/services/trailing_config_service.py`, which loads rows from the DB (5-min cache).
-
-Rows are scoped by `config_set` ('live'/'demo'), `is_scalp` (true/false), `strategy` (e.g. `SMC_SIMPLE`, `XAU_GOLD`, or `DEFAULT`), and `epic`. Lookup falls back: pair+strategy row → `DEFAULT` row → empty. Key columns:
-- `break_even_trigger_points` / `early_breakeven_trigger_points` - BE triggers
-- `stage1/2/3_trigger_points` + matching `*_lock_points` - Progressive trailing stages
-- `stage3_atr_multiplier` / `stage3_min_distance` - ATR trail (final stage)
-- `min_trail_distance` - Minimum trailing distance
-- `enable_partial_close` / `partial_close_trigger_points` / `partial_close_size`
-
-**DO NOT** edit `worker/app/forex_scanner/config_trailing_stops.py` for live trading changes - that file is for backtesting only!
-
-### When updating trailing stops:
-1. Update the DB row (scope by `config_set` + `epic` + `is_scalp` + `strategy`), e.g.:
-   ```bash
-   docker exec postgres psql -U postgres -d strategy_config -c "
-   UPDATE trailing_pair_config SET break_even_trigger_points = 12
-   WHERE config_set='demo' AND epic='CS.D.EURUSD.CEEM.IP' AND is_scalp=true AND strategy='SMC_SIMPLE';"
-   ```
-2. The `TrailingConfigService` cache (5-min TTL) is invalidated on write via `trailing_config_router`; to force it immediately, restart `fastapi-dev`: `docker restart fastapi-dev` (NOT `docker compose up`)
-3. Verify:
-   ```bash
-   docker exec postgres psql -U postgres -d strategy_config -c "
-   SELECT config_set, epic, is_scalp, strategy, break_even_trigger_points, stage1_trigger_points
-   FROM trailing_pair_config WHERE epic='CS.D.EURUSD.CEEM.IP' ORDER BY config_set, is_scalp;"
-   ```
-
-> ⚠️ The streamlit `./dev-app/config.py:/app/trailing_config.py:ro` docker-compose mount predates the DB migration — for trailing it now reflects only the legacy seed dicts, not live values. Read trailing values from the DB.
+---
 
 ## 🤖 Agent Configuration
 
-**MANDATORY: Always delegate to a specialist agent BEFORE responding** when the question or task matches any agent domain below. Do NOT answer inline first and then suggest an agent — delegate immediately. This applies to questions ("how does X work?"), analysis requests ("why is Y losing?"), and implementation tasks alike. If multiple agents apply, spawn them in parallel.
+**MANDATORY: delegate to the matching specialist agent BEFORE responding** — for questions, analysis, AND implementation. Do not answer inline then suggest an agent. Spawn multiple in parallel if several apply.
 
-**Database Schema Reference**: All agents that write PostgreSQL queries should `Read` `.claude/agents/db-expert.md` first — it is the single source of truth for table schemas, column names, domain constants, and current pair configuration. Do not duplicate schema knowledge inline; reference that file instead.
+**Agents that write SQL must `Read` `.claude/agents/db-expert.md` first** — single source of truth for table schemas, columns, domain constants, pair config. Don't duplicate schema knowledge inline.
 
-**Automatic Agent Usage:**
+| Agent | Use for |
+|-------|---------|
+| **db-expert** | ad-hoc queries, schema, data exploration/debugging (alert_history, trade_log, *_pair_overrides, loss_prevention_rules, trailing_pair_config) |
+| **trading-strategy-analyst** | strategy performance, backtest evaluation, parameter tuning, win/PF analysis, regime |
+| **backtest-ablation-engineer** | running backtests, ablation/gate isolation, permissive baselines, live-vs-backtest, signals/month |
+| **devops-engineer** | docker, CI/CD, infra automation, deployment, monitoring, scaling |
+| **quantitative-researcher** | statistical/mathematical modeling, hypothesis testing, risk/factor models |
+| **financial-data-engineer** | market/tick data feeds, normalization, order book, time series, OHLCV |
+| **lpf-engineer** | Loss Prevention Filter rules — add/tune/audit, why a trade was blocked, coverage |
+| **trailing-stop-engineer** | trailing stages, breakeven, lock points, partial close, live-vs-backtest parity |
+| **strategy-lifecycle-manager** | promote monitor-only → demo → live, promotion gates, DB wiring, pair enablement |
+| **rejection-signal-analyst** | over-blocking analysis across *_rejections / loss_prevention_decisions tables |
+| **trade-outcome-analyst** | trade outcomes, win/loss patterns, alert↔trade correlation |
 
-- **db-expert**: Automatically use this agent for any task involving:
-  - Ad-hoc database queries, schema questions, data exploration, debugging data issues
-  - Keywords: query, database, table, column, SQL, schema, how many, show me, count, alert_history, trade_log, smc_simple_rejections, smc_simple_pair_overrides, loss_prevention_rules, trailing_pair_config
+---
 
-- **trading-strategy-analyst**: Automatically use this agent for any task involving:
-  - Strategy performance analysis, backtest result evaluation, trading strategy optimization
-  - Win rate, profit/loss analysis, strategy parameter tuning, market regime performance assessment
-  - Keywords: strategy, backtest, performance, win rate, profit, loss, optimization, trading, analysis, momentum, RSI, MACD, EMA, SMA, bollinger, stochastic, parameters, signals, entry, exit, stop loss, take profit
-  - File patterns: */strategies/*, */backtests/*, *backtest*.py, *strategy*.py, *config_*.py
+## ⚠️ Monitor-Only Pairs
 
-- **devops-engineer**: Automatically use this agent for any task involving:
-  - Docker orchestration, CI/CD pipelines, infrastructure automation, production deployment
-  - System monitoring, alerting, performance optimization, infrastructure scaling
-  - Keywords: docker, kubernetes, deployment, infrastructure, monitoring, CI/CD, pipeline, container, scaling, production, devops, automation
-  - File patterns: docker-compose*.yml, Dockerfile*, k8s/*, .github/workflows/*, .gitlab-ci.yml
+Signals logged but NOT traded (check `parameter_overrides->>'monitor_only'`):
+- **USDCHF** — breakeven (0.99 PF), filters degrade.
+- **AUDUSD** — disabled on live, monitor-only on demo; under-filtered config floods ~445 BUY/quarter at PF 0.50. Do NOT flip to traded without re-tuning to peer gates + OOS validation.
 
-- **quantitative-researcher**: Automatically use this agent for any task involving:
-  - Mathematical modeling, statistical analysis, hypothesis testing, risk modeling
-  - Research methodology, alternative data analysis, factor modeling, portfolio optimization
-  - Keywords: statistical, mathematical, model, research, hypothesis, risk, factor, correlation, regression, optimization, quantitative, econometric, simulation
-  - File patterns: */research/*, */models/*, *analysis*.py, *research*.py, *model*.py
+The only actively-traded SMC_SIMPLE pair on demo is currently **EURUSD**. Full status + SQL: `claude-deep-reference.md`.
 
-- **real-time-systems-engineer**: Automatically use this agent for any task involving:
-  - Ultra-low latency optimization, high-frequency processing, concurrent programming
-  - Real-time data processing, performance optimization, memory management
-  - Keywords: latency, real-time, concurrent, performance, optimization, threading, memory, high-frequency, microsecond, lock-free
-  - File patterns: */real_time/*, */concurrent/*, */performance/*, *latency*.py, *concurrent*.py
+---
 
-- **financial-data-engineer**: Automatically use this agent for any task involving:
-  - Market data feeds, tick data processing, financial data normalization, order book management
-  - Financial database optimization, time series data, market microstructure
-  - Keywords: market data, tick data, financial, forex, currency, price, quote, trade, order book, time series, OHLCV
-  - File patterns: */market_data/*, */feeds/*, */financial/*, *market*.py, *price*.py, *forex*.py
+## 📋 Extended Documentation
 
-- **backtest-ablation-engineer**: Automatically use this agent for any task involving:
-  - Running backtests, ablation studies, gate isolation, permissive baseline analysis
-  - Interpreting backtest results with sample-size caution, comparing live vs backtest signals
-  - Keywords: backtest, ablation, bt.py, ablate, baseline, PF, profit factor, signals/month, gate, inverse-ablation, permissive
-  - File patterns: */scripts/ablate_*.py, *bt.py, *backtest_cli.py, *backtest*.py
+Read with the Read tool when needed:
 
-- **lpf-engineer**: Automatically use this agent for any task involving:
-  - Adding, removing, tuning, or auditing Loss Prevention Filter rules
-  - Understanding why specific trades were blocked by LPF, checking LPF coverage
-  - Keywords: LPF, loss prevention, penalty, rule, block, category A, category B, category C, condition_config, lpf_engineer
-  - File patterns: *loss_prevention*.py, *lpf*.py
+| Topic | File |
+|-------|------|
+| **Deep reference (relocated detail)** | `claude-deep-reference.md` |
+| Overview & navigation | `claude-overview.md` |
+| Commands & CLI | `claude-commands.md` |
+| Full architecture | `claude-architecture.md` |
+| Strategy development | `claude-strategies.md` |
+| Parameter optimization | `claude-optimization.md` |
+| Market intelligence | `claude-intelligence.md` |
+| Trailing stop system | `claude-trailing-system.md` |
+| Configuration system | `claude-configuration.md` |
+| Development best practices | `claude-development.md` |
 
-- **trailing-stop-engineer**: Automatically use this agent for any task involving:
-  - Modifying trailing stop stages, debugging trailing behavior, checking live vs backtest trailing config parity
-  - Scalp vs non-scalp trailing, break-even triggers, stage lock points, partial close
-  - Keywords: trailing, breakeven, break-even, stage1, stage2, stage3, lock, SL moved, trailing config, PAIR_TRAILING_CONFIGS, SCALP_TRAILING_CONFIGS
-  - File patterns: *trailing*.py, *config_trailing*.py, dev-app/config.py
-
-- **strategy-lifecycle-manager**: Automatically use this agent for any task involving:
-  - Promoting a strategy from monitor-only to demo or live trading
-  - Checking promotion gates, wiring new strategies into DB, pair enablement policy decisions
-  - Keywords: monitor-only, launch, promote, gate, pair enablement, is_traded, is_enabled, demo to live, strategy launch, forward gate
-  - File patterns: */migrations/*.sql, *pair_overrides*.sql
-
-## 📈 System Status
-
-**January 2026 Cleanup Complete:**
-- ✅ Archived 16 disabled strategies (preserved in `archive/disabled_strategies/`)
-- ✅ Archived 67 unused helper modules (preserved in `archive/disabled_helpers/`)
-- ✅ Cleaned signal_detector.py (3,605 → 630 lines, 83% reduction)
-- ✅ Cleaned config.py (1,413 → 733 lines, 48% reduction)
-- ✅ Implemented Strategy Registry pattern for easy extensibility
-- ✅ Created strategy and migration templates
-- ✅ SMC Simple + SMC Momentum strategies active (database-driven configuration)
-
-**System Features:**
-- ✅ Dynamic parameter optimization system (database-driven)
-- ✅ Market intelligence with regime detection
-- ✅ Progressive trailing stop system with 4 stages
-- ✅ Scalp-specific trailing configs (12-20 pips, data-backed) **NEW: Jan 2026**
-- ✅ Claude AI trade analysis integration
-- ✅ Smart Money Concepts (SMC) analysis
-- ~~✅ Virtual Stop Loss for scalping mode~~ **DEPRECATED: Jan 2026** - Replaced with scalp trailing configs
-
-**⚠️ Monitor-Only Pairs (Feb 2026):**
-
-The following pairs are in **monitor-only mode** - signals are logged but NOT traded:
-
-| Pair | Reason | Check Status |
-|------|--------|--------------|
-| **USDCHF** | Breakeven (0.99 PF), all filters degrade | `parameter_overrides->>'monitor_only'` |
-| **AUDUSD** | No validated SMC edge; under-filtered config floods signals (see note) | `parameter_overrides->>'monitor_only'` |
-
-**AUDUSD status (corrected Jun 1, 2026):** AUDUSD is **disabled on live** (`config_id=2`, `is_enabled=f`) and **monitor-only on demo** (`config_id=3`, `is_enabled=t`, `monitor_only=true`) — i.e. **not traded anywhere**. (The prior "re-enabled Mar 14" claim is stale per the DB.) Its scalp config is deliberately stripped of the entry-quality gates the other pairs carry (loose `scalp_entry_rsi_buy_max=70` vs 44–55, no `scalp_min_adx` floor, no impulse-quality/MFI filters), so in a trend it fires a distinct BUY every ~15 min (cooldown floor) → ~445 signals/quarter at PF 0.50. Harmless while monitor-only (only spams `alert_history`), but do NOT flip to traded without re-tuning to peer gates AND OOS-validating first. Overlaying EURUSD's gate set collapses it 445→70 at PF 1.10 (n=75, marginal). The only actively-traded SMC_SIMPLE pair on demo is currently **EURUSD**.
-
-```sql
--- Check monitor-only status
-SELECT epic, parameter_overrides->>'monitor_only' FROM smc_simple_pair_overrides
-WHERE parameter_overrides->>'monitor_only' = 'true';
-
--- Re-enable trading (remove flag)
-UPDATE smc_simple_pair_overrides SET parameter_overrides = parameter_overrides - 'monitor_only'
-WHERE epic = 'CS.D.AUDUSD.MINI.IP';
-```
-
-For detailed setup and usage instructions, start with the [Overview & Navigation](claude-overview.md).
+> The system is Docker-required, database-driven (PostgreSQL), and modular. `claude-vsl-system.md` is DEPRECATED (Jan 2026 — replaced by scalp trailing configs).
