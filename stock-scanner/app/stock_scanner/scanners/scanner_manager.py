@@ -133,11 +133,19 @@ class ScannerManager:
         'zlma_trend',
         'ema_pullback',
         'volatility_contraction_breakout',
-        'premarket_catalyst',
-        'gap_and_go',
         'squeeze_momentum',
         'ultimate_ma_mtf',
         'regime_adaptive_composite',
+        # Monitor-only (re-enabled Jun 2026): emits signals for forward-testing but
+        # excluded from the live tradable pool via MONITOR_ONLY_SCANNERS in
+        # trading-ui/app/api/signals/top/route.ts. Edge survives day-trade re-grade
+        # (PF ~3.0) but rests on only 8 sessions of one bull regime — not live-ready.
+        'high_retest',
+        # Disabled Jun 2026 — negative edge, no valuable signals, consuming pipeline
+        # resources. gap_and_go: ~40% of all signal volume at PF 0.76 / WR 31%.
+        # premarket_catalyst: PF 0.66-0.75 / WR 38%, negative both 30d & 90d windows.
+        # 'premarket_catalyst',
+        # 'gap_and_go',
     ]
 
     def __init__(

@@ -20,6 +20,15 @@ const EDGE_PF_FLOOR = 1.0; // drop a scanner below this PF...
 const EDGE_MIN_CLOSED = 10; // ...only once it has >= this many closed trades
 const EDGE_NO_LOSS_PF_CAP = 3.0; // score cap for closed wins with zero closed losses
 const DAYTRADE_SIGNAL_DATE_COUNT = 2; // include today's partial scan plus latest complete batch
+// Monitor-only scanners: still emit/log signals to stock_scanner_signals (so the
+// nightly monitor_only_outcomes forward-test layer tracks them), but are excluded
+// fail-closed from the tradable day-trade candidate pool the auto-trader pulls.
+// Use this to forward-test an unvalidated scanner on the LIVE account without
+// allocating capital. There is no per-scanner DB flag in the stock path, so this
+// list is the single chokepoint that keeps a scanner out of live execution.
+// high_retest (re-enabled Jun 2026): edge survives day-trade re-grade (PF ~3.0)
+// but only 8 trading sessions of one bull regime, never forward-tested.
+const MONITOR_ONLY_SCANNERS = ["high_retest"];
 // Day-trade EMA50 freshness gate (default; overridable via ?maxEmaCrossAgeSessions).
 // A candidate is kept only if it is currently above its daily EMA50 AND the upward
 // cross happened within this many trading sessions (i.e. a fresh reclaim, not an
@@ -394,6 +403,11 @@ export async function GET(request: Request) {
           mode === "daytrades"
             ? `
           signal_type = 'BUY'
+          ${
+            MONITOR_ONLY_SCANNERS.length
+              ? `AND scanner_name NOT IN (${MONITOR_ONLY_SCANNERS.map((s) => `'${s}'`).join(", ")})`
+              : ""
+          }
           AND signal_date IN (
             SELECT signal_date
             FROM (
