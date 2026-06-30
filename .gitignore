@@ -113,3 +113,4 @@ worker/app/forex_scanner/config_trailing_stops.py.bak
 # Next.js build output
 trading-ui/.next/
 .claude/scheduled_tasks.lock
+worker/app/forex_scanner/exit_sim_signals/

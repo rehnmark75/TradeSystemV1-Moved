@@ -349,6 +349,26 @@ services:
       - fastapi-dev
       - minio
 
+  # Monitor-only forward test: LuxAlgo money-flow-divergence signals (JPY+commodity).
+  # Logs to luxalgo_monitor_signals; NO execution. See project_luxalgo_proxy_jun30.
+  luxalgo-monitor:
+    build:
+      context: ./worker
+    container_name: luxalgo-monitor
+    restart: unless-stopped
+    command: ["python", "/app/forex_scanner/luxalgo_monitor.py", "--loop", "--interval", "1800"]
+    volumes:
+      - ./worker/app:/app
+      - ./logs/worker:/app/logs
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+    networks:
+      - workers-demo
+    depends_on:
+      - postgres
+
   task-worker-live:
     build:
       context: ./worker
