@@ -41,6 +41,11 @@ from .strategies import (
     UltimateMAMTFScanner,
     RegimeAdaptiveCompositeScanner,
     EmaCross92150Scanner,  # monitor-only (new Jun 2026): EMA 9/21/50 cross
+    # SmartMoneyReclaimScanner: KILLED Jul 1 2026 — refuted by de-bias backtest
+    # (edge == random-long beta, worse than sweep-no-reclaim control). Code kept
+    # on disk (strategies/smart_money_reclaim.py + replay) as a documented
+    # dead-end; NOT wired into the pipeline. See memory
+    # project_smart_money_reclaim_scanner_jul1.
     # TrendReversalScanner removed - PF 1.09 too low
 )
 
@@ -143,6 +148,8 @@ class ScannerManager:
         # is scanner + ATR-trail exit + breadth gate together (~1.7 PF). See
         # memory project_ema_cross_optimization_jun30.
         'ema_cross_9_21_50',
+        # smart_money_reclaim intentionally NOT enabled — KILLED Jul 1 2026
+        # (refuted: edge indistinguishable from random-long beta). See memory.
         # Monitor-only (re-enabled Jun 2026): emits signals for forward-testing but
         # excluded from the live tradable pool via MONITOR_ONLY_SCANNERS in
         # trading-ui/app/api/signals/top/route.ts. Edge survives day-trade re-grade
