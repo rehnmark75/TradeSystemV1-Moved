@@ -28,7 +28,14 @@ const DAYTRADE_SIGNAL_DATE_COUNT = 2; // include today's partial scan plus lates
 // list is the single chokepoint that keeps a scanner out of live execution.
 // high_retest (re-enabled Jun 2026): edge survives day-trade re-grade (PF ~3.0)
 // but only 8 trading sessions of one bull regime, never forward-tested.
-const MONITOR_ONLY_SCANNERS = ["high_retest"];
+// zlma_trend + regime_adaptive_composite (demoted Jul 1 2026): live per-scanner
+// review found these two = 72% of the candidate pool but ~100%+ of the realized
+// net loss (zlma_trend PF 0.25 / -$128 on 13 closed; regime_adaptive_composite
+// 0% WR / -$39 on 4). candidate_score had no discriminating power even within
+// zlma_trend (corr -0.36), so a higher score bar can't rescue them. Kept
+// monitor-only (still logged for re-validation) rather than deleted. The other
+// 6 scanners were net +$64/12 trades over the same window.
+const MONITOR_ONLY_SCANNERS = ["high_retest", "zlma_trend", "regime_adaptive_composite"];
 // Day-trade EMA50 freshness gate (default; overridable via ?maxEmaCrossAgeSessions).
 // A candidate is kept only if it is currently above its daily EMA50 AND the upward
 // cross happened within this many trading sessions (i.e. a fresh reclaim, not an
