@@ -1428,13 +1428,25 @@ class StockScheduler:
             api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
             account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
             dry_run = os.getenv('BREAKEVEN_MONITOR_DRY_RUN', 'true').lower() not in ('0', 'false', 'no')
+            # ATR-trailing (validated Jul-2026). OFF by default; enable via env.
+            trail_enabled = os.getenv('TRAILING_STOP_ENABLED', 'false').lower() in ('1', 'true', 'yes')
+            trail_arm_pct = float(os.getenv('TRAILING_STOP_ARM_PCT', '2.0'))
+            trail_atr_mult = float(os.getenv('TRAILING_STOP_ATR_MULT', '3.0'))
+            trail_tp_backstop_pct = float(os.getenv('TRAILING_STOP_TP_BACKSTOP_PCT', '30.0'))
 
             if not api_key or not account_id:
                 logger.warning("[SKIP] Breakeven monitor - missing API credentials")
                 return {'skipped': True, 'reason': 'missing API credentials'}
 
             client = RoboMarketsClient(api_key=api_key, account_id=account_id)
-            monitor = BreakevenMonitor(db_manager=self.db, dry_run=dry_run)
+            monitor = BreakevenMonitor(
+                db_manager=self.db, dry_run=dry_run,
+                trail_enabled=trail_enabled, trail_arm_pct=trail_arm_pct,
+                trail_atr_mult=trail_atr_mult, trail_tp_backstop_pct=trail_tp_backstop_pct,
+            )
+            if trail_enabled:
+                logger.info("[Trail] ATR trailing ENABLED (arm=%.1f%% mult=%.1f backstop=%.0f%% dry_run=%s)",
+                            trail_arm_pct, trail_atr_mult, trail_tp_backstop_pct, dry_run)
 
             async with client:
                 results = await monitor.check_once(client)

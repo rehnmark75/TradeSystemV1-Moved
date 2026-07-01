@@ -18,9 +18,18 @@ logger = logging.getLogger("breakeven_monitor")
 class BreakevenMonitor:
     DEFAULT_TRIGGER_USD = 10.0
 
-    def __init__(self, db_manager, dry_run: bool = True):
+    def __init__(self, db_manager, dry_run: bool = True,
+                 trail_enabled: bool = False, trail_arm_pct: float = 2.0,
+                 trail_atr_mult: float = 3.0, trail_tp_backstop_pct: float = 30.0,
+                 trail_default_atr_pct: float = 3.0):
         self.db = db_manager
         self.dry_run = dry_run
+        # ATR-trailing (validated Jul-2026, ema_cross_lab.py). OFF by default.
+        self.trail_enabled = trail_enabled
+        self.trail_arm_pct = trail_arm_pct
+        self.trail_atr_mult = trail_atr_mult
+        self.trail_tp_backstop_pct = trail_tp_backstop_pct
+        self.trail_default_atr_pct = trail_default_atr_pct
 
     async def ensure_schema(self):
         """Create monitor table for deployments where the stock migration has not rerun."""
@@ -53,6 +62,14 @@ class BreakevenMonitor:
             CREATE INDEX IF NOT EXISTS idx_stock_breakeven_monitors_active
             ON stock_breakeven_monitors(status, last_checked_at)
             WHERE status IN ('pending_fill', 'monitoring')
+        """)
+        # ATR-trailing state columns (idempotent; mirrors migration 039)
+        await self.db.execute("""
+            ALTER TABLE stock_breakeven_monitors
+                ADD COLUMN IF NOT EXISTS peak_price DECIMAL(12,4),
+                ADD COLUMN IF NOT EXISTS tp_widened BOOLEAN DEFAULT FALSE,
+                ADD COLUMN IF NOT EXISTS trail_moves INTEGER DEFAULT 0,
+                ADD COLUMN IF NOT EXISTS trail_last_at TIMESTAMP
         """)
 
     async def check_once(self, client) -> Dict[str, Any]:
@@ -140,6 +157,10 @@ class BreakevenMonitor:
         return candidates[0]
 
     async def _process_position(self, client, monitor: dict, position) -> bool:
+        # ATR-trailing takes over the exit when enabled (long-only day-trades).
+        if self.trail_enabled and (monitor.get("side") == "buy"):
+            return await self._process_trailing(client, monitor, position)
+
         profit = float(position.unrealized_pnl or 0)
         trigger = float(monitor.get("trigger_profit_usd") or self.DEFAULT_TRIGGER_USD)
         entry = float(monitor.get("breakeven_stop_price") or monitor.get("entry_price") or position.entry_price)
@@ -180,6 +201,94 @@ class BreakevenMonitor:
             monitor["ticker"], position.deal_id, entry, profit
         )
         return True
+
+    # ------------------------------------------------------------------
+    # ATR trailing stop (long-only). Keeps status='monitoring' so it trails
+    # every poll. Widens the hard TP once so winners run past the fixed 7%.
+    # ------------------------------------------------------------------
+    async def _process_trailing(self, client, monitor: dict, position) -> bool:
+        entry = float(monitor.get("entry_price") or position.entry_price or 0)
+        price = float(position.current_price or position.entry_price or 0)
+        current_sl = float(position.stop_loss) if position.stop_loss is not None else None
+        profit = float(position.unrealized_pnl or 0)
+        if entry <= 0 or price <= 0:
+            await self._update_check(monitor["id"], position.deal_id, profit, "trail: bad price")
+            return False
+
+        # high-water mark
+        stored_peak = float(monitor.get("peak_price") or 0) or entry
+        peak = max(stored_peak, price)
+
+        # widen the hard TP once so the trail (not a 7% cap) governs the exit
+        backstop_tp = round(entry * (1 + self.trail_tp_backstop_pct / 100), 4)
+        need_widen = (not monitor.get("tp_widened")) and (
+            position.take_profit is None or float(position.take_profit) < backstop_tp
+        )
+        moved = False
+        if need_widen:
+            if self.dry_run:
+                logger.info("[Trail] DRY RUN would widen %s TP -> %.4f", monitor["ticker"], backstop_tp)
+            else:
+                await client.modify_position(deal_id=position.deal_id,
+                                             stop_loss=current_sl, take_profit=backstop_tp)
+                logger.info("[Trail] %s TP widened -> %.4f", monitor["ticker"], backstop_tp)
+
+        armed = price >= entry * (1 + self.trail_arm_pct / 100)
+        new_sl = None
+        if armed:
+            atr_pct = await self._get_atr_pct(monitor["ticker"])
+            trail_stop = round(peak * (1 - self.trail_atr_mult * atr_pct / 100), 4)
+            # favorable-only, and never place the stop at/above current price
+            if trail_stop < price and (current_sl is None or trail_stop > current_sl):
+                new_sl = trail_stop
+
+        if new_sl is not None:
+            if self.dry_run:
+                logger.info("[Trail] DRY RUN would move %s SL %s -> %.4f (peak %.4f, price %.4f)",
+                            monitor["ticker"], current_sl, new_sl, peak, price)
+            else:
+                await client.modify_position(deal_id=position.deal_id,
+                                             stop_loss=new_sl,
+                                             take_profit=backstop_tp if (need_widen or monitor.get("tp_widened")) else position.take_profit)
+                logger.info("[Trail] Moved %s SL -> %.4f (peak %.4f)", monitor["ticker"], new_sl, peak)
+                moved = True
+
+        await self._update_trail(monitor["id"], position.deal_id, profit, peak,
+                                 widened=(need_widen and not self.dry_run) or bool(monitor.get("tp_widened")),
+                                 trailed=(new_sl is not None and not self.dry_run))
+        return moved
+
+    async def _get_atr_pct(self, ticker: str) -> float:
+        """Latest nightly daily ATR%% for the ticker; fallback to default."""
+        try:
+            row = await self.db.fetchrow("""
+                SELECT atr_percent FROM stock_screening_metrics
+                WHERE ticker = $1 AND atr_percent IS NOT NULL
+                ORDER BY calculation_date DESC LIMIT 1
+            """, str(ticker).upper())
+            if row and row["atr_percent"] is not None:
+                v = float(row["atr_percent"])
+                if 0.1 <= v <= 25.0:
+                    return v
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[Trail] ATR lookup failed for %s: %s", ticker, exc)
+        return self.trail_default_atr_pct
+
+    async def _update_trail(self, monitor_id: int, deal_id: str, profit: float,
+                            peak: float, widened: bool, trailed: bool):
+        await self.db.execute("""
+            UPDATE stock_breakeven_monitors
+            SET status = 'monitoring',
+                robomarkets_deal_id = COALESCE(NULLIF(robomarkets_deal_id, ''), $2),
+                last_profit_usd = $3,
+                peak_price = $4,
+                tp_widened = tp_widened OR $5,
+                trail_moves = trail_moves + CASE WHEN $6 THEN 1 ELSE 0 END,
+                trail_last_at = CASE WHEN $6 THEN NOW() ELSE trail_last_at END,
+                last_checked_at = NOW(),
+                error_message = NULL
+            WHERE id = $1
+        """, monitor_id, deal_id, profit, peak, widened, trailed)
 
     def _should_move_stop(self, side: str, current_sl: Optional[float], entry: float) -> bool:
         if current_sl is None or current_sl <= 0:
