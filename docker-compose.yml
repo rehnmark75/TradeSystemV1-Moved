@@ -443,8 +443,9 @@ services:
       - ./logs/stock-scanner:/app/stock_scanner/logs
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
-      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
-      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
+      # DEMO account (forward test, Jul 2026) — no live fallback: fails closed if unset.
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_DEMO_API_KEY}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_DEMO_ACCOUNT_ID}
       - BREAKEVEN_MONITOR_DRY_RUN=${BREAKEVEN_MONITOR_DRY_RUN:-false}
       - BREAKEVEN_MONITOR_INTERVAL_SECONDS=${BREAKEVEN_MONITOR_INTERVAL_SECONDS:-300}
       # ATR-trailing exit (validated Jul-2026, ema_cross_lab.py). OFF by default;
@@ -473,9 +474,11 @@ services:
     environment:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - TRADING_UI_URL=http://trading-ui:3000/trading
-      - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
-      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
+      # DEMO account (forward test, Jul 2026) — no live fallback: fails closed if unset.
+      - ROBOMARKETS_API_KEY=${ROBOMARKETS_DEMO_API_KEY}
+      - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_DEMO_ACCOUNT_ID}
       - AUTO_TRADING_ENABLED=true
+      # Demo connection verified Jul 1 2026 (acct 92116829, $9723 virtual) → live-on-demo.
       - AUTO_TRADING_DRY_RUN=false
       - AUTO_TRADER_INTERVAL_SECONDS=60
       - AUTO_TRADE_VALIDATE_DELAY_MINUTES=5
