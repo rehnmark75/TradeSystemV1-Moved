@@ -40,6 +40,7 @@ from .pocket_pivot import PocketPivotScanner
 from .squeeze_momentum import SqueezeMomentumScanner
 from .ultimate_ma_mtf import UltimateMAMTFScanner
 from .regime_adaptive_composite import RegimeAdaptiveCompositeScanner
+from .ema_cross_9_21_50 import EmaCross92150Scanner
 from .catalyst_scanners import (
     EarningsDriftScanner,
     ShortSqueezeBreakoutScanner,
@@ -64,6 +65,7 @@ __all__ = [
     'SqueezeMomentumScanner',
     'UltimateMAMTFScanner',
     'RegimeAdaptiveCompositeScanner',
+    'EmaCross92150Scanner',
     'EarningsDriftScanner',
     'ShortSqueezeBreakoutScanner',
     'SectorRotationLeaderScanner',

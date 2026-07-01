@@ -447,6 +447,14 @@ services:
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
       - BREAKEVEN_MONITOR_DRY_RUN=${BREAKEVEN_MONITOR_DRY_RUN:-false}
       - BREAKEVEN_MONITOR_INTERVAL_SECONDS=${BREAKEVEN_MONITOR_INTERVAL_SECONDS:-300}
+      # ATR-trailing exit (validated Jul-2026, ema_cross_lab.py). OFF by default;
+      # long-only. When ON it replaces breakeven for longs: widens the hard TP to
+      # let winners run and trails the stop at peak-(mult*dailyATR%). Fixed 2.5%
+      # initial stop / sizing UNCHANGED. Flip TRAILING_STOP_ENABLED=true to enable.
+      - TRAILING_STOP_ENABLED=${TRAILING_STOP_ENABLED:-true}
+      - TRAILING_STOP_ARM_PCT=${TRAILING_STOP_ARM_PCT:-2.0}
+      - TRAILING_STOP_ATR_MULT=${TRAILING_STOP_ATR_MULT:-3.0}
+      - TRAILING_STOP_TP_BACKSTOP_PCT=${TRAILING_STOP_TP_BACKSTOP_PCT:-30.0}
     command: ["python", "-m", "stock_scanner.scheduler", "breakeven-monitor"]
     networks:
       - lab-net
@@ -497,6 +505,12 @@ services:
       - AUTO_TRADE_ATR_THRESHOLD_PCT=7.0
       - AUTO_TRADE_ATR_STOP_MULT=1.0
       - AUTO_TRADE_ATR_RR=1.6667
+      # Market-breadth regime gate (validated Jul-2026). OFF by default; blocks
+      # ALL new long entries on days when < MIN_PCT of the liquid universe is
+      # above its 50-day MA. DB stock_auto_trade_settings is authoritative — to
+      # enable, set AUTO_TRADE_BREADTH_GATE_ENABLED=true there (or here) + restart.
+      - AUTO_TRADE_BREADTH_GATE_ENABLED=${AUTO_TRADE_BREADTH_GATE_ENABLED:-true}
+      - AUTO_TRADE_BREADTH_MIN_PCT=${AUTO_TRADE_BREADTH_MIN_PCT:-50}
     command: ["python", "-m", "stock_scanner.scheduler", "autotrader-monitor"]
     networks:
       - lab-net

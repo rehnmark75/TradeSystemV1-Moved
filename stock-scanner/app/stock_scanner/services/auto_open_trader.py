@@ -51,6 +51,17 @@ class AutoOpenTrader:
         # preservation — avoids holding fresh day-trades into the 14:00 ET
         # announcement). On by default; off switch: AUTO_TRADE_FOMC_BLACKOUT_ENABLED=false.
         "AUTO_TRADE_FOMC_BLACKOUT_ENABLED": ("fomc_blackout_enabled", "bool", "true"),
+        # Market-breadth regime gate (validated Jul 2026, ema_cross_lab.py): skip
+        # ALL new long entries on days when fewer than MIN_PCT of the liquid
+        # universe is above its 50-day MA (weak-tape seatbelt — the long
+        # momentum-pullback edge inverts in broad downtrends). OFF by default;
+        # fail-open on a data gap (a seatbelt, not a hard risk gate). Breadth uses
+        # SMA50 (stock_screening_metrics.price_vs_sma50) as the live proxy for the
+        # backtest's EMA50 breadth.
+        "AUTO_TRADE_BREADTH_GATE_ENABLED": ("breadth_gate_enabled", "bool", "false"),
+        "AUTO_TRADE_BREADTH_MIN_PCT": ("breadth_min_pct", "float", "50"),
+        "AUTO_TRADE_BREADTH_MIN_DOLLAR_VOL": ("breadth_min_dollar_vol", "float", "5000000"),
+        "AUTO_TRADE_BREADTH_MIN_UNIVERSE": ("breadth_min_universe", "int", "100"),
         "MAX_ORDER_NOTIONAL_USD": ("max_notional", "float", "500"),
         "MAX_ACTIVE_STOCK_ORDERS": ("max_active_orders", "int", "5"),
         "MAX_ORDERS_PER_RUN": ("max_orders_per_run", "int", "5"),
@@ -263,6 +274,23 @@ class AutoOpenTrader:
             await self._mark_run_status(run_id, "fomc_blackout")
             return result
 
+        if self.breadth_gate_enabled:
+            breadth = await self._compute_breadth_pct()
+            if breadth is not None:
+                result["breadth_pct"] = round(breadth, 1)
+                if breadth < self.breadth_min_pct:
+                    result["stage"] = "breadth_blocked"
+                    logger.info(
+                        "[AutoTrader] Market breadth %.1f%% < %.1f%% — regime gate active, no new entries %s",
+                        breadth, self.breadth_min_pct, trade_date,
+                    )
+                    await self._mark_run_status(run_id, "breadth_blocked")
+                    return result
+                logger.info("[AutoTrader] Market breadth %.1f%% >= %.1f%% — regime OK",
+                            breadth, self.breadth_min_pct)
+            else:
+                logger.warning("[AutoTrader] Breadth gate ON but breadth unavailable — failing OPEN (allowing trades)")
+
         minutes_after_open = self._minutes_after_open(now_et)
         if minutes_after_open is None or minutes_after_open < self.validate_delay_minutes:
             result["stage"] = "waiting_for_open_window"
@@ -316,6 +344,36 @@ class AutoOpenTrader:
             except Exception as exc:
                 logger.exception("[AutoTrader] loop error: %s", exc)
             await asyncio.sleep(max(15, interval))
+
+    async def _compute_breadth_pct(self) -> Optional[float]:
+        """Percent of the liquid universe above its 50-day MA on the latest
+        nightly metrics date. Proxy (SMA50) for the backtest's EMA50 breadth.
+        Returns None if the reading can't be trusted (universe too small)."""
+        try:
+            row = await self.db.fetchrow(
+                """
+                SELECT
+                    COUNT(*) FILTER (WHERE price_vs_sma50 > 0)::float
+                        / NULLIF(COUNT(*), 0) AS breadth,
+                    COUNT(*) AS n
+                FROM stock_screening_metrics
+                WHERE calculation_date = (
+                        SELECT MAX(calculation_date) FROM stock_screening_metrics
+                      )
+                  AND price_vs_sma50 IS NOT NULL
+                  AND avg_dollar_volume >= $1
+                """,
+                float(self.breadth_min_dollar_vol),
+            )
+            if not row or row["breadth"] is None:
+                return None
+            if int(row["n"] or 0) < int(self.breadth_min_universe):
+                logger.warning("[AutoTrader] Breadth universe too small (%s) — untrusted", row["n"])
+                return None
+            return float(row["breadth"]) * 100.0
+        except Exception as exc:  # noqa: BLE001
+            logger.warning("[AutoTrader] Breadth compute failed: %s", exc)
+            return None
 
     async def _load_runtime_settings(self):
         rows = await self.db.fetch("""

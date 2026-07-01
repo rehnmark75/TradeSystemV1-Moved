@@ -40,6 +40,7 @@ from .strategies import (
     SqueezeMomentumScanner,
     UltimateMAMTFScanner,
     RegimeAdaptiveCompositeScanner,
+    EmaCross92150Scanner,  # monitor-only (new Jun 2026): EMA 9/21/50 cross
     # TrendReversalScanner removed - PF 1.09 too low
 )
 
@@ -127,6 +128,7 @@ class ScannerManager:
         'squeeze_momentum': SqueezeMomentumScanner,
         'ultimate_ma_mtf': UltimateMAMTFScanner,
         'regime_adaptive_composite': RegimeAdaptiveCompositeScanner,
+        'ema_cross_9_21_50': EmaCross92150Scanner,
     }
 
     DEFAULT_ENABLED_SCANNERS = [
@@ -136,6 +138,11 @@ class ScannerManager:
         'squeeze_momentum',
         'ultimate_ma_mtf',
         'regime_adaptive_composite',
+        # ema_cross_9_21_50: activated Jul 1 2026 (user directive). Runs + is
+        # live-tradable (NOT in route.ts MONITOR_ONLY_SCANNERS). Validated config
+        # is scanner + ATR-trail exit + breadth gate together (~1.7 PF). See
+        # memory project_ema_cross_optimization_jun30.
+        'ema_cross_9_21_50',
         # Monitor-only (re-enabled Jun 2026): emits signals for forward-testing but
         # excluded from the live tradable pool via MONITOR_ONLY_SCANNERS in
         # trading-ui/app/api/signals/top/route.ts. Edge survives day-trade re-grade
