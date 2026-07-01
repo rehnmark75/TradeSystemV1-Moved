@@ -41,6 +41,7 @@ from .strategies import (
     UltimateMAMTFScanner,
     RegimeAdaptiveCompositeScanner,
     EmaCross92150Scanner,  # monitor-only (new Jun 2026): EMA 9/21/50 cross
+    AdaptiveTrendPullbackScanner,  # LIVE demo forward-test (Jul 1 2026)
     # SmartMoneyReclaimScanner: KILLED Jul 1 2026 — refuted by de-bias backtest
     # (edge == random-long beta, worse than sweep-no-reclaim control). Code kept
     # on disk (strategies/smart_money_reclaim.py + replay) as a documented
@@ -134,6 +135,7 @@ class ScannerManager:
         'ultimate_ma_mtf': UltimateMAMTFScanner,
         'regime_adaptive_composite': RegimeAdaptiveCompositeScanner,
         'ema_cross_9_21_50': EmaCross92150Scanner,
+        'adaptive_trend_pullback': AdaptiveTrendPullbackScanner,
     }
 
     DEFAULT_ENABLED_SCANNERS = [
@@ -155,6 +157,13 @@ class ScannerManager:
         # trading-ui/app/api/signals/top/route.ts. Edge survives day-trade re-grade
         # (PF ~3.0) but rests on only 8 sessions of one bull regime — not live-ready.
         'high_retest',
+        # adaptive_trend_pullback: LIVE demo forward-test, real execution (Jul 1
+        # 2026). RoboMarkets demo acct 92116829 (zero capital risk). Runs + is
+        # live-tradable (NOT in route.ts MONITOR_ONLY_SCANNERS) per
+        # feedback_forward_test_means_demo_execution — a forward test means real
+        # demo fills, not monitor-only logging. See memory
+        # project_stock_demo_forward_test_jul1.
+        'adaptive_trend_pullback',
         # Disabled Jun 2026 — negative edge, no valuable signals, consuming pipeline
         # resources. gap_and_go: ~40% of all signal volume at PF 0.76 / WR 31%.
         # premarket_catalyst: PF 0.66-0.75 / WR 38%, negative both 30d & 90d windows.

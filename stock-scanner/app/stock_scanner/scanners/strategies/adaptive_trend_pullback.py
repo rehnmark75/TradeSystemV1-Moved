@@ -13,13 +13,16 @@ back into the LOWER half of a causal Nadaraya-Watson kernel envelope (fresh, not
 stale), with the predictive-ranges midline not falling and a self-contained
 perf-quality gate — in a non-bear, breadth-supported regime.
 
-STATUS: pre-wiring validation build (Jul 1 2026). This wrapper is intentionally
-NOT registered in scanner_manager / DEFAULT_ENABLED_SCANNERS and has NO DB
-migration — the strategy must first beat BOTH the random baseline AND the
-fixed-3.0 null control in `analysis/adaptive_trend_pullback_replay.py`. Wire it
-(register in stock_signal_scanners, add to scanner_manager + DEFAULT_ENABLED_
-SCANNERS, list in MONITOR_ONLY_SCANNERS) ONLY after validation. Risk bracket
-mirrors the live auto-trader (SL capped 2.5%, TP 7%).
+STATUS: LIVE demo forward-test (Jul 1 2026, RoboMarkets demo acct 92116829,
+real execution / zero capital risk). Registered in stock_signal_scanners
+(migrations/042_register_adaptive_trend_pullback_scanner.sql), wired into
+scanner_manager.SCANNER_CLASSES + DEFAULT_ENABLED_SCANNERS, and deliberately
+NOT listed in MONITOR_ONLY_SCANNERS (trading-ui/app/api/signals/top/route.ts)
+so it is a real tradable candidate, not just logged. Risk bracket mirrors the
+live auto-trader (SL capped 2.5%, TP 7%). composite_score (see strategies/
+adaptive_trend_pullback.py) is display/ranking only — it does NOT feed the
+auto-trader's AUTO_TRADE_MIN_SCORE=65 gate, which instead applies to the
+independent candidate_score computed in route.ts (RS/TV/RVOL/range based).
 """
 
 import logging
