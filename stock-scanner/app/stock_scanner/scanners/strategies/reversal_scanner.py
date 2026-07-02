@@ -53,6 +53,12 @@ from ..exclusion_filters import ExclusionFilterEngine, get_mean_reversion_filter
 
 logger = logging.getLogger(__name__)
 
+# Max age (calendar days) a fallback daily candle may be relative to
+# calculation_date before we refuse to price a signal off it. Guards against
+# pricing entries off a stale close when the watchlist/screening_metrics
+# pipeline hasn't run yet for the requested date.
+MAX_FALLBACK_CANDLE_AGE_DAYS = 3
+
 
 class ReversalType(Enum):
     """Type of reversal pattern detected"""
@@ -219,6 +225,20 @@ class ReversalScanner(BaseScanner):
         # Get candidate data for scoring
         candidate = await self._get_candidate_data(ticker, calculation_date)
         if not candidate:
+            # No watchlist/screening_metrics row for calculation_date yet. Only
+            # fall back to the raw candle close if it's fresh -- pricing a
+            # signal off a stale candle silently corrupts realized_pnl_pct
+            # downstream. See zlma_trend.py's _get_daily_candles docstring.
+            if candle_timestamp is not None:
+                ts_date = candle_timestamp.date() if hasattr(candle_timestamp, 'date') else candle_timestamp
+                cal_date = calculation_date.date() if hasattr(calculation_date, 'date') else calculation_date
+                if hasattr(ts_date, 'toordinal') and hasattr(cal_date, 'toordinal'):
+                    if abs(cal_date.toordinal() - ts_date.toordinal()) > MAX_FALLBACK_CANDLE_AGE_DAYS:
+                        logger.warning(
+                            f"{ticker}: skipping reversal_scanner signal, no screening_metrics "
+                            f"for {cal_date} and latest candle ({ts_date}) is stale"
+                        )
+                        return None
             candidate = {
                 'ticker': ticker,
                 'current_price': closes[-1],
@@ -653,16 +673,24 @@ class ReversalScanner(BaseScanner):
         return (atr / closes[-1]) * 100 if closes[-1] > 0 else 3.0
 
     async def _get_daily_candles(self, ticker: str, limit: int = 100) -> List[Dict[str, Any]]:
-        """Get daily candles for a ticker."""
+        """Get the most recent `limit` daily candles for a ticker, oldest first.
+
+        Must ORDER BY timestamp DESC before LIMIT, then reverse. A plain
+        "ORDER BY timestamp ASC LIMIT N" returns the OLDEST N rows once a
+        ticker has more than N days of history, freezing closes[-1] (used as
+        "current price" in the candidate fallback) at a stale historical
+        price instead of the latest close. See zlma_trend.py for the fuller
+        writeup of the resulting realized_pnl_pct corruption (Jul 2026).
+        """
         query = """
             SELECT timestamp, open, high, low, close, volume
             FROM stock_candles_synthesized
             WHERE ticker = $1 AND timeframe = '1d'
-            ORDER BY timestamp ASC
+            ORDER BY timestamp DESC
             LIMIT $2
         """
         rows = await self.db.fetch(query, ticker, limit)
-        return [dict(r) for r in rows]
+        return [dict(r) for r in reversed(rows)]
 
     async def _get_qualified_tickers(self, calculation_date: datetime) -> List[str]:
         """Get all active tickers for reversal scan."""

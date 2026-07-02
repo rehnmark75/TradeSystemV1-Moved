@@ -728,6 +728,20 @@ class StockScheduler:
             logger.error(f"[FAIL] Performance Tracking: {e}")
             results['performance'] = {'error': str(e)}
 
+        # === Edge-map router: refresh per-cell scanner edge map ===
+        # Must run AFTER Stage 9 (signal outcomes written + contaminated rows
+        # flagged status='data_error' inside update_signal_statuses). The analyzer
+        # excludes data_error / |pnl|>100 rows so it learns from clean outcomes only.
+        # Failure-isolated: a refresh error must never break the pipeline.
+        try:
+            from stock_scanner.analysis.scanner_cell_edge_analyzer import run as run_cell_edge
+            cell_edge_summary = await asyncio.to_thread(run_cell_edge, window_days=120)
+            results['cell_edge_map'] = cell_edge_summary
+            logger.info(f"[OK] Cell-edge map refreshed: {cell_edge_summary}")
+        except Exception as e:
+            logger.warning(f"[SKIP] Cell-edge map refresh (non-fatal): {e}")
+            results['cell_edge_map'] = {'error': str(e)}
+
         # === STAGE 10: Claude AI Analysis ===
         logger.info("\n[STAGE 10/11] Running Claude AI analysis on top signals...")
         try:

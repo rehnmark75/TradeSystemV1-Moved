@@ -23,6 +23,7 @@ const NAV_SECTIONS: NavSection[] = [
       { href: "/", label: "Overview", shortLabel: "Home" },
       { href: "/watchlists", label: "Equity Watchlists", shortLabel: "Watchlists" },
       { href: "/signals", label: "Signal Inspection", shortLabel: "Signals" },
+      { href: "/cell-router", label: "Cell-Router Monitor", shortLabel: "Cell Router" },
       { href: "/broker", label: "Broker Ledger", shortLabel: "Broker" },
       { href: "/market", label: "Market Regime", shortLabel: "Market" },
     ],

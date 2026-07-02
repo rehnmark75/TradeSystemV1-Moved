@@ -164,6 +164,15 @@ class ScannerManager:
         # demo fills, not monitor-only logging. See memory
         # project_stock_demo_forward_test_jul1.
         'adaptive_trend_pullback',
+        # macd_momentum: LIVE demo forward-test, real execution (Jul 1 2026).
+        # Net loser pooled (PF 0.77) but hard-gated to fire ONLY in its one
+        # validated character cell (ADX>=25 AND ATR%<2.0 -> PF 1.41 over 4.5mo
+        # / 39 tickers) — see cell_gate_* in
+        # scanners/strategies/macd_momentum.py::MACDMomentumConfig. Flagship
+        # proof-of-concept for the adaptive regime-router. RoboMarkets demo
+        # acct 92116829. Runs + is live-tradable (NOT in route.ts
+        # MONITOR_ONLY_SCANNERS). See memory project_stock_demo_forward_test_jul1.
+        'macd_momentum',
         # Disabled Jun 2026 — negative edge, no valuable signals, consuming pipeline
         # resources. gap_and_go: ~40% of all signal volume at PF 0.76 / WR 31%.
         # premarket_catalyst: PF 0.66-0.75 / WR 38%, negative both 30d & 90d windows.
@@ -317,6 +326,22 @@ class ScannerManager:
         if save_to_db and ranked_signals:
             saved = await self._save_all_signals(ranked_signals)
             self._scan_stats['signals_saved'] = saved
+
+            # Edge-map router (a): tag just-saved signals with their character
+            # cell (trend_state/vol_regime/liquidity_tier/cell_market_regime).
+            # only_missing=True makes this cheap + idempotent (touches only the
+            # rows the save just created, whose trend_state is still NULL). Run
+            # off the event loop (sync psycopg2). Failure-isolated: tagging must
+            # NEVER break the scan pipeline, so we only warn on error.
+            try:
+                from stock_scanner.scripts.backfill_signal_cells import backfill
+                tag_stats = await asyncio.to_thread(backfill, only_missing=True)
+                logger.info(
+                    "cell-router: tagged %s just-saved signal(s)",
+                    tag_stats.get("updated"),
+                )
+            except Exception as tag_err:  # noqa: BLE001 - never break the pipeline
+                logger.warning("cell-router tagging skipped (non-fatal): %s", tag_err)
 
         # Log summary
         self._log_scan_summary(ranked_signals)

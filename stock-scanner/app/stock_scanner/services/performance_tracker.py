@@ -25,6 +25,14 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Sanity bound for a single-signal realized P&L. Anything beyond this is not
+# a real outcome -- it's almost always a bad entry_price (stale candle fallback,
+# split-unadjusted feed price, etc.) rather than a genuine >100% move captured
+# by a fixed-bracket swing/day-trade signal. Such rows get status='data_error'
+# instead of silently polluting win/loss/PF aggregates. See the Jul 2026
+# zlma_trend outcome-contamination autopsy (financial-data-engineer).
+MAX_ABS_REALIZED_PNL_PCT = 100.0
+
 
 class SignalOutcome(Enum):
     """Signal outcome status"""
@@ -228,20 +236,37 @@ class PerformanceTracker:
             pnl_pct = ((entry - current) / entry) * 100
             r_multiple = (entry - current) / (stop - entry) if stop != entry else 0
 
+        exit_reason = f"Signal {outcome.replace('_', ' ')}"
+
+        # Guard: an implausible |pnl| almost always means entry_price itself was
+        # bad (stale fallback candle, bad feed tick, etc.) rather than a real
+        # >100% move on a fixed-bracket signal. Flag as data_error instead of
+        # closed/expired so it's excluded from win/loss/PF aggregates but stays
+        # in the table for audit (raw values preserved).
+        if new_status in ('closed', 'expired') and abs(pnl_pct) > MAX_ABS_REALIZED_PNL_PCT:
+            logger.warning(
+                f"{signal['ticker']} ({signal['scanner_name']}): implausible P&L "
+                f"{pnl_pct:+.2f}% (entry={entry}, exit={current}) -> flagging data_error "
+                f"instead of {new_status}"
+            )
+            new_status = 'data_error'
+            exit_reason = (
+                f"DATA_ERROR: |pnl|={pnl_pct:+.2f}% exceeds {MAX_ABS_REALIZED_PNL_PCT:.0f}% "
+                f"sanity bound (entry={entry}, exit={current}); raw outcome={outcome}"
+            )
+
         # Update query - use explicit cast to VARCHAR to avoid type inference issues
         # The CASE expression uses $1::VARCHAR to ensure consistent type deduction
         query = """
             UPDATE stock_scanner_signals
             SET status = $1::VARCHAR,
-                close_timestamp = CASE WHEN $1::VARCHAR IN ('closed', 'expired') THEN NOW() ELSE close_timestamp END,
+                close_timestamp = CASE WHEN $1::VARCHAR IN ('closed', 'expired', 'data_error') THEN NOW() ELSE close_timestamp END,
                 close_price = $2,
                 realized_pnl_pct = $3,
                 realized_r_multiple = $4,
                 exit_reason = $5
             WHERE id = $6
         """
-
-        exit_reason = f"Signal {outcome.replace('_', ' ')}"
 
         await self.db.execute(
             query,
@@ -253,7 +278,7 @@ class PerformanceTracker:
             signal_id
         )
 
-        logger.info(f"Updated {signal['ticker']}: {outcome} (P&L: {pnl_pct:+.2f}%, R: {r_multiple:.2f})")
+        logger.info(f"Updated {signal['ticker']}: {outcome} -> status={new_status} (P&L: {pnl_pct:+.2f}%, R: {r_multiple:.2f})")
 
     async def get_scanner_performance(
         self,
@@ -274,6 +299,12 @@ class PerformanceTracker:
         if scanner_name:
             scanner_filter = f"AND scanner_name = '{scanner_name}'"
 
+        # NOTE: every FILTER touching realized_pnl_pct/realized_r_multiple
+        # explicitly excludes status='data_error' rows -- those are signals
+        # whose realized_pnl_pct was flagged as an implausible/bad-entry
+        # outcome (see MAX_ABS_REALIZED_PNL_PCT guard in _update_signal_status)
+        # and must never leak into win/loss/PF aggregates even though the raw
+        # numeric value is still present in the row for audit.
         query = f"""
             SELECT
                 COUNT(*) as total_signals,
@@ -281,17 +312,18 @@ class PerformanceTracker:
                 COUNT(*) FILTER (WHERE status = 'closed') as closed,
                 COUNT(*) FILTER (WHERE status = 'expired') as expired,
                 COUNT(*) FILTER (WHERE status = 'cancelled') as cancelled,
-                COUNT(*) FILTER (WHERE realized_pnl_pct > 0) as wins,
+                COUNT(*) FILTER (WHERE status = 'data_error') as data_errors,
+                COUNT(*) FILTER (WHERE realized_pnl_pct > 0 AND status != 'data_error') as wins,
                 COUNT(*) FILTER (WHERE realized_pnl_pct <= 0 AND status = 'closed') as losses,
-                AVG(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0) as avg_win,
+                AVG(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0 AND status != 'data_error') as avg_win,
                 AVG(realized_pnl_pct) FILTER (WHERE realized_pnl_pct <= 0 AND status = 'closed') as avg_loss,
-                MAX(realized_pnl_pct) as max_win,
-                MIN(realized_pnl_pct) FILTER (WHERE realized_pnl_pct < 0) as max_loss,
-                AVG(realized_r_multiple) as avg_r,
-                MAX(realized_r_multiple) as max_r,
-                MIN(realized_r_multiple) as min_r,
+                MAX(realized_pnl_pct) FILTER (WHERE status != 'data_error') as max_win,
+                MIN(realized_pnl_pct) FILTER (WHERE realized_pnl_pct < 0 AND status != 'data_error') as max_loss,
+                AVG(realized_r_multiple) FILTER (WHERE status != 'data_error') as avg_r,
+                MAX(realized_r_multiple) FILTER (WHERE status != 'data_error') as max_r,
+                MIN(realized_r_multiple) FILTER (WHERE status != 'data_error') as min_r,
                 AVG(EXTRACT(EPOCH FROM (close_timestamp - signal_timestamp))/3600)
-                    FILTER (WHERE close_timestamp IS NOT NULL) as avg_hold_hours,
+                    FILTER (WHERE close_timestamp IS NOT NULL AND status != 'data_error') as avg_hold_hours,
                 COUNT(*) FILTER (WHERE quality_tier = 'A+') as a_plus,
                 COUNT(*) FILTER (WHERE quality_tier = 'A') as a,
                 COUNT(*) FILTER (WHERE quality_tier = 'B') as b,
@@ -357,14 +389,16 @@ class PerformanceTracker:
         results = {}
 
         for tier in tiers:
+            # status != 'data_error' excludes signals flagged by the
+            # MAX_ABS_REALIZED_PNL_PCT guard (implausible entry/exit price).
             query = f"""
                 SELECT
                     COUNT(*) as total,
-                    COUNT(*) FILTER (WHERE realized_pnl_pct > 0) as wins,
+                    COUNT(*) FILTER (WHERE realized_pnl_pct > 0 AND status != 'data_error') as wins,
                     COUNT(*) FILTER (WHERE realized_pnl_pct <= 0 AND status = 'closed') as losses,
-                    AVG(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0) as avg_win,
+                    AVG(realized_pnl_pct) FILTER (WHERE realized_pnl_pct > 0 AND status != 'data_error') as avg_win,
                     AVG(realized_pnl_pct) FILTER (WHERE realized_pnl_pct <= 0 AND status = 'closed') as avg_loss,
-                    AVG(realized_r_multiple) as avg_r
+                    AVG(realized_r_multiple) FILTER (WHERE status != 'data_error') as avg_r
                 FROM stock_scanner_signals
                 WHERE signal_timestamp >= NOW() - INTERVAL '{days} days'
                 AND quality_tier = $1

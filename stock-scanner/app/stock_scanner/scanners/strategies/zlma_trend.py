@@ -45,6 +45,12 @@ from ..scoring import SignalScorer
 
 logger = logging.getLogger(__name__)
 
+# Max age (calendar days) a fallback daily candle may be relative to
+# calculation_date before we refuse to price a signal off it. Guards against
+# pricing entries off a stale close when the watchlist/screening_metrics
+# pipeline hasn't run yet for the requested date.
+MAX_FALLBACK_CANDLE_AGE_DAYS = 3
+
 
 @dataclass
 class ZLMATrendConfig(ScannerConfig):
@@ -214,6 +220,22 @@ class ZLMATrendScanner(BaseScanner):
         # Get candidate data for scoring
         candidate = await self._get_candidate_data(ticker, calculation_date)
         if not candidate:
+            # No watchlist/screening_metrics row for calculation_date yet (e.g. an
+            # intraday/post-market run firing before that day's pipeline has
+            # completed). Fall back to the latest daily candle, but only if it's
+            # actually fresh — an entry priced off a stale candle silently
+            # corrupts realized_pnl_pct downstream (see _get_daily_candles docstring).
+            last_candle_ts = candles[-1].get('timestamp') if candles else None
+            if last_candle_ts is not None:
+                ts_date = last_candle_ts.date() if hasattr(last_candle_ts, 'date') else last_candle_ts
+                cal_date = calculation_date.date() if hasattr(calculation_date, 'date') else calculation_date
+                if hasattr(ts_date, 'toordinal') and hasattr(cal_date, 'toordinal'):
+                    if abs(cal_date.toordinal() - ts_date.toordinal()) > MAX_FALLBACK_CANDLE_AGE_DAYS:
+                        logger.warning(
+                            f"{ticker}: skipping zlma_trend signal, no screening_metrics "
+                            f"for {cal_date} and latest candle ({ts_date}) is stale"
+                        )
+                        return None
             candidate = {
                 'ticker': ticker,
                 'current_price': current_close,
@@ -486,16 +508,27 @@ class ZLMATrendScanner(BaseScanner):
         return None
 
     async def _get_daily_candles(self, ticker: str, limit: int = 250) -> List[Dict[str, Any]]:
-        """Get daily candles for a ticker."""
+        """Get the most recent `limit` daily candles for a ticker, oldest first.
+
+        NOTE: must ORDER BY timestamp DESC before LIMIT, then reverse. A plain
+        "ORDER BY timestamp ASC LIMIT N" (the historical bug here) returns the
+        OLDEST N rows once a ticker has more than N days of history, freezing
+        closes[-1]/candidate['current_price'] at a stale multi-month-old price
+        instead of the latest close. That stale "current price" then flows into
+        entry_price and silently corrupts realized_pnl_pct in
+        stock_scanner_signals once the real price has moved on (fake >100%
+        "gains" on small-caps that simply rallied for real between the frozen
+        window and now). See financial-data-engineer autopsy, Jul 2026.
+        """
         query = """
             SELECT timestamp, open, high, low, close, volume
             FROM stock_candles_synthesized
             WHERE ticker = $1 AND timeframe = '1d'
-            ORDER BY timestamp ASC
+            ORDER BY timestamp DESC
             LIMIT $2
         """
         rows = await self.db.fetch(query, ticker, limit)
-        return [dict(r) for r in rows]
+        return [dict(r) for r in reversed(rows)]
 
     async def _get_qualified_tickers(self, calculation_date: datetime) -> List[str]:
         """Get all active tickers for ZLMA scan."""

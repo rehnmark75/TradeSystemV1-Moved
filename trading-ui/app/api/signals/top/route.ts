@@ -36,6 +36,14 @@ const DAYTRADE_SIGNAL_DATE_COUNT = 2; // include today's partial scan plus lates
 // monitor-only (still logged for re-validation) rather than deleted. The other
 // 6 scanners were net +$64/12 trades over the same window.
 const MONITOR_ONLY_SCANNERS = ["high_retest", "zlma_trend", "regime_adaptive_composite"];
+// Edge-map router (c) — SHADOW MODE ONLY. When true, log the intended per-cell
+// routing decision for every returned candidate WITHOUT changing what trades or
+// what this endpoint returns. Maps each candidate's stored character cell
+// (trend_state x vol_regime, off migration 043) to its learned verdict in
+// scanner_cell_edge: block->would-drop, monitor->would-hold, trade->allowed,
+// missing/insufficient->fail-open (allowed). Never drops for real. Flip to false
+// to silence. There is deliberately NO enforce mode here.
+const CELL_ROUTER_SHADOW = true;
 // Day-trade EMA50 freshness gate (default; overridable via ?maxEmaCrossAgeSessions).
 // A candidate is kept only if it is currently above its daily EMA50 AND the upward
 // cross happened within this many trading sessions (i.e. a fresh reclaim, not an
@@ -225,6 +233,44 @@ const fetchIntradayCandleStats = async (
     console.error("intraday candle stats query failed", err);
     return {};
   }
+};
+
+// Edge-map router (c) — 2-axis cell verdict lookup (SHADOW MODE).
+// Fetches the learned (scanner_name x trend_state x vol_regime) edge rows in ONE
+// batched query and returns a Map keyed "scanner|trend|vol" for O(1) join in JS.
+// Restricted to the 2-axis grid (liquidity_tier IS NULL AND market_regime IS
+// NULL) per INTEGRATION_NOTES step (c). pf is cast ::float8 (pg numeric -> JS
+// string gotcha); verdict is text so it is safe as-is.
+type CellEdge = { verdict: string | null; pf: number | null; n: number | null };
+const fetchCellEdgeMap = async (
+  client: { query: (text: string, params: unknown[]) => Promise<{ rows: Record<string, unknown>[] }> },
+  scannerNames: string[]
+): Promise<Map<string, CellEdge>> => {
+  const map = new Map<string, CellEdge>();
+  if (scannerNames.length === 0) return map;
+  try {
+    const { rows } = await client.query(
+      `
+      SELECT scanner_name, trend_state, vol_regime, verdict, pf::float8 AS pf, n
+      FROM scanner_cell_edge
+      WHERE liquidity_tier IS NULL
+        AND market_regime IS NULL
+        AND scanner_name = ANY($1)
+      `,
+      [scannerNames]
+    );
+    for (const r of rows) {
+      const key = `${String(r.scanner_name)}|${String(r.trend_state)}|${String(r.vol_regime)}`;
+      map.set(key, {
+        verdict: r.verdict == null ? null : String(r.verdict),
+        pf: r.pf == null ? null : Number(r.pf),
+        n: r.n == null ? null : Number(r.n),
+      });
+    }
+  } catch (err) {
+    console.warn("[CELL-ROUTER-SHADOW] edge-map fetch failed (non-fatal):", err);
+  }
+  return map;
 };
 
 export async function GET(request: Request) {
@@ -484,6 +530,10 @@ export async function GET(request: Request) {
           s.confluence_factors,
           s.timeframe,
           s.market_regime,
+          -- Edge-map router (c): stored as-of character cell (migration 043).
+          -- text columns, so no ::float8 cast needed. Flow through SELECT * below.
+          s.trend_state,
+          s.vol_regime,
           s.claude_grade,
           s.claude_score,
           s.claude_action,
@@ -973,6 +1023,46 @@ export async function GET(request: Request) {
               .map((row, index) => ({ ...row, rank: index + 1 }));
           })()
         : includedRows;
+
+    // Edge-map router (c) — SHADOW MODE: log the intended routing decision for
+    // every returned candidate. Changes NOTHING about what trades or what this
+    // endpoint returns; `actual_action` is always "unchanged". Fail-open on any
+    // missing/insufficient cell or lookup error (never drop for real).
+    if (CELL_ROUTER_SHADOW) {
+      try {
+        const scannerNames = [...new Set(rows.map((r) => String(r.scanner_name)))];
+        const edgeMap = await fetchCellEdgeMap(client, scannerNames);
+        for (const row of rows) {
+          const trend = row.trend_state == null ? null : String(row.trend_state);
+          const vol = row.vol_regime == null ? null : String(row.vol_regime);
+          const cellKey = `${String(row.scanner_name)}|${trend ?? "?"}|${vol ?? "?"}`;
+          const edge = trend && vol ? edgeMap.get(cellKey) : undefined;
+          const verdict = edge?.verdict ?? null;
+          // block->would-drop, monitor->would-hold, trade/missing/insufficient->allowed (fail-open)
+          const intendedAction =
+            verdict === "block"
+              ? "would-drop"
+              : verdict === "monitor"
+                ? "would-hold"
+                : "allowed";
+          console.log(
+            "[CELL-ROUTER-SHADOW]",
+            JSON.stringify({
+              ticker: row.ticker,
+              scanner_name: row.scanner_name,
+              cell_key: cellKey,
+              verdict: edge ? (verdict ?? "insufficient") : "missing",
+              pf: edge?.pf ?? null,
+              n: edge?.n ?? null,
+              intended_action: intendedAction,
+              actual_action: "unchanged",
+            })
+          );
+        }
+      } catch (err) {
+        console.warn("[CELL-ROUTER-SHADOW] shadow logging failed (non-fatal):", err);
+      }
+    }
 
     return NextResponse.json(
       {

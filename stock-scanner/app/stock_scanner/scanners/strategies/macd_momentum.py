@@ -54,6 +54,16 @@ class MACDMomentumConfig(ScannerConfig):
     max_signals_per_run: int = 50
     min_score_threshold: int = 60      # Minimum quality score
 
+    # --- Character-cell gate (edge-map autopsy, Jul 2026) -------------------
+    # macd_momentum is a net loser pooled (PF 0.77) but has a robust positive
+    # pocket at: trending + low-volatility (ADX >= 25 AND ATR% < 2.0),
+    # PF 1.41 over 4.5 months / 39 tickers. Ship gated to ONLY that cell for
+    # demo forward-test. See memory project_stock_demo_forward_test_jul1 /
+    # macd_momentum cell-gate autopsy.
+    cell_gate_enabled: bool = True
+    cell_gate_adx_min: float = 25.0        # ADX_MIN
+    cell_gate_atr_pct_max: float = 2.0     # ATR_PCT_MAX
+
 
 class MACDMomentumScanner(BaseScanner):
     """
@@ -123,9 +133,14 @@ class MACDMomentumScanner(BaseScanner):
         tickers = await self.get_all_active_tickers()
         logger.info(f"Scanning {len(tickers)} active stocks for MACD momentum")
 
+        # Cell gate metrics (as-of calculation_date, causal): adx_14 / atr_percent
+        # per ticker from stock_screening_metrics. Fetched once, batched.
+        cell_metrics = await self._get_cell_gate_metrics(tickers, calculation_date)
+
         # Step 2 & 3: Fetch data and run strategy for each ticker
         signals = []
         scanned_count = 0
+        gated_out_count = 0
 
         for ticker in tickers:
             sector = None  # Can be fetched from stock_instruments if needed
@@ -147,20 +162,41 @@ class MACDMomentumScanner(BaseScanner):
                 # Run the exact backtested strategy logic
                 macd_signal = self.strategy.scan(df, ticker, sector)
 
-                if macd_signal:
-                    # Convert to SignalSetup format (pass ticker info as minimal candidate)
-                    candidate = {'ticker': ticker, 'sector': sector}
-                    signal = self._convert_to_signal_setup(macd_signal, candidate)
-                    if signal:
-                        signals.append(signal)
-                        logger.info(f"{ticker}: Signal generated - {macd_signal.quality_tier} tier, "
-                                    f"confidence {macd_signal.confidence:.1%}")
+                if not macd_signal:
+                    continue
+
+                # --- Character-cell gate ---
+                # Only PF-positive pocket found in autopsy: trend + low-vol
+                # (ADX >= cell_gate_adx_min AND ATR% < cell_gate_atr_pct_max).
+                # Reject (no signal) outside the cell.
+                if self.config.cell_gate_enabled:
+                    passed, adx_val, atr_pct_val = self._check_cell_gate(ticker, cell_metrics)
+                    if not passed:
+                        gated_out_count += 1
+                        logger.info(
+                            f"{ticker}: CELL_GATE_REJECT - macd_momentum signal outside "
+                            f"validated cell (adx_14={adx_val}, atr_percent={atr_pct_val}; "
+                            f"require adx>={self.config.cell_gate_adx_min}, "
+                            f"atr_pct<{self.config.cell_gate_atr_pct_max})"
+                        )
+                        continue
+
+                # Convert to SignalSetup format (pass ticker info as minimal candidate)
+                candidate = {'ticker': ticker, 'sector': sector}
+                signal = self._convert_to_signal_setup(macd_signal, candidate)
+                if signal:
+                    signals.append(signal)
+                    logger.info(f"{ticker}: Signal generated - {macd_signal.quality_tier} tier, "
+                                f"confidence {macd_signal.confidence:.1%}")
 
             except Exception as e:
                 logger.warning(f"{ticker}: Error scanning - {e}")
                 continue
 
-        logger.info(f"Scanned {scanned_count} tickers, generated {len(signals)} signals")
+        logger.info(
+            f"Scanned {scanned_count} tickers, generated {len(signals)} signals "
+            f"({gated_out_count} rejected by cell gate)"
+        )
 
         # Step 4: Sort by composite score (quality)
         signals.sort(key=lambda x: x.composite_score, reverse=True)
@@ -173,6 +209,71 @@ class MACDMomentumScanner(BaseScanner):
         self.log_scan_summary(len(tickers), len(signals), high_quality)
 
         return signals
+
+    async def _get_cell_gate_metrics(
+        self,
+        tickers: List[str],
+        calculation_date: date
+    ) -> Dict[str, Dict[str, Optional[float]]]:
+        """
+        Batch-fetch the character-cell gate metrics (adx_14, atr_percent) for
+        all tickers, as-of `calculation_date`.
+
+        Causal / no-lookahead: for each ticker we take the most recent row
+        with calculation_date <= the scan's calculation_date (not a future
+        date), matching how stock_screening_metrics is populated EOD.
+        """
+        if not tickers:
+            return {}
+
+        query = """
+            SELECT DISTINCT ON (ticker)
+                ticker, adx_14, atr_percent, calculation_date
+            FROM stock_screening_metrics
+            WHERE ticker = ANY($1)
+              AND calculation_date <= $2
+            ORDER BY ticker, calculation_date DESC
+        """
+        rows = await self.db.fetch(query, tickers, calculation_date)
+        return {
+            r['ticker']: {
+                'adx_14': float(r['adx_14']) if r['adx_14'] is not None else None,
+                'atr_percent': float(r['atr_percent']) if r['atr_percent'] is not None else None,
+            }
+            for r in rows
+        }
+
+    def _check_cell_gate(
+        self,
+        ticker: str,
+        cell_metrics: Dict[str, Dict[str, Optional[float]]]
+    ) -> tuple:
+        """
+        Character-cell gate: trend + low-volatility.
+
+        Validated pocket (edge-map autopsy, Jul 2026): ADX >= ADX_MIN AND
+        ATR% < ATR_PCT_MAX -> PF 1.41 over 4.5 months / 39 tickers, vs a
+        net-losing PF 0.77 pooled across all regimes.
+
+        Returns (passed: bool, adx_value, atr_pct_value) for logging.
+        """
+        metrics = cell_metrics.get(ticker)
+        if not metrics:
+            # No metrics row available as-of this date -> fail closed (can't
+            # confirm the cell, so don't trade it).
+            return False, None, None
+
+        adx_val = metrics.get('adx_14')
+        atr_pct_val = metrics.get('atr_percent')
+
+        if adx_val is None or atr_pct_val is None:
+            return False, adx_val, atr_pct_val
+
+        passed = (
+            adx_val >= self.config.cell_gate_adx_min
+            and atr_pct_val < self.config.cell_gate_atr_pct_max
+        )
+        return passed, adx_val, atr_pct_val
 
     async def _get_latest_watchlist_date(self) -> date:
         """Get the most recent date with watchlist data."""
