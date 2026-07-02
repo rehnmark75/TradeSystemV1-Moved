@@ -9,19 +9,24 @@ The service is intentionally idempotent:
 """
 
 import logging
-from datetime import datetime, timezone
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
+
+import pytz
+from stock_scanner.core.detection.market_hours import is_trading_day, is_us_market_open
 
 logger = logging.getLogger("breakeven_monitor")
 
 
 class BreakevenMonitor:
     DEFAULT_TRIGGER_USD = 10.0
+    ET = pytz.timezone("America/New_York")
 
     def __init__(self, db_manager, dry_run: bool = True,
                  trail_enabled: bool = False, trail_arm_pct: float = 2.0,
                  trail_atr_mult: float = 3.0, trail_tp_backstop_pct: float = 30.0,
-                 trail_default_atr_pct: float = 3.0):
+                 trail_default_atr_pct: float = 3.0,
+                 time_stop_enabled: bool = False, time_stop_days: int = 3):
         self.db = db_manager
         self.dry_run = dry_run
         # ATR-trailing (validated Jul-2026, ema_cross_lab.py). OFF by default.
@@ -30,6 +35,11 @@ class BreakevenMonitor:
         self.trail_atr_mult = trail_atr_mult
         self.trail_tp_backstop_pct = trail_tp_backstop_pct
         self.trail_default_atr_pct = trail_default_atr_pct
+        # Time stop (Jul-2026): the target hold is 1-3 days; positions held past
+        # 3 sessions without ever arming the trail were the second-worst P&L
+        # bucket (n=20, 30% WR, -$188/90d) — dead positions blocking slots.
+        self.time_stop_enabled = time_stop_enabled
+        self.time_stop_days = time_stop_days
 
     async def ensure_schema(self):
         """Create monitor table for deployments where the stock migration has not rerun."""
@@ -157,6 +167,11 @@ class BreakevenMonitor:
         return candidates[0]
 
     async def _process_position(self, client, monitor: dict, position) -> bool:
+        # Time stop runs first: a position that never armed the trail has no
+        # exit path except the fixed SL — don't let it drift past the horizon.
+        if await self._check_time_stop(client, monitor, position):
+            return True
+
         # ATR-trailing takes over the exit when enabled (long-only day-trades).
         if self.trail_enabled and (monitor.get("side") == "buy"):
             return await self._process_trailing(client, monitor, position)
@@ -257,6 +272,92 @@ class BreakevenMonitor:
                                  widened=(need_widen and not self.dry_run) or bool(monitor.get("tp_widened")),
                                  trailed=(new_sl is not None and not self.dry_run))
         return moved
+
+    # ------------------------------------------------------------------
+    # Time stop (long-only): close a position that has been held for
+    # time_stop_days full trading sessions without ever reaching the trail
+    # arm level (entry * (1 + trail_arm_pct%)). Winners arm the trail and are
+    # never touched; this only clears dead positions so the slot recycles.
+    # ------------------------------------------------------------------
+    async def _check_time_stop(self, client, monitor: dict, position) -> bool:
+        if not self.time_stop_enabled or monitor.get("side") != "buy":
+            return False
+
+        entry = float(monitor.get("entry_price") or position.entry_price or 0)
+        price = float(position.current_price or 0)
+        opened_at = position.opened_at
+        if entry <= 0 or price <= 0 or not opened_at:
+            return False
+
+        # Never time-stop a position that armed the trail — the trail owns it.
+        peak = max(float(monitor.get("peak_price") or 0), price)
+        arm_level = entry * (1 + self.trail_arm_pct / 100)
+        if peak >= arm_level:
+            return False
+
+        sessions_held = self._trading_sessions_held(opened_at)
+        if sessions_held < self.time_stop_days:
+            return False
+
+        # Market close orders only fill in the regular session.
+        if not is_us_market_open():
+            logger.info(
+                "[TimeStop] %s deal %s due (%s sessions, peak %.4f < arm %.4f) — waiting for market open",
+                monitor["ticker"], position.deal_id, sessions_held, peak, arm_level,
+            )
+            return False
+
+        profit = float(position.unrealized_pnl or 0)
+        if self.dry_run:
+            logger.info(
+                "[TimeStop] DRY RUN would close %s deal %s after %s sessions (pnl %.2f, peak %.4f < arm %.4f)",
+                monitor["ticker"], position.deal_id, sessions_held, profit, peak, arm_level,
+            )
+            await self._update_check(monitor["id"], position.deal_id, profit,
+                                     f"time stop due ({sessions_held} sessions, dry run)")
+            return False
+
+        await client.close_position(position.deal_id)
+        await self._mark_time_stopped(monitor["id"], position.deal_id, profit, sessions_held)
+        logger.info(
+            "[TimeStop] Closed %s deal %s after %s sessions unarmed (pnl %.2f)",
+            monitor["ticker"], position.deal_id, sessions_held, profit,
+        )
+        return True
+
+    def _trading_sessions_held(self, opened_at_utc: datetime) -> int:
+        """Full trading sessions elapsed strictly after the entry date (ET).
+
+        Entry Monday -> Tue/Wed/Thu count 1/2/3; the stop fires Thursday at the
+        open, i.e. the position got Mon-Wed (3 full sessions) to arm the trail.
+        """
+        if opened_at_utc.tzinfo is None:
+            opened_at_utc = pytz.utc.localize(opened_at_utc)
+        open_date = opened_at_utc.astimezone(self.ET).date()
+        today = datetime.now(self.ET).date()
+        sessions = 0
+        d = open_date
+        # bounded walk — monitors never live anywhere near 90 calendar days
+        for _ in range(90):
+            d += timedelta(days=1)
+            if d > today:
+                break
+            if is_trading_day(datetime.combine(d, datetime.min.time())):
+                sessions += 1
+        return sessions
+
+    async def _mark_time_stopped(self, monitor_id: int, deal_id: str, profit: float, sessions: int):
+        await self.db.execute("""
+            UPDATE stock_breakeven_monitors
+            SET status = 'closed_time_stop',
+                robomarkets_deal_id = COALESCE(NULLIF(robomarkets_deal_id, ''), $2),
+                last_profit_usd = $3,
+                last_checked_at = NOW(),
+                moved_at = NOW(),
+                error_message = $4
+            WHERE id = $1
+        """, monitor_id, deal_id, profit,
+            f"time stop: closed after {sessions} sessions without arming trail")
 
     async def _get_atr_pct(self, ticker: str) -> float:
         """Latest nightly daily ATR%% for the ticker; fallback to default."""

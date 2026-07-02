@@ -1447,6 +1447,10 @@ class StockScheduler:
             trail_arm_pct = float(os.getenv('TRAILING_STOP_ARM_PCT', '2.0'))
             trail_atr_mult = float(os.getenv('TRAILING_STOP_ATR_MULT', '3.0'))
             trail_tp_backstop_pct = float(os.getenv('TRAILING_STOP_TP_BACKSTOP_PCT', '30.0'))
+            # Time stop (Jul 2026): close positions that never reach the trail arm
+            # level after N full sessions (target hold is 1-3 days). OFF by default.
+            time_stop_enabled = os.getenv('TIME_STOP_ENABLED', 'false').lower() in ('1', 'true', 'yes')
+            time_stop_days = int(os.getenv('TIME_STOP_TRADING_DAYS', '3'))
 
             if not api_key or not account_id:
                 logger.warning("[SKIP] Breakeven monitor - missing API credentials")
@@ -1457,10 +1461,14 @@ class StockScheduler:
                 db_manager=self.db, dry_run=dry_run,
                 trail_enabled=trail_enabled, trail_arm_pct=trail_arm_pct,
                 trail_atr_mult=trail_atr_mult, trail_tp_backstop_pct=trail_tp_backstop_pct,
+                time_stop_enabled=time_stop_enabled, time_stop_days=time_stop_days,
             )
             if trail_enabled:
                 logger.info("[Trail] ATR trailing ENABLED (arm=%.1f%% mult=%.1f backstop=%.0f%% dry_run=%s)",
                             trail_arm_pct, trail_atr_mult, trail_tp_backstop_pct, dry_run)
+            if time_stop_enabled:
+                logger.info("[TimeStop] ENABLED (%s trading sessions, dry_run=%s)",
+                            time_stop_days, dry_run)
 
             async with client:
                 results = await monitor.check_once(client)

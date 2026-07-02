@@ -107,6 +107,12 @@ class AutoOpenTrader:
         # require_positive_day is on.
         "AUTO_TRADE_MIN_DAY_CHANGE_PCT": ("min_day_change_pct", "float", "0"),
         "AUTO_TRADE_MAX_QUOTE_AGE_MINUTES": ("max_quote_age_minutes", "int", "3"),
+        # Extension hard gate (Jul 2 2026): reject entries more than N daily ATRs
+        # above the EMA50. The route only scores extension softly (-15 pts/ATR);
+        # chased extended prints were the instant-stop-out bucket (17 trades <1h
+        # hold, 0% WR, -$178/90d — stop inside normal noise after buying a spike).
+        # Fail-closed like the VWAP/day-change gates. 0 disables.
+        "AUTO_TRADE_MAX_EMA50_EXTENSION_ATR": ("max_ema50_extension_atr", "float", "3.0"),
         "AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT": ("pullback_limit_offset_pct", "float", "0.3"),
         "AUTO_TRADE_START_DELAY_MINUTES": ("start_delay_minutes", "int", "15"),
         "AUTO_TRADE_VALIDATE_DELAY_MINUTES": ("validate_delay_minutes", "int", "5"),
@@ -215,6 +221,10 @@ class AutoOpenTrader:
         await self.db.execute("""
             ALTER TABLE stock_auto_trade_candidates
             ADD COLUMN IF NOT EXISTS day_change_pct DECIMAL(10,4)
+        """)
+        await self.db.execute("""
+            ALTER TABLE stock_auto_trade_candidates
+            ADD COLUMN IF NOT EXISTS signal_id BIGINT
         """)
         await self.db.execute("""
             CREATE INDEX IF NOT EXISTS idx_stock_auto_trade_candidates_run_status
@@ -413,6 +423,7 @@ class AutoOpenTrader:
             "require_intraday_rvol": self.require_intraday_rvol,
             "require_above_vwap": self.require_above_vwap,
             "max_quote_age_minutes": self.max_quote_age_minutes,
+            "max_ema50_extension_atr": self.max_ema50_extension_atr,
             "pullback_limit_offset_pct": self.pullback_limit_offset_pct,
             "start_delay_minutes": self.start_delay_minutes,
             "validate_delay_minutes": self.validate_delay_minutes,
@@ -469,9 +480,10 @@ class AutoOpenTrader:
                     broker_last, broker_spread_pct, broker_quote_age_minutes,
                     relative_volume, intraday_relative_volume, atr_percent,
                     planned_entry, planned_stop_loss, planned_take_profit, session_vwap,
-                    prev_close, day_change_pct
-                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23)
+                    prev_close, day_change_pct, signal_id
+                ) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24)
                 ON CONFLICT (run_id, ticker) DO UPDATE SET
+                    signal_id = COALESCE(stock_auto_trade_candidates.signal_id, EXCLUDED.signal_id),
                     status = CASE
                         WHEN stock_auto_trade_candidates.status = 'capped' THEN 'queued'
                         ELSE stock_auto_trade_candidates.status
@@ -532,6 +544,7 @@ class AutoOpenTrader:
                 self._num(row.get("pm_suggested_stop")), self._num(row.get("pm_suggested_target")),
                 self._num(row.get("session_vwap")),
                 *self._day_change(row),
+                self._int(row.get("id")),
             )
             count += 1
         return count
@@ -679,6 +692,7 @@ class AutoOpenTrader:
                     price=entry,
                     stop_loss=stop,
                     take_profit=target,
+                    signal_id=self._int(row.get("signal_id")),
                 )
                 if response.get("status") != "submitted" and self._is_price_too_close_response(response):
                     original_response = response
@@ -709,6 +723,7 @@ class AutoOpenTrader:
                                 price=entry,
                                 stop_loss=stop,
                                 take_profit=target,
+                                signal_id=self._int(row.get("signal_id")),
                             )
                             response["fallback_reason"] = "price_too_close_to_quote"
                             response["initial_order_response"] = original_response
@@ -803,7 +818,8 @@ class AutoOpenTrader:
             "mode": mode,
         }
 
-    async def _place_order_api(self, ticker: str, quantity: int, price: float, stop_loss: float, take_profit: float) -> Dict[str, Any]:
+    async def _place_order_api(self, ticker: str, quantity: int, price: float, stop_loss: float,
+                               take_profit: float, signal_id: Optional[int] = None) -> Dict[str, Any]:
         url = f"{self.trading_ui_url}/api/orders/place"
         payload = {
             "ticker": ticker,
@@ -813,6 +829,10 @@ class AutoOpenTrader:
             "price": round(price, 2),
             "stop_loss": round(stop_loss, 2),
             "take_profit": round(take_profit, 2),
+            # Exact signal lineage (Jul 2 2026): stock_orders.signal_id is what
+            # BrokerTradeSync uses to link broker_trades back to the scanner
+            # signal — without it only ~28% of fills were attributable.
+            "signal_id": signal_id,
             "trade_ready_override": True,
             # BE disabled Jun 11 2026: trigger sweep (be_trigger_sweep.py) showed
             # BE kills ~1.7x more winners than the losers it rescues at every
@@ -969,6 +989,29 @@ class AutoOpenTrader:
                 return (
                     f"Day change {day_change_pct:+.2f}% below min margin "
                     f"{min_margin:.2f}% (prev close {prev_close:.2f})"
+                )
+        # Extension veto: buying a name several daily ATRs above its EMA50 is
+        # chasing a spike — the fixed 2% stop then sits inside normal noise
+        # (the <1h instant-stop-out bucket: 17 trades, 0% WR). The route already
+        # requires above-EMA50 + fresh cross; this caps HOW FAR above. Fail-closed
+        # like the VWAP gate. Off switch: AUTO_TRADE_MAX_EMA50_EXTENSION_ATR=0.
+        if self.max_ema50_extension_atr > 0:
+            ema50 = self._num(row.get("ema_50"))
+            atr_pct = self._num(row.get("atr_percent"))
+            price_for_ext = self._num(row.get("broker_last")) or self._num(row.get("broker_ask"))
+            if ema50 is None or ema50 <= 0:
+                return "Missing EMA50 (extension gate)"
+            if atr_pct is None or atr_pct <= 0:
+                return "Missing ATR% (extension gate)"
+            if price_for_ext is None or price_for_ext <= 0:
+                return "Missing broker price for extension check"
+            atr_dollars = price_for_ext * atr_pct / 100
+            extension_atr = (price_for_ext - ema50) / atr_dollars
+            if extension_atr > self.max_ema50_extension_atr:
+                return (
+                    f"Extended {extension_atr:.1f}xATR above EMA50 "
+                    f"(price {price_for_ext:.2f}, EMA50 {ema50:.2f}, "
+                    f"max {self.max_ema50_extension_atr:.1f}xATR)"
                 )
         ask = self._num(row.get("broker_ask"))
         if ask is None or ask <= 0:

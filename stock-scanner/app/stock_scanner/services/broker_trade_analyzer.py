@@ -642,18 +642,19 @@ class BrokerTradeSync:
         self.db = db_manager
         self.client = robomarkets_client
 
-    async def _resolve_signal_id(
+    async def _resolve_order(
         self,
         broker_ticker: str,
         side: str,
         reference_time: Optional[datetime]
-    ) -> Optional[int]:
+    ) -> Optional[Dict[str, Any]]:
         """
-        Resolve the originating signal_id for a broker trade from stock_orders.
+        Resolve the originating stock_orders row for a broker trade.
 
         We prefer exact order-to-trade lineage, but the broker trade payload does not
         currently include our local signal id. The best available source is the most
         relevant stock_orders row for the same ticker/side nearest the trade open time.
+        Returns signal_id plus the planned SL/TP bracket for backfilling.
         """
         if not broker_ticker:
             return None
@@ -666,7 +667,7 @@ class BrokerTradeSync:
 
         order = await self.db.fetchrow(
             """
-            SELECT signal_id
+            SELECT signal_id, stop_loss, take_profit
             FROM stock_orders
             WHERE ticker = $1
               AND signal_id IS NOT NULL
@@ -690,9 +691,18 @@ class BrokerTradeSync:
             normalized_reference_time
         )
 
+        return dict(order) if order else None
+
+    async def _resolve_signal_id(
+        self,
+        broker_ticker: str,
+        side: str,
+        reference_time: Optional[datetime]
+    ) -> Optional[int]:
+        """Resolve just the originating signal_id (see _resolve_order)."""
+        order = await self._resolve_order(broker_ticker, side, reference_time)
         if not order:
             return None
-
         signal_id = order.get("signal_id")
         return int(signal_id) if signal_id is not None else None
 
@@ -1022,13 +1032,18 @@ class BrokerTradeSync:
 
     async def backfill_signal_ids(self, days: int = 90) -> Dict[str, int]:
         """
-        Backfill signal_id for existing broker_trades rows that predate persistence.
+        Backfill signal_id and missing SL/TP brackets for broker_trades rows.
+
+        The broker deal history rarely carries the bracket (82% of closed rows
+        had no SL/TP stamped), so the planned bracket from the matched
+        stock_orders row is the best available record of what was actually
+        protecting the trade.
         """
         rows = await self.db.fetch(
             """
             SELECT deal_id, ticker, side, open_time
             FROM broker_trades
-            WHERE signal_id IS NULL
+            WHERE (signal_id IS NULL OR stop_loss IS NULL OR take_profit IS NULL)
               AND open_time >= NOW() - ($1::text || ' days')::interval
             ORDER BY open_time DESC
             """,
@@ -1040,28 +1055,38 @@ class BrokerTradeSync:
 
         for row in rows:
             checked += 1
-            signal_id = await self._resolve_signal_id(
+            order = await self._resolve_order(
                 broker_ticker=row["ticker"],
                 side=row["side"],
                 reference_time=row["open_time"]
             )
-            if signal_id is None:
+            if not order:
                 continue
 
-            await self.db.execute(
+            result = await self.db.execute(
                 """
                 UPDATE broker_trades
-                SET signal_id = $1, updated_at = NOW()
-                WHERE deal_id = $2
-                  AND signal_id IS NULL
+                SET signal_id = COALESCE(signal_id, $1),
+                    stop_loss = COALESCE(stop_loss, $2),
+                    take_profit = COALESCE(take_profit, $3),
+                    updated_at = NOW()
+                WHERE deal_id = $4
+                  AND (
+                    (signal_id IS NULL AND $1::bigint IS NOT NULL)
+                    OR (stop_loss IS NULL AND $2::decimal IS NOT NULL)
+                    OR (take_profit IS NULL AND $3::decimal IS NOT NULL)
+                  )
                 """,
-                signal_id,
+                order.get("signal_id"),
+                order.get("stop_loss"),
+                order.get("take_profit"),
                 row["deal_id"]
             )
-            updated += 1
+            if "UPDATE 1" in str(result):
+                updated += 1
 
         if updated:
-            logger.info(f"Backfilled signal_id on {updated}/{checked} broker trades")
+            logger.info(f"Backfilled signal_id/brackets on {updated}/{checked} broker trades")
 
         return {"checked": checked, "updated": updated}
 

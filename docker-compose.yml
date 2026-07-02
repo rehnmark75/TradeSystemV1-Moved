@@ -456,6 +456,12 @@ services:
       - TRAILING_STOP_ARM_PCT=${TRAILING_STOP_ARM_PCT:-2.0}
       - TRAILING_STOP_ATR_MULT=${TRAILING_STOP_ATR_MULT:-3.0}
       - TRAILING_STOP_TP_BACKSTOP_PCT=${TRAILING_STOP_TP_BACKSTOP_PCT:-30.0}
+      # Time stop (Jul 2 2026): the target hold is 1-3 days. Close any long that
+      # never reached the trail arm level (+ARM_PCT%) after 3 full trading
+      # sessions — the >3d unarmed bucket was the second-worst P&L segment
+      # (n=20, 30% WR, -$188/90d). Armed positions are never touched.
+      - TIME_STOP_ENABLED=${TIME_STOP_ENABLED:-true}
+      - TIME_STOP_TRADING_DAYS=${TIME_STOP_TRADING_DAYS:-3}
     command: ["python", "-m", "stock_scanner.scheduler", "breakeven-monitor"]
     networks:
       - lab-net
@@ -498,6 +504,11 @@ services:
       - AUTO_TRADE_REQUIRE_INTRADAY_RVOL=true
       - AUTO_TRADE_REQUIRE_ABOVE_VWAP=true
       - AUTO_TRADE_MAX_QUOTE_AGE_MINUTES=3
+      # Extension hard gate (Jul 2 2026): reject entries >N daily ATRs above the
+      # EMA50 — chased extended prints were the instant-stop-out bucket (17
+      # trades <1h, 0% WR). NOTE stock_auto_trade_settings is authoritative at
+      # runtime; this env only seeds the initial row. 0 disables.
+      - AUTO_TRADE_MAX_EMA50_EXTENSION_ATR=${AUTO_TRADE_MAX_EMA50_EXTENSION_ATR:-3.0}
       - AUTO_TRADE_PULLBACK_LIMIT_OFFSET_PCT=0.3
       - AUTO_TRADE_STOP_LOSS_PCT=3.0
       - AUTO_TRADE_TAKE_PROFIT_PCT=5.0
