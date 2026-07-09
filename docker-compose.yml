@@ -660,6 +660,24 @@ services:
       retries: 2
       start_period: 30s
 
+  candle-snapshotter:
+    build:
+      context: ./snapshotter
+    container_name: candle-snapshotter
+    restart: unless-stopped
+    environment:
+      - PG_DSN=postgresql://postgres:postgres@postgres:5432/forex
+      # Container-scoped SAS URL with write+create perms. If unset the script
+      # exits(2) on start — fail-closed without breaking other compose commands.
+      - BLOB_CONTAINER_SAS_URL=${CANDLE_BLOB_CONTAINER_SAS_URL:-}
+      # label:bucket-minutes:bars — 5m entry context, 15m swing structure, 1h bias
+      - SERIES=5min:5:72,15min:15:96,1h:60:48
+      - SNAPSHOT_INTERVAL_SECONDS=60
+    networks:
+      - lab-net
+    depends_on:
+      - postgres
+
 volumes:
   pgadmin_data:
   minio_data:
