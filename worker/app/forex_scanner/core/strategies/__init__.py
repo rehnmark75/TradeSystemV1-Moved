@@ -28,6 +28,7 @@ from .inside_day_breakout_strategy import InsideDayBreakoutStrategy, create_insi
 from .squeeze_momentum_strategy import SqueezeMomentumStrategy
 from .ultimate_ma_mtf_forex_strategy import UltimateMAMTFForexStrategy
 from .confluence_stack_strategy import ConfluenceStackStrategy
+from .freedom_scalp_strategy import FreedomScalpStrategy
 from .signal_result import SignalResult
 from .strategy_registry import (
     StrategyRegistry,

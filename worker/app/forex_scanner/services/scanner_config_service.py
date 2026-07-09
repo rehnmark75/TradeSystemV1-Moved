@@ -53,12 +53,14 @@ KNOWN_ACTIVE_STRATEGIES: frozenset = frozenset({
     'INSIDE_DAY',
     'SMC_SIMPLE_V2',
     'CONFLUENCE_STACK',
+    'FREEDOMSCALP',
 })
 
 DEMO_ONLY_STRATEGIES: frozenset = frozenset({
     'SMC_SIMPLE_V2',
     'ULTIMATE_MA_MTF_FOREX',
     'CONFLUENCE_STACK',
+    'FREEDOMSCALP',
 })
 
 

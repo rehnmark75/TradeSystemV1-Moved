@@ -189,6 +189,19 @@ class SignalDetector:
             self.logger.warning(f"⚠️ CONFLUENCE_STACK config check failed; disabled: {e}")
             self.confluence_stack_enabled = False
 
+        # FREEDOMSCALP is a demo-only gold forward test (TradingView Gaussian
+        # scalp port, Jul 2026). Real demo execution; never runs on live.
+        try:
+            config_set = os.getenv("TRADING_CONFIG_SET", "demo")
+            if config_set == "demo":
+                scanner_cfg = get_scanner_config()
+                self.freedomscalp_enabled = scanner_cfg.is_strategy_enabled("FREEDOMSCALP")
+            else:
+                self.freedomscalp_enabled = False
+        except Exception as e:
+            self.logger.warning(f"⚠️ FREEDOMSCALP config check failed; disabled: {e}")
+            self.freedomscalp_enabled = False
+
         # Multi-strategy routing (v3.0.0)
         # Routes signals to different strategies based on ADX-derived market regime
         self._strategy_router = None
@@ -261,6 +274,7 @@ class SignalDetector:
                 'ULTIMATE_MA_MTF_FOREX': 'ultimate_ma_mtf_forex_strategy',
                 'SMC_SIMPLE_V2': 'smc_simple_v2_strategy',
                 'CONFLUENCE_STACK': 'confluence_stack_strategy',
+                'FREEDOMSCALP': 'freedom_scalp_strategy',
             }
             module_name = module_map.get(key)
             if module_name:
@@ -1201,6 +1215,30 @@ class SignalDetector:
                     self.logger.error(f"❌ [CONFLUENCE_STACK] Error for {epic}: {e}")
                     individual_results['confluence_stack'] = None
 
+            # FREEDOMSCALP: demo-only gold forward test. Runs alongside
+            # XAU_GOLD on gold epics; own pair table scopes it to gold.
+            if self.freedomscalp_enabled and self._freedomscalp_pair_enabled(epic):
+                try:
+                    self.logger.debug(f"🔍 [FREEDOMSCALP] Starting detection for {epic}")
+                    _fs_bt_time = getattr(self.data_fetcher, 'current_backtest_time', None)
+                    _fs_ts = _fs_bt_time if _fs_bt_time is not None else datetime.now(timezone.utc)
+                    fs_signal = self.detect_freedomscalp_signals(
+                        epic, pair, spread_pips, timeframe, current_timestamp=_fs_ts
+                    )
+                    individual_results['freedomscalp'] = fs_signal
+                    if fs_signal:
+                        all_signals.append(fs_signal)
+                        mode = "MONITOR" if fs_signal.get("monitor_only") else "ACTIVE"
+                        self.logger.info(
+                            f"✅ [FREEDOMSCALP:{mode}] Signal detected for {epic}: "
+                            f"{fs_signal.get('signal')} @ {fs_signal.get('entry_price', 0):.2f}"
+                        )
+                    else:
+                        self.logger.debug(f"📊 [FREEDOMSCALP] No signal for {epic}")
+                except Exception as e:
+                    self.logger.error(f"❌ [FREEDOMSCALP] Error for {epic}: {e}")
+                    individual_results['freedomscalp'] = None
+
             # Propagate regime info from routing to signals that don't set these fields
             if all_signals and routing_result.get('regime'):
                 for sig in all_signals:
@@ -1260,6 +1298,8 @@ class SignalDetector:
         'UMTF': 'ULTIMATE_MA_MTF_FOREX',
         'STACK': 'CONFLUENCE_STACK',
         'CONFLUENCE': 'CONFLUENCE_STACK',
+        'FREEDOM': 'FREEDOMSCALP',
+        'FS': 'FREEDOMSCALP',
     }
 
     def _detect_single_strategy(
@@ -1305,6 +1345,8 @@ class SignalDetector:
                 signal = self.detect_smc_simple_v2_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'CONFLUENCE_STACK':
                 signal = self.detect_confluence_stack_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
+            elif name == 'FREEDOMSCALP':
+                signal = self.detect_freedomscalp_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             elif name == 'INSIDE_DAY':
                 signal = self.detect_inside_day_signals(epic, pair, spread_pips, timeframe, current_timestamp=current_timestamp)
             else:
@@ -2415,6 +2457,72 @@ class SignalDetector:
 
         except Exception as e:
             self.logger.error(f"❌ Error detecting Confluence Stack signals for {epic}: {e}")
+            return None
+
+    def _freedomscalp_pair_enabled(self, epic: str) -> bool:
+        """Check FREEDOMSCALP per-pair enablement (fails closed)."""
+        try:
+            from .strategies.freedom_scalp_strategy import FreedomScalpConfigService
+            svc = FreedomScalpConfigService.get_instance()
+            if svc._db_manager is None:
+                svc.set_db_manager(self.db_manager)
+            return svc.is_pair_enabled(epic)
+        except Exception as e:
+            self.logger.debug(f"[FREEDOMSCALP] pair enablement check failed: {e}")
+            return False
+
+    def detect_freedomscalp_signals(
+        self,
+        epic: str,
+        pair: str,
+        spread_pips: float = 1.5,
+        timeframe: str = '5m',
+        current_timestamp: datetime = None,
+    ) -> Optional[Dict]:
+        """Detect signals using the FREEDOMSCALP Gaussian scalp strategy."""
+        try:
+            strategy = self._get_strategy('FREEDOMSCALP')
+            if strategy is None:
+                return None
+
+            is_backtest = (
+                hasattr(self.data_fetcher, 'current_backtest_time')
+                and self.data_fetcher.current_backtest_time is not None
+            )
+            if is_backtest:
+                current_id = id(self.data_fetcher)
+                if getattr(self, '_freedomscalp_backtest_id', None) != current_id:
+                    self._freedomscalp_backtest_id = current_id
+                    strategy.reset_cooldowns()
+
+            df_5m = self.data_fetcher.get_enhanced_data(
+                epic=epic,
+                pair=pair,
+                timeframe='5m',
+                lookback_hours=96,
+            )
+            if df_5m is None or df_5m.empty:
+                self.logger.debug(f"[FREEDOMSCALP] Missing 5m data for {epic}")
+                return None
+
+            signal = strategy.detect_signal(
+                df_trigger=df_5m,
+                epic=epic,
+                pair=pair,
+                spread_pips=spread_pips,
+                current_timestamp=current_timestamp,
+            )
+
+            if signal:
+                signal = self._add_complete_technical_indicators(signal, df_5m)
+
+            if hasattr(strategy, 'flush_rejections'):
+                strategy.flush_rejections()
+
+            return signal
+
+        except Exception as e:
+            self.logger.error(f"❌ Error detecting FREEDOMSCALP signals for {epic}: {e}")
             return None
 
     def detect_squeeze_momentum_signals(
