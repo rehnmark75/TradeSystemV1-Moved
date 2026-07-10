@@ -102,11 +102,13 @@ except ImportError:
 try:
     from stock_scanner.services.broker_trade_analyzer import BrokerTradeSync
     from stock_scanner.core.trading.robomarkets_client import RoboMarketsClient
+    from stock_scanner.core.trading.order_placement import resolve_trading_credentials
     BROKER_SYNC_AVAILABLE = True
 except ImportError:
     BROKER_SYNC_AVAILABLE = False
     BrokerTradeSync = None
     RoboMarketsClient = None
+    resolve_trading_credentials = None
 
 # Import stale order guardian
 try:
@@ -1315,9 +1317,12 @@ class StockScheduler:
             return {'skipped': True, 'reason': 'dependencies not available'}
 
         try:
-            # Check for API credentials
-            api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
-            account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
+            # TRADING-account credentials (ROBOMARKETS_TRADE_* precedence):
+            # broker_trades is the single account of record — sync_positions
+            # reconcile-closes anything not in this account's open set, so this
+            # must be the account orders are placed on (demo since Jul 2026),
+            # NOT the container-wide creds stock-scanner keeps for market data.
+            api_key, account_id = resolve_trading_credentials()
 
             if not api_key or not account_id:
                 logger.warning("[SKIP] Broker sync - missing API credentials")
@@ -1384,8 +1389,9 @@ class StockScheduler:
             return {'skipped': True, 'reason': 'broker client not available'}
 
         try:
-            api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
-            account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
+            # Trading-account creds: guardian cancels orders the auto-trader
+            # placed, so it must target the same (demo) account.
+            api_key, account_id = resolve_trading_credentials()
 
             if not api_key or not account_id:
                 logger.warning("[SKIP] Stale order guardian - missing API credentials")
@@ -1439,8 +1445,8 @@ class StockScheduler:
             return {'skipped': True, 'reason': 'broker client not available'}
 
         try:
-            api_key = os.getenv('ROBOMARKETS_API_KEY', config.ROBOMARKETS_API_KEY if hasattr(config, 'ROBOMARKETS_API_KEY') else '')
-            account_id = os.getenv('ROBOMARKETS_ACCOUNT_ID', config.ROBOMARKETS_ACCOUNT_ID if hasattr(config, 'ROBOMARKETS_ACCOUNT_ID') else '')
+            # Trading-account creds: manages positions the auto-trader opened.
+            api_key, account_id = resolve_trading_credentials()
             dry_run = os.getenv('BREAKEVEN_MONITOR_DRY_RUN', 'true').lower() not in ('0', 'false', 'no')
             # ATR-trailing (validated Jul-2026). OFF by default; enable via env.
             trail_enabled = os.getenv('TRAILING_STOP_ENABLED', 'false').lower() in ('1', 'true', 'yes')

@@ -1,9 +1,12 @@
 """
 Auto Open Trader - places capped day-trade limit orders after the open.
 
-This worker intentionally delegates order execution to trading-ui's
-/api/orders/place route so it reuses the same RoboMarkets SL/TP protection,
-broker level retry, and breakeven monitor registration logic.
+Orders are placed directly against RoboMarkets with THIS container's
+credentials via core.trading.order_placement (a port of trading-ui's
+/api/orders/place SL/TP protection and broker level retry logic). Do NOT
+delegate placement back to trading-ui: its route executes with trading-ui's
+own env credentials, which silently kept auto-trades on the LIVE account
+after the Jul 1 2026 demo switch.
 """
 
 import asyncio
@@ -16,6 +19,10 @@ from typing import Any, Dict, List, Optional
 import aiohttp
 import pytz
 from stock_scanner.core.detection.market_hours import is_trading_day
+from stock_scanner.core.trading.order_placement import (
+    place_protected_order,
+    resolve_trading_credentials,
+)
 from stock_scanner.core.trading.robomarkets_client import RoboMarketsClient
 
 logger = logging.getLogger("auto_open_trader")
@@ -137,8 +144,7 @@ class AutoOpenTrader:
     def __init__(self, db_manager):
         self.db = db_manager
         self.trading_ui_url = os.getenv("TRADING_UI_URL", "http://trading-ui:3000/trading").rstrip("/")
-        self.robomarkets_api_key = os.getenv("ROBOMARKETS_API_KEY", "")
-        self.robomarkets_account_id = os.getenv("ROBOMARKETS_ACCOUNT_ID", "")
+        self.robomarkets_api_key, self.robomarkets_account_id = resolve_trading_credentials()
         self._fomc_last_known_date = max(self.FOMC_DECISION_DATES)
         self._fomc_stale_warned = False
         self._apply_env_settings()
@@ -820,32 +826,28 @@ class AutoOpenTrader:
 
     async def _place_order_api(self, ticker: str, quantity: int, price: float, stop_loss: float,
                                take_profit: float, signal_id: Optional[int] = None) -> Dict[str, Any]:
-        url = f"{self.trading_ui_url}/api/orders/place"
-        payload = {
-            "ticker": ticker,
-            "side": "buy",
-            "order_type": "limit",
-            "quantity": quantity,
-            "price": round(price, 2),
-            "stop_loss": round(stop_loss, 2),
-            "take_profit": round(take_profit, 2),
+        # Direct broker placement with THIS container's credentials. Placement
+        # must never route through trading-ui's /api/orders/place — that route
+        # uses trading-ui's own env creds (live account).
+        # No breakeven monitor row: BE disabled Jun 11 2026 — trigger sweep
+        # (be_trigger_sweep.py) showed BE kills ~1.7x more winners than the
+        # losers it rescues at every trigger level/horizon (PF 0.99 vs 0.44 at $10).
+        return await place_protected_order(
+            self.db,
+            api_key=self.robomarkets_api_key,
+            account_id=self.robomarkets_account_id,
+            ticker=ticker,
+            side="buy",
+            order_type="limit",
+            quantity=quantity,
+            price=round(price, 2),
+            stop_loss=round(stop_loss, 2),
+            take_profit=round(take_profit, 2),
             # Exact signal lineage (Jul 2 2026): stock_orders.signal_id is what
             # BrokerTradeSync uses to link broker_trades back to the scanner
             # signal — without it only ~28% of fills were attributable.
-            "signal_id": signal_id,
-            "trade_ready_override": True,
-            # BE disabled Jun 11 2026: trigger sweep (be_trigger_sweep.py) showed
-            # BE kills ~1.7x more winners than the losers it rescues at every
-            # trigger level/horizon; BE-off dominates (PF 0.99 vs 0.44 at $10).
-            "breakeven_enabled": False,
-        }
-        timeout = aiohttp.ClientTimeout(total=45)
-        async with aiohttp.ClientSession(timeout=timeout) as session:
-            async with session.post(url, json=payload) as response:
-                data = await response.json()
-                if response.status >= 400:
-                    data.setdefault("error", f"Order API returned {response.status}")
-                return data
+            signal_id=signal_id,
+        )
 
     async def _active_stock_order_tickers(self) -> set[str]:
         rows = await self.db.fetch("""

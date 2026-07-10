@@ -419,6 +419,12 @@ services:
       - STOCKS_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/stocks
       - ROBOMARKETS_API_KEY=${ROBOMARKETS_API_KEY:-28e2c0dab20ac9f6fd54917100be3c9b8d1c650cde5205b8b79c6c795b6fc676}
       - ROBOMARKETS_ACCOUNT_ID=${ROBOMARKETS_ACCOUNT_ID:-93121868}
+      # TRADING account (demo forward test, Jul 2026) for broker_sync + stale-order
+      # guardian: broker_trades is single-account-of-record and must track the
+      # account orders are placed on. ROBOMARKETS_* above stays live for market
+      # data only. No live fallback: fails closed (jobs skip) if unset.
+      - ROBOMARKETS_TRADE_API_KEY=${ROBOMARKETS_DEMO_API_KEY}
+      - ROBOMARKETS_TRADE_ACCOUNT_ID=${ROBOMARKETS_DEMO_ACCOUNT_ID}
       - CLAUDE_API_KEY=${CLAUDE_API_KEY}
       - FINNHUB_API_KEY=${FINNHUB_API_KEY:-d4thb4pr01qnn6lkv89gd4thb4pr01qnn6lkv8a0}
       - PREMARKET_PRICING_TICKER_LIMIT=100
