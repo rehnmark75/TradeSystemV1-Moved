@@ -56,6 +56,8 @@ from .shadow import (
     simulate_outcome,
 )
 from .resume import ResumeProposal, evaluate_resume
+from .shadow_source import decide_trip_shadow, load_shadow_outcomes
+from .events import record_event
 
 __all__ = [
     "AutoPauseParams",
@@ -91,4 +93,7 @@ __all__ = [
     "simulate_outcome",
     "ResumeProposal",
     "evaluate_resume",
+    "decide_trip_shadow",
+    "load_shadow_outcomes",
+    "record_event",
 ]

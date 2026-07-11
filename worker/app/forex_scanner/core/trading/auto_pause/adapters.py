@@ -42,7 +42,9 @@ class StrategyAdapter:
 
 # Only ACTIVE strategies are registered. Archived strategies
 # (bb_supertrend, fvg_retest, range_structure, ranging_market, squeeze_momentum,
-# volume_profile) are intentionally omitted. SMC_SIMPLE_V2 is not DB-wired yet.
+# volume_profile) are intentionally omitted. ULTIMATE_MA_MTF_FOREX has no
+# overrides table (monitor_only hardcoded True in the strategy) — it is
+# enrolled as an adapter-less notify-only cell, not registered here.
 REGISTRY: Dict[str, StrategyAdapter] = {
     "SMC_SIMPLE":      StrategyAdapter("SMC_SIMPLE",      "smc_simple_pair_overrides",      "jsonb",  "config_id"),
     "SMC_MOMENTUM":    StrategyAdapter("SMC_MOMENTUM",    "smc_momentum_pair_overrides",    "column", "config_set"),
@@ -54,6 +56,7 @@ REGISTRY: Dict[str, StrategyAdapter] = {
     "XAU_GOLD":        StrategyAdapter("XAU_GOLD",        "xau_gold_pair_overrides",        "column", "config_set"),
     "DONCHIAN_TURTLE": StrategyAdapter("DONCHIAN_TURTLE", "donchian_turtle_pair_overrides", "column", "none"),
     "FA_OR_ATR_TRAIL": StrategyAdapter("FA_OR_ATR_TRAIL", "fa_or_atr_trail_pair_overrides", "column", "config_set"),
+    "SMC_SIMPLE_V2":   StrategyAdapter("SMC_SIMPLE_V2",   "smc_simple_v2_pair_overrides",   "column", "config_set"),
 }
 
 
@@ -214,6 +217,9 @@ def _config_service_instance(strategy: str) -> Any:
     if s == "INSIDE_DAY":
         from forex_scanner.services.inside_day_config_service import get_inside_day_config_service
         return get_inside_day_config_service()
+    if s == "SMC_SIMPLE_V2":
+        from forex_scanner.services.smc_simple_v2_config_service import get_smc_simple_v2_config_service
+        return get_smc_simple_v2_config_service()
     return None
 
 
@@ -232,7 +238,7 @@ def refresh_config_cache(strategy: str) -> bool:
         if svc is None:
             logger.debug("[AutoPause] no config service mapped for %s; TTL fallback", s)
             return False
-        for method in ("refresh", "invalidate_cache"):
+        for method in ("refresh", "invalidate_cache", "invalidate"):
             fn = getattr(svc, method, None)
             if callable(fn):
                 fn()

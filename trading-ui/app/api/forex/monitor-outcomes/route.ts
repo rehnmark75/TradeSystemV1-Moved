@@ -139,6 +139,8 @@ export async function GET(request: Request) {
       WHERE signal_timestamp >= $1
         AND environment = $2
         AND ref_outcome IS NOT NULL
+        -- Table now holds ALL signals; this screen is the monitor-only view.
+        AND was_executed = FALSE
       ORDER BY signal_timestamp DESC
       LIMIT 20000
       `,
@@ -310,6 +312,7 @@ export async function GET(request: Request) {
       FROM monitor_only_outcomes
       WHERE signal_timestamp >= $1
         AND environment = $2
+        AND was_executed = FALSE
       ORDER BY signal_timestamp DESC
       LIMIT 1000
       `,

@@ -1,17 +1,22 @@
 """
 Monitor-Only Outcome Analyzer
 
-Counterfactual forward-outcome layer for MONITOR-ONLY signals.
+Counterfactual forward-outcome layer for ALL logged signals.
 
-A monitor-only signal is one that passed strategy logic (so it is logged to
-`alert_history`) but was never executed, so it has no trade_log row and no
-outcome anywhere. We define this population operationally as "logged but not
-executed" (no matching trade_log row) rather than via per-pair monitor_only
-config flags, because those flags are inconsistent across strategies and do not
-reliably reflect execution (e.g. strategies emit signals while is_enabled=false;
-gold demo runs un-executed with monitor_only=false). Cooldown / risk / LPF
-blocks never reach alert_history (they land in the rejection/validator tables),
-so non-executed alert_history rows are exactly the monitor-only set.
+Originally this evaluated only MONITOR-ONLY signals (logged to `alert_history`
+but never executed — no trade_log row). Since Jul 2026 it evaluates EVERY
+alert_history signal and stamps `was_executed`, so the table holds the complete
+per-(strategy, epic) reference-grid outcome series — the auto-pause decay
+detector (Trip Rule B) needs the full signal population, and traded cells would
+otherwise have exactly their traded signals missing from the series. Consumers
+wanting the original monitor-only population filter `was_executed = FALSE`.
+
+Executed-ness is defined operationally ("has a trade_log row") rather than via
+per-pair monitor_only config flags, because those flags are inconsistent across
+strategies and do not reliably reflect execution (e.g. strategies emit signals
+while is_enabled=false; gold demo runs un-executed with monitor_only=false).
+Cooldown / risk / LPF blocks never reach alert_history (they land in the
+rejection/validator tables).
 
 This job walks `ig_candles` (1m) forward from each such signal and records what
 price actually did:
@@ -115,19 +120,22 @@ class MonitorOutcomeAnalyzer:
     # -- signal selection ---------------------------------------------------
 
     def get_candidate_signals(self, start_date, end_date) -> pd.DataFrame:
-        """Monitor-only (logged-but-not-executed) alert_history rows to evaluate.
+        """ALL alert_history rows to evaluate, stamped with was_executed.
 
-        A signal qualifies if it has no trade_log execution and is old enough to
-        have a forward candle. Rows with no outcome yet, an OPEN outcome, or a
-        NO_DATA outcome are included (re-evaluated until their horizon completes
-        or candles finally arrive). Archived strategies are skipped.
+        Executed signals are evaluated too (was_executed=TRUE) so the table
+        holds the COMPLETE per-cell ref-grid series — the auto-pause decay
+        detector needs the full signal population, not just untraded signals.
+        A signal qualifies if it is old enough to have a forward candle. Rows
+        with no outcome yet, an OPEN outcome, or a NO_DATA outcome are included
+        (re-evaluated until their horizon completes or candles finally arrive).
+        Archived strategies are skipped.
         """
         max_signal_time = end_date - timedelta(minutes=MIN_SIGNAL_AGE_MINUTES)
         q = """
             SELECT a.id AS alert_id, a.strategy, a.epic, a.pair, a.environment,
-                   a.signal_type, a.alert_timestamp, a.price, a.bid_price, a.ask_price
+                   a.signal_type, a.alert_timestamp, a.price, a.bid_price, a.ask_price,
+                   EXISTS (SELECT 1 FROM trade_log t WHERE t.alert_id = a.id) AS was_executed
             FROM alert_history a
-            LEFT JOIN trade_log t          ON t.alert_id = a.id
             LEFT JOIN monitor_only_outcomes o ON o.alert_id = a.id
             WHERE a.alert_timestamp >= :start_date
               AND a.alert_timestamp <  :end_date
@@ -142,10 +150,13 @@ class MonitorOutcomeAnalyzer:
               -- post-signal candle open in simulate(). Excluding them here dropped
               -- ~160 monitor-only signals (notably RANGE_FADE / FA_OR_ATR_TRAIL /
               -- SMC_MOMENTUM) from outcome analysis entirely.
-              AND t.alert_id IS NULL
               -- Re-select OPEN (horizon incomplete) and NO_DATA (candles may have
               -- arrived since the first attempt); only finished RESOLVED is skipped.
-              AND (o.id IS NULL OR o.status IN ('OPEN', 'NO_DATA'))
+              -- Also re-select rows whose execution arrived after evaluation, so
+              -- was_executed flips TRUE even on RESOLVED rows.
+              AND (o.id IS NULL OR o.status IN ('OPEN', 'NO_DATA')
+                   OR (o.was_executed = FALSE
+                       AND EXISTS (SELECT 1 FROM trade_log t2 WHERE t2.alert_id = a.id)))
             ORDER BY a.alert_timestamp ASC
         """
         with self.forex.connect() as conn:
@@ -210,6 +221,7 @@ class MonitorOutcomeAnalyzer:
             "time_to_tp_minutes": None, "time_to_sl_minutes": None,
             "candles_evaluated": 0, "status": "NO_DATA",
             "evaluated_until": None,
+            "was_executed": bool(sig.get("was_executed")),
         }
 
         if direction is None:
@@ -335,7 +347,7 @@ class MonitorOutcomeAnalyzer:
             pnl_60m_pips, pnl_240m_pips, pnl_1440m_pips,
             ref_sl_pips, ref_tp_pips, ref_outcome, ref_pnl_pips,
             time_to_tp_minutes, time_to_sl_minutes,
-            candles_evaluated, status, evaluated_until, updated_at
+            candles_evaluated, status, evaluated_until, was_executed, updated_at
         ) VALUES (
             :alert_id, :strategy, :epic, :pair, :environment, :signal_timestamp,
             :direction, :entry_price, :pip_multiplier, :horizon_minutes,
@@ -343,7 +355,7 @@ class MonitorOutcomeAnalyzer:
             :pnl_60m_pips, :pnl_240m_pips, :pnl_1440m_pips,
             :ref_sl_pips, :ref_tp_pips, :ref_outcome, :ref_pnl_pips,
             :time_to_tp_minutes, :time_to_sl_minutes,
-            :candles_evaluated, :status, :evaluated_until, now()
+            :candles_evaluated, :status, :evaluated_until, :was_executed, now()
         )
         ON CONFLICT (alert_id) DO UPDATE SET
             -- entry_price can go NULL -> reconstructed when a row that first
@@ -360,6 +372,8 @@ class MonitorOutcomeAnalyzer:
             time_to_sl_minutes = EXCLUDED.time_to_sl_minutes,
             candles_evaluated = EXCLUDED.candles_evaluated,
             status = EXCLUDED.status, evaluated_until = EXCLUDED.evaluated_until,
+            -- executed-ness can only turn on (a later trade fills the signal)
+            was_executed = monitor_only_outcomes.was_executed OR EXCLUDED.was_executed,
             updated_at = now()
     """)
 

@@ -24,6 +24,7 @@ const DEFAULT_ITEMS: ForexNavItem[] = [
   { href: "/forex/entry-timing", label: "Entry Timing" },
   { href: "/forex/mae-analysis", label: "MAE Analysis" },
   { href: "/forex/monitor-outcomes", label: "Monitor Outcomes" },
+  { href: "/forex/decay-monitor", label: "Decay Monitor" },
   { href: "/forex/alert-history", label: "Alert History" },
   { href: "/forex/alert-data", label: "Alert Data" },
   { href: "/forex/trade-analysis", label: "Trade Analysis" },

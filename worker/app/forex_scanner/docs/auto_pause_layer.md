@@ -173,6 +173,44 @@ observation but NOT yet trustworthy enough to auto-resume on:
 Phase B/C must validate that proposals correlate with genuine recovery before
 resume is trusted.
 
+## Trip Rule B — shadow ref-grid series (Jul 2026)
+
+`trade_log` proved far too sparse for Rule A on most cells (≤3 closed trades
+per cell / 30d), so a second, per-cell-selectable trip source was added:
+
+- **Data**: `monitor_only_outcomes.ref_pnl_pips` (forex DB) — the fixed
+  reference-grid outcome (FX 10/15 pips, gold 80/160) that
+  `monitor_outcome_analyzer` computes for **every** logged signal (~40–170 per
+  cell / 30d). Since Jul 2026 the analyzer also evaluates EXECUTED signals and
+  stamps `was_executed`, so the series is the complete signal population.
+- **Rule** (`shadow_source.py::decide_trip_shadow`, window = last 50 RESOLVED):
+  trip when `shadow PF < 0.8` **AND** `shadow WR < baseline_shadow_wr − 12pp`
+  (n ≥ 30), **or** ≥ 8 consecutive shadow losses. Both legs required because
+  the ref grid is near-binary (PF ≈ 1.5·w/(1−w)); σ(WR) ≈ 7pp at n = 50.
+- **Baselines**: `baseline_shadow_pf/wr/n` on `auto_pause_eligibility` — frozen
+  at enrollment (same doctrine as `baseline_pf`). Enroll via
+  `scripts/auto_pause_enroll.py` (computes from the OLDEST outcomes in the
+  window, or accepts manual 90d-backtest values; warns when baseline WR is
+  below the 40% ref-grid breakeven).
+- **Selection**: `auto_pause_eligibility.trip_source` = `'trades' | 'shadow' |
+  'both'`. Shadow-tripped cells also **resume** on the ref-grid series (post-
+  pause outcomes only) so trip/resume hysteresis is on one metric; the resume
+  adds a WR leg (within 5pp of baseline).
+- **⚠️ The ref-grid PF is a decay PROXY, not live P&L** — a trailing-exit
+  strategy can be live-profitable while its fixed-bracket proxy sits below 1.0.
+  Cells with sub-breakeven baselines get weak (under-sensitive) protection:
+  effectively only the consecutive-loss safeguard.
+- **Dry-run**: `AUTO_PAUSE_DRY_RUN` (default **true**) — trips are logged +
+  recorded to `auto_pause_events` but nothing is flipped. Flip to `false` on
+  demo after ~a week of sane dry-run events.
+- **Events + Telegram**: every decision → `auto_pause_events` (strategy_config
+  DB, 24h dedupe for recurring dry-run trips / resume proposals); system-monitor
+  polls unnotified rows → Telegram. Dashboard: trading-ui `/forex/decay-monitor`.
+- **Replay acceptance** (`scripts/auto_pause_replay.py`): Rule B trips
+  RANGE_FADE EURUSD on **2026-06-10** — three weeks before Rule A's Jul 2 trip;
+  healthy cells (MEAN_REVERSION EURJPY PF 1.76, XAU_GOLD current PF 1.70)
+  produce zero spurious trips. Do NOT grid-search thresholds against replays.
+
 ## Phase status
 
 | Phase | Scope | Status |
@@ -181,6 +219,7 @@ resume is trusted.
 | 2 | Orchestrator maintenance hook: evaluate eligible cells → flip `monitor_only` → in-process cache refresh (pause-only) | **Done** (needs `docker restart task-worker` to load) |
 | 3 | Shadow-P&L reconstruction + resume proposals (propose-only) | **Done** |
 | C | Fully-auto resume (per-cell `auto_resume` flag) | **Done** (one-click-confirm step skipped) |
+| B (shadow) | Trip Rule B on `monitor_only_outcomes` ref-grid series + events + Telegram + decay dashboard; 9 cells enrolled dry-run | **Done** (Jul 2026, dry-run) |
 | — | Reconstruction-fidelity validation (signals-vs-trades, fixed-vs-trailing SL/TP) | Deferred — required before trusting fully-auto beyond demo |
 
 ## Tests

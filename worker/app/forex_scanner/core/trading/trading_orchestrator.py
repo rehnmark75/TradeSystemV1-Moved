@@ -475,8 +475,12 @@ class TradingOrchestrator:
         # Positive proof at startup that this block ran (a capital-safety hook
         # that silently failed to initialize would otherwise look identical to a
         # working-but-inert one — both log nothing).
+        _ap_dry_run = os.getenv(
+            "AUTO_PAUSE_DRY_RUN", "true"
+        ).strip().lower() not in {"false", "0", "no", "off"}
         self.logger.info(
             f"🛡️ Auto-pause armed: enabled={self._auto_pause_enabled}, "
+            f"dry_run={_ap_dry_run}, "
             f"config_set={self._auto_pause_config_set} "
             f"(inert until auto_pause_eligibility rows are added)"
         )
@@ -2300,10 +2304,18 @@ class TradingOrchestrator:
             self._last_gate_edge_analysis = now  # avoid retry spam
 
     def _run_auto_pause_check_if_due(self):
-        """Auto-pause eligible (strategy, pair) cells whose rolling LIVE
-        performance has decayed.
+        """Auto-pause eligible (strategy, pair) cells whose rolling performance
+        has decayed.
 
-        Phase 2 = PAUSE ONLY (flip monitor_only -> True). Resume is Phase 3.
+        Two trip rules, selected per cell by eligibility.trip_source:
+          * 'trades' — Rule A: rolling last-N closed trade_log PF (original).
+          * 'shadow' — Rule B: ref-grid series from monitor_only_outcomes
+            (PF floor + WR drop vs frozen baseline). Works for cells whose
+            trade_log is too sparse to ever fill Rule A's window.
+          * 'both'   — either rule may trip.
+        Dry-run mode (params.dry_run, default ON) records a dry_run_trip event
+        and logs, but does NOT flip monitor_only.
+
         Inert until cells are opted into the auto_pause_eligibility allowlist.
         Runs hourly; mirrors _run_outcome_analysis_if_due (timestamp-tracked,
         exception-isolated). Acts only on cells matching this orchestrator's
@@ -2323,12 +2335,15 @@ class TradingOrchestrator:
         try:
             from forex_scanner.core.trading.auto_pause import (
                 decide_trip,
+                decide_trip_shadow,
                 default_params,
                 evaluate_performance,
                 get_adapter,
                 get_monitor_only,
                 load_closed_trades,
                 load_eligible_cells,
+                load_shadow_outcomes,
+                record_event,
                 record_pause,
                 refresh_config_cache,
                 set_monitor_only,
@@ -2343,32 +2358,73 @@ class TradingOrchestrator:
 
             paused = 0
             for cell in cells:
+                trip_source = getattr(cell, "trip_source", "trades")
                 adapter = get_adapter(cell.strategy)
-                if adapter is None:
+                if adapter is None and trip_source == "trades":
                     self.logger.error(
                         f"🚨 [AutoPause] No adapter for eligible strategy "
                         f"{cell.strategy} — cannot protect {cell.epic}"
                     )
                     continue
 
-                # Already paused (by us, manually, or config): Phase 3 propose-only
+                # Already paused (by us, manually, or config): propose-only
                 # resume evaluation instead of a trip check.
-                if get_monitor_only(adapter, cell.epic, config_set) is True:
+                if adapter is not None and \
+                        get_monitor_only(adapter, cell.epic, config_set) is True:
                     self._auto_pause_resume_proposal(cell, adapter, config_set, params)
                     continue
 
-                rows = load_closed_trades(
-                    cell.strategy, cell.epic, config_set, params.rolling_window
-                )
-                stats = evaluate_performance(rows)
-                decision = decide_trip(stats, params)
-                if not decision.should_pause:
+                decision = None
+                stats = None
+                if trip_source in ("trades", "both"):
+                    rows = load_closed_trades(
+                        cell.strategy, cell.epic, config_set, params.rolling_window
+                    )
+                    stats = evaluate_performance(rows)
+                    decision = decide_trip(stats, params)
+                if (decision is None or not decision.should_pause) and \
+                        trip_source in ("shadow", "both"):
+                    rows = load_shadow_outcomes(
+                        cell.strategy, cell.epic, config_set, params.shadow_window
+                    )
+                    stats = evaluate_performance(rows)
+                    decision = decide_trip_shadow(
+                        stats, getattr(cell, "baseline_shadow_wr", None), params
+                    )
+                if decision is None or not decision.should_pause:
                     continue
 
+                metrics = {
+                    "trip_source": trip_source,
+                    "pf": stats.pf, "win_rate": round(stats.win_rate, 4),
+                    "n": stats.n, "consecutive_losses": stats.consecutive_losses,
+                    "baseline_pf": cell.baseline_pf,
+                    "baseline_shadow_pf": getattr(cell, "baseline_shadow_pf", None),
+                    "baseline_shadow_wr": getattr(cell, "baseline_shadow_wr", None),
+                }
+
+                if params.dry_run or adapter is None:
+                    note = "" if adapter is not None else " (no adapter — notify-only cell)"
+                    # dedupe: a still-tripping cell re-fires every hourly cycle
+                    record_event("dry_run_trip", cell.strategy, cell.epic,
+                                 config_set, decision.reason + note, metrics,
+                                 dedupe_hours=24)
+                    self.logger.warning(
+                        f"⏸️ [AutoPause] DRY-RUN TRIP {cell.strategy} {cell.epic} "
+                        f"({config_set}) — would pause | {decision.reason}{note}"
+                    )
+                    continue
+
+                record_event("trip", cell.strategy, cell.epic, config_set,
+                             decision.reason, metrics)
                 affected = set_monitor_only(adapter, cell.epic, config_set, True)
                 if affected == 0:
                     # Loud: eligibility says protect this cell but the flip hit no
                     # rows -> the pause silently did nothing. Must not be missed.
+                    record_event("flip_noop_error", cell.strategy, cell.epic,
+                                 config_set,
+                                 f"pause flip matched 0 rows in {adapter.table}",
+                                 metrics)
                     self.logger.error(
                         f"🚨 [AutoPause] TRIPPED but pause was a NO-OP (0 rows matched) "
                         f"for {cell.strategy} {cell.epic} ({config_set}). Eligibility row "
@@ -2378,6 +2434,8 @@ class TradingOrchestrator:
 
                 refresh_config_cache(cell.strategy)
                 record_pause(cell.strategy, cell.epic, config_set, decision.reason)
+                record_event("pause", cell.strategy, cell.epic, config_set,
+                             decision.reason, metrics)
                 paused += 1
                 self.logger.warning(
                     f"⏸️ [AutoPause] PAUSED {cell.strategy} {cell.epic} ({config_set}) "
@@ -2405,9 +2463,12 @@ class TradingOrchestrator:
         """
         from forex_scanner.core.trading.auto_pause import (
             compute_shadow_stats,
+            evaluate_performance,
             evaluate_resume,
             get_pause_state,
+            load_shadow_outcomes,
             record_eval,
+            record_event,
             record_resume,
             refresh_config_cache,
             set_monitor_only,
@@ -2417,18 +2478,49 @@ class TradingOrchestrator:
         if ps is None:
             return  # paused manually / not by the auto-pause layer — leave alone
 
-        stats, n_sig, n_res = compute_shadow_stats(
-            adapter, cell.strategy, cell.epic, config_set, ps.paused_at
-        )
-        if stats is None:
-            return  # SL/TP unavailable (e.g. ATR-based) — can't reconstruct yet
+        trip_source = getattr(cell, "trip_source", "trades")
+        if trip_source in ("shadow", "both"):
+            # Shadow-tripped cells resume on the SAME ref-grid series they
+            # tripped on (hysteresis on one metric); post-pause outcomes only.
+            rows = load_shadow_outcomes(
+                cell.strategy, cell.epic, config_set,
+                params.shadow_window, since=ps.paused_at,
+            )
+            stats = evaluate_performance(rows)
+            n_res = stats.n
+        else:
+            stats, n_sig, n_res = compute_shadow_stats(
+                adapter, cell.strategy, cell.epic, config_set, ps.paused_at
+            )
+            if stats is None:
+                return  # SL/TP unavailable (e.g. ATR-based) — can't reconstruct yet
 
         proposal = evaluate_resume(ps.paused_at, stats, n_res, params, datetime.now())
+        # Shadow cells add a WR hysteresis leg: recovery must also close the
+        # win-rate gap (within 5pp of the frozen baseline), mirroring the
+        # WR-drop leg of the trip rule.
+        base_wr = getattr(cell, "baseline_shadow_wr", None)
+        if (
+            proposal.should_propose
+            and trip_source in ("shadow", "both")
+            and base_wr is not None
+            and stats.win_rate <= base_wr - 0.05
+        ):
+            proposal = type(proposal)(
+                False,
+                f"shadow WR {stats.win_rate:.0%} still > 5pp below "
+                f"baseline {base_wr:.0%}",
+            )
         if not proposal.should_propose:
             record_eval(cell.strategy, cell.epic, config_set, n_res, stats.pf, False)
             return
 
         # R1 met.
+        resume_metrics = {
+            "trip_source": trip_source,
+            "pf": stats.pf, "win_rate": round(stats.win_rate, 4), "n": n_res,
+            "baseline_shadow_wr": base_wr,
+        }
         if getattr(cell, "auto_resume", False):
             # Fully auto-resume: flip monitor_only back off.
             affected = set_monitor_only(adapter, cell.epic, config_set, False)
@@ -2437,10 +2529,14 @@ class TradingOrchestrator:
                     f"🚨 [AutoPause] AUTO-RESUME was a NO-OP (0 rows matched) for "
                     f"{cell.strategy} {cell.epic} ({config_set}) — CELL NOT RESUMED."
                 )
+                record_event("flip_noop_error", cell.strategy, cell.epic, config_set,
+                             "resume flip matched 0 rows", resume_metrics)
                 record_eval(cell.strategy, cell.epic, config_set, n_res, stats.pf, True)
                 return
             refresh_config_cache(cell.strategy)
             record_resume(cell.strategy, cell.epic, config_set, n_res, stats.pf)
+            record_event("resumed", cell.strategy, cell.epic, config_set,
+                         proposal.reason, resume_metrics)
             self.logger.warning(
                 f"✅ [AutoPause] AUTO-RESUMED {cell.strategy} {cell.epic} ({config_set}) "
                 f"-> monitor_only=false | {proposal.reason}"
@@ -2448,6 +2544,9 @@ class TradingOrchestrator:
         else:
             # Propose-only: log + record, a human re-enables.
             record_eval(cell.strategy, cell.epic, config_set, n_res, stats.pf, True)
+            # dedupe: R1 stays satisfied and re-proposes every hourly cycle
+            record_event("resume_proposed", cell.strategy, cell.epic, config_set,
+                         proposal.reason, resume_metrics, dedupe_hours=24)
             self.logger.warning(
                 f"🔔 [AutoPause] RESUME PROPOSED (propose-only) "
                 f"{cell.strategy} {cell.epic} ({config_set}): {proposal.reason}. "

@@ -11,6 +11,13 @@ class Settings(BaseSettings):
 
     # Database
     database_url: str = "postgresql://postgres:postgres@postgres:5432/forex"
+    strategy_config_database_url: str = (
+        "postgresql://postgres:postgres@postgres:5432/strategy_config"
+    )
+
+    # Auto-pause event watcher (polls auto_pause_events -> Telegram)
+    auto_pause_watch_enabled: bool = True
+    auto_pause_watch_interval: int = 60  # seconds between polls
 
     # Telegram notifications
     telegram_bot_token: Optional[str] = None

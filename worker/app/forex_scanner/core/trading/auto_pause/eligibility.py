@@ -28,6 +28,11 @@ class EligibilityRecord:
     baseline_n: Optional[int]
     monthly_trade_rate: Optional[float]
     auto_resume: bool = False  # True -> fully auto-resume; False -> propose-only
+    # Trip Rule B (shadow ref-grid series). trip_source: 'trades'|'shadow'|'both'.
+    trip_source: str = "trades"
+    baseline_shadow_pf: Optional[float] = None
+    baseline_shadow_wr: Optional[float] = None  # 0-1, frozen at enrollment
+    baseline_shadow_n: Optional[int] = None
 
 
 def load_eligible_cells(
@@ -36,7 +41,8 @@ def load_eligible_cells(
     """Return all cells flagged eligible=TRUE."""
     query = """
         SELECT strategy, epic, config_set, baseline_pf, baseline_n,
-               monthly_trade_rate, auto_resume
+               monthly_trade_rate, auto_resume,
+               trip_source, baseline_shadow_pf, baseline_shadow_wr, baseline_shadow_n
         FROM auto_pause_eligibility
         WHERE eligible = TRUE
         ORDER BY strategy, epic, config_set
@@ -70,6 +76,22 @@ def load_eligible_cells(
                     else None
                 ),
                 auto_resume=bool(r["auto_resume"]),
+                trip_source=str(r["trip_source"] or "trades"),
+                baseline_shadow_pf=(
+                    float(r["baseline_shadow_pf"])
+                    if r["baseline_shadow_pf"] is not None
+                    else None
+                ),
+                baseline_shadow_wr=(
+                    float(r["baseline_shadow_wr"])
+                    if r["baseline_shadow_wr"] is not None
+                    else None
+                ),
+                baseline_shadow_n=(
+                    int(r["baseline_shadow_n"])
+                    if r["baseline_shadow_n"] is not None
+                    else None
+                ),
             )
         )
     return out

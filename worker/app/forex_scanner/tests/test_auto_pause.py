@@ -293,6 +293,101 @@ def test_resume_blocks_pf_none():
 
 
 # --------------------------------------------------------------------------- #
+# Trip Rule B (shadow ref-grid series)
+# --------------------------------------------------------------------------- #
+from forex_scanner.core.trading.auto_pause import decide_trip_shadow  # noqa: E402
+from forex_scanner.core.trading.auto_pause.eligibility import EligibilityRecord  # noqa: E402
+
+
+def _shadow_stats(pf, wr, n=50, consec=0):
+    return PerfStats(n=n, pf=pf, gross_win=100.0, gross_loss=50.0,
+                     win_rate=wr, consecutive_losses=consec)
+
+
+def test_shadow_trip_requires_both_pf_and_wr():
+    # PF bad but WR fine -> no trip
+    d = decide_trip_shadow(_shadow_stats(0.7, 0.50), 0.55, PARAMS)
+    assert d.should_pause is False
+    # WR bad but PF fine -> no trip
+    d = decide_trip_shadow(_shadow_stats(1.2, 0.40), 0.55, PARAMS)
+    assert d.should_pause is False
+    # Both bad -> trip
+    d = decide_trip_shadow(_shadow_stats(0.7, 0.40), 0.55, PARAMS)
+    assert d.should_pause is True
+    assert "shadow PF" in d.reason
+
+
+def test_shadow_trip_min_outcomes_gate():
+    d = decide_trip_shadow(_shadow_stats(0.5, 0.20, n=PARAMS.shadow_min_outcomes - 1),
+                           0.55, PARAMS)
+    assert d.should_pause is False
+
+
+def test_shadow_trip_no_baseline_no_pf_trip():
+    # Without a frozen baseline WR, the PF+WR rule cannot express decay.
+    d = decide_trip_shadow(_shadow_stats(0.5, 0.20), None, PARAMS)
+    assert d.should_pause is False
+
+
+def test_shadow_trip_consecutive_loss_safeguard():
+    # Fires regardless of baseline / n.
+    d = decide_trip_shadow(
+        _shadow_stats(1.5, 0.60, n=10, consec=PARAMS.shadow_max_consecutive_losses),
+        None, PARAMS,
+    )
+    assert d.should_pause is True
+    assert "consecutive" in d.reason
+
+
+def test_shadow_trip_wr_drop_boundary():
+    # WR exactly at baseline - drop is NOT below it -> no trip.
+    base = 0.55
+    at_edge = base - PARAMS.shadow_trip_wr_drop
+    d = decide_trip_shadow(_shadow_stats(0.7, at_edge), base, PARAMS)
+    assert d.should_pause is False
+    d = decide_trip_shadow(_shadow_stats(0.7, at_edge - 0.01), base, PARAMS)
+    assert d.should_pause is True
+
+
+def test_shadow_params_defaults():
+    p = default_params()
+    assert p.shadow_window == 50
+    assert p.shadow_min_outcomes == 30
+    assert p.shadow_trip_pf == 0.8
+    assert abs(p.shadow_trip_wr_drop - 0.12) < 1e-9
+    assert p.shadow_max_consecutive_losses == 8
+    assert isinstance(p.dry_run, bool)
+
+
+def test_eligibility_record_shadow_defaults():
+    rec = EligibilityRecord(
+        strategy="X", epic="E", config_set="demo",
+        baseline_pf=None, baseline_n=None, monthly_trade_rate=None,
+    )
+    assert rec.trip_source == "trades"
+    assert rec.baseline_shadow_pf is None
+    assert rec.baseline_shadow_wr is None
+
+
+def test_shadow_series_shape_feeds_evaluator():
+    # load_shadow_outcomes shapes rows as {'profit_loss': ref_pnl_pips};
+    # evaluate_performance must consume them and honour ordering.
+    rows = [{"profit_loss": -10.0}, {"profit_loss": -10.0}, {"profit_loss": 15.0}]
+    st = evaluate_performance(rows)
+    assert st.n == 3
+    assert st.consecutive_losses == 2  # most-recent-first leading streak
+    assert st.pf == 15.0 / 20.0
+
+
+def test_event_type_registry():
+    from forex_scanner.core.trading.auto_pause.events import EVENT_TYPES, record_event
+    assert {"trip", "pause", "dry_run_trip", "resume_proposed",
+            "resumed", "flip_noop_error"} == EVENT_TYPES
+    # Unknown event types are rejected without touching the DB.
+    assert record_event("bogus", "S", "E", "demo") is False
+
+
+# --------------------------------------------------------------------------- #
 # Minimal runner (so the file works without pytest installed)
 # --------------------------------------------------------------------------- #
 def _run():

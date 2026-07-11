@@ -16,6 +16,7 @@ from .services.docker_monitor import DockerMonitor
 from .services.health_checker import HealthChecker
 from .services.metrics_collector import MetricsCollector
 from .services.alert_manager import AlertManager
+from .services.auto_pause_watcher import AutoPauseWatcher
 from .notifications.telegram_notifier import TelegramNotifier
 from .notifications.email_notifier import EmailNotifier
 from .api import routes
@@ -39,6 +40,14 @@ alert_manager: AlertManager = None
 telegram_notifier: TelegramNotifier = None
 email_notifier: EmailNotifier = None
 scheduler: AsyncIOScheduler = None
+auto_pause_watcher: AutoPauseWatcher = None
+
+
+async def auto_pause_watch_loop():
+    """Deliver pending auto-pause events (strategy decay trips/pauses/resumes)."""
+    global auto_pause_watcher
+    if auto_pause_watcher:
+        await auto_pause_watcher.poll()
 
 
 async def monitoring_loop():
@@ -101,7 +110,7 @@ async def cleanup_task():
 async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     global docker_monitor, health_checker, metrics_collector, alert_manager
-    global telegram_notifier, email_notifier, scheduler
+    global telegram_notifier, email_notifier, scheduler, auto_pause_watcher
 
     logger.info("=" * 50)
     logger.info("Starting System Monitor...")
@@ -165,6 +174,21 @@ async def lifespan(app: FastAPI):
             name="Container Monitoring",
             replace_existing=True,
         )
+
+        # Auto-pause event watcher (strategy decay notifications)
+        if settings.auto_pause_watch_enabled:
+            auto_pause_watcher = AutoPauseWatcher(telegram_notifier)
+            scheduler.add_job(
+                auto_pause_watch_loop,
+                trigger=IntervalTrigger(seconds=settings.auto_pause_watch_interval),
+                id="auto_pause_watch",
+                name="Auto-Pause Event Watcher",
+                replace_existing=True,
+            )
+            logger.info(
+                f"✅ Auto-pause event watcher scheduled "
+                f"(every {settings.auto_pause_watch_interval}s)"
+            )
 
         # Daily cleanup task (run at 3 AM)
         scheduler.add_job(
