@@ -73,6 +73,7 @@ ACTIVE_EPICS = [
     "CS.D.AUDJPY.MINI.IP",
     "CS.D.NZDUSD.MINI.IP",
     "CS.D.EURUSD.CEEM.IP",
+    "CS.D.USDCHF.MINI.IP",
     "CS.D.CFEGOLD.CEE.IP",   # Spot Gold ($1)
     "CS.D.CFDSILVER.CFM.IP",  # Silver Mini
 ]
