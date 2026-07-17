@@ -19,6 +19,10 @@ class Settings(BaseSettings):
     auto_pause_watch_enabled: bool = True
     auto_pause_watch_interval: int = 60  # seconds between polls
 
+    # Auto-backtest verdict watcher (polls auto_backtest_runs -> Telegram)
+    auto_backtest_watch_enabled: bool = True
+    auto_backtest_watch_interval: int = 300  # seconds between polls
+
     # Telegram notifications
     telegram_bot_token: Optional[str] = None
     telegram_chat_id: Optional[str] = None

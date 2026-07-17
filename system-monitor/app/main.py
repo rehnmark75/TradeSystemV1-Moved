@@ -17,6 +17,7 @@ from .services.health_checker import HealthChecker
 from .services.metrics_collector import MetricsCollector
 from .services.alert_manager import AlertManager
 from .services.auto_pause_watcher import AutoPauseWatcher
+from .services.auto_backtest_watcher import AutoBacktestWatcher
 from .notifications.telegram_notifier import TelegramNotifier
 from .notifications.email_notifier import EmailNotifier
 from .api import routes
@@ -41,6 +42,7 @@ telegram_notifier: TelegramNotifier = None
 email_notifier: EmailNotifier = None
 scheduler: AsyncIOScheduler = None
 auto_pause_watcher: AutoPauseWatcher = None
+auto_backtest_watcher: AutoBacktestWatcher = None
 
 
 async def auto_pause_watch_loop():
@@ -48,6 +50,13 @@ async def auto_pause_watch_loop():
     global auto_pause_watcher
     if auto_pause_watcher:
         await auto_pause_watcher.poll()
+
+
+async def auto_backtest_watch_loop():
+    """Deliver pending auto-backtest verdicts (promotion-candidate screening)."""
+    global auto_backtest_watcher
+    if auto_backtest_watcher:
+        await auto_backtest_watcher.poll()
 
 
 async def monitoring_loop():
@@ -111,6 +120,7 @@ async def lifespan(app: FastAPI):
     """Application lifespan manager."""
     global docker_monitor, health_checker, metrics_collector, alert_manager
     global telegram_notifier, email_notifier, scheduler, auto_pause_watcher
+    global auto_backtest_watcher
 
     logger.info("=" * 50)
     logger.info("Starting System Monitor...")
@@ -188,6 +198,21 @@ async def lifespan(app: FastAPI):
             logger.info(
                 f"✅ Auto-pause event watcher scheduled "
                 f"(every {settings.auto_pause_watch_interval}s)"
+            )
+
+        # Auto-backtest verdict watcher (promotion-candidate screening)
+        if settings.auto_backtest_watch_enabled:
+            auto_backtest_watcher = AutoBacktestWatcher(telegram_notifier)
+            scheduler.add_job(
+                auto_backtest_watch_loop,
+                trigger=IntervalTrigger(seconds=settings.auto_backtest_watch_interval),
+                id="auto_backtest_watch",
+                name="Auto-Backtest Verdict Watcher",
+                replace_existing=True,
+            )
+            logger.info(
+                f"✅ Auto-backtest verdict watcher scheduled "
+                f"(every {settings.auto_backtest_watch_interval}s)"
             )
 
         # Daily cleanup task (run at 3 AM)

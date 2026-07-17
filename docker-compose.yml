@@ -369,6 +369,32 @@ services:
     depends_on:
       - postgres
 
+  # Auto-backtest: scans monitor_only_outcomes for cells whose edge metrics
+  # clear the trigger gates, runs bt.py --live-parity for each, records the
+  # verdict in auto_backtest_runs (strategy_config DB). system-monitor
+  # delivers verdicts to Telegram. Triage only — never auto-enables anything.
+  auto-backtest:
+    build:
+      context: ./worker
+    container_name: auto-backtest
+    restart: unless-stopped
+    command: ["python3", "-u", "/app/forex_scanner/monitoring/auto_backtest_scanner.py", "--loop", "--interval", "21600"]
+    volumes:
+      - ./worker/app:/app
+      - ./logs/worker:/app/logs
+    environment:
+      - PYTHONPATH=/app
+      - PYTHONUNBUFFERED=1
+      - TRADING_ENVIRONMENT=demo
+      - TRADING_CONFIG_SET=demo
+      - DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex
+      - CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/forex_config
+      - STRATEGY_CONFIG_DATABASE_URL=postgresql://postgres:postgres@postgres:5432/strategy_config
+    networks:
+      - workers-demo
+    depends_on:
+      - postgres
+
   task-worker-live:
     build:
       context: ./worker
